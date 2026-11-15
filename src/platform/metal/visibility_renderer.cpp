@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
+#include <string_view>
 
 namespace phosphor {
 namespace {
@@ -110,7 +111,7 @@ pipe::PipelineHandle VisibilityRenderer::binPipeline(u32 mask, bool overflow) {
             if (textureTransform_) d = pipe::forward::withTextureTransform(d); // F15.1 (ticket 22)
             d.constant(pipe::matclass::gen::kResolveBinConstantIndex, pipe::ConstantType::UInt,
                        overflow ? VISIBILITY_BIN_OVERFLOW : (VISIBILITY_BIN_CLASS | mask));
-            return d;
+            return pipe::forward::inExactModule(d); // F15.2 (ticket 21): the exact-maths copy of the kernel
         };
         // A harvest (--harvest-pipelines) records both resolve kernels of every class (the plan names both), whichever lighting
         // path the harvested run uses.
@@ -229,6 +230,13 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
         }
         servedGeneric_ = features_.serve(pipelines_, 110 + so, adaptive_ ? adaptivePipeline_ : generic_, shadeMask,
                                          [&] { return sssConstant(compute(adaptive_ ? "visibility_adaptive" : kernel)); });
+        if (pipelines_.harvesting()) {
+            // F15.2 (ticket 21): the archive holds the exact-module resolve pipelines of both lighting paths, specialised (a scene of one path
+            // is exercised by runners of the other).
+            for (const char *k : {"visibility_resolve", "visibility_lit_resolve"})
+                features_.requestSpecialised(pipelines_, 500 + so + (std::string_view(k) == "visibility_lit_resolve" ? 100u : 0u), shadeMask,
+                                      [&] { return sssConstant(compute(k)); });
+        }
         servedTile_ = tile_ == pipe::INVALID_PIPELINE ? tile_ : features_.serve(pipelines_, 111, tile_, mask, [&] {
             auto d = compute("visibility_tile");
             d.kind = pipe::PipelineKind::Tile;

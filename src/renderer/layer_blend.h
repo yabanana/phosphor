@@ -40,7 +40,11 @@
 
 #ifdef __METAL_VERSION__
 #define PHOSPHOR_LAYER_FN static inline __attribute__((unused))
+#ifdef PHOSPHOR_EXACT_MODULE
+#define PHOSPHOR_LAYER_EXP(x) metal::precise::exp(x) /* F15.2 (ticket 21): the exact module uses no fast builtin */
+#else
 #define PHOSPHOR_LAYER_EXP(x) metal::exp(x)
+#endif
 #else
 #include <cmath>
 #define PHOSPHOR_LAYER_FN inline

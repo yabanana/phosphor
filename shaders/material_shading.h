@@ -1,8 +1,10 @@
 #pragma once
 #include <metal_stdlib>
 #include "renderer/gpu_types.h"
+#include "materials/exact_pragma_on.h"
 #include "renderer/lobe_guide_pack.h"
 #include "renderer/layer_blend.h"
+#include "materials/exact_pragma_off.h"
 #include "pipeline/forward_variants.generated.metal.h"
 using namespace metal;
 using namespace phosphor;
@@ -27,6 +29,7 @@ inline float sssCodeOf(uint packed) {
 struct TextureHandle {
     texture2d<float> tex;
 };
+#include "materials/exact_math_begin.h"
 struct SurfaceInput {
     float3 worldPos;
     float3 normal;
@@ -1328,3 +1331,4 @@ static GPULobeGuide lobeGuideRecord(ShadingResult value, uint diFlags) {
     }
     return packLobeGuide(value.lobes);
 }
+#include "materials/exact_math_end.h"

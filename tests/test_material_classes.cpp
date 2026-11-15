@@ -267,7 +267,7 @@ TEST_CASE("F15.2 generator: the archive plan names one class pipeline per kernel
     u32 overflow = 0;
     for (const auto& p : plan["pipelines"]) {
         const std::string kernel = p["kernel"];
-        CHECK((kernel == "visibility_resolve" || kernel == "visibility_lit_resolve"));
+        CHECK((kernel == "phx_exact::visibility_resolve" || kernel == "phx_exact::visibility_lit_resolve"));
         const u32 mask = p["mask"], bin = p["bin_mode"];
         const bool sss = p["sss"];
         CHECK(identities.insert(kernel + "/" + std::to_string(mask) + "/" + std::to_string(bin) + "/" + (sss ? "s" : "-")).second); // no duplicates

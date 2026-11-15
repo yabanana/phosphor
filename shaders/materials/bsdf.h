@@ -10,11 +10,14 @@
 // bit, so keep the association of products (specular = ((w * D) * V) * F) and
 // do not fold factors differently without re-checking the exact captures.
 #include <metal_stdlib>
+#include "exact_pragma_on.h"
 #include "renderer/dfg_table.h"
 #include "renderer/sheen_table.h"
 #include "renderer/lobe_select.h"
 #include "renderer/transmission_math.h"
+#include "exact_pragma_off.h"
 using namespace metal;
+#include "exact_math_begin.h"
 
 // GGX (Trowbridge-Reitz) normal distribution; alpha = roughness^2.
 inline float bsdfDGGX(float NdotH, float a) {
@@ -601,3 +604,4 @@ inline float3 bsdfVolumeAbsorption(float3 attenuationColor, float attenuationDis
                   phosphor::transmissionBeerLambert(attenuationColor.y, attenuationDistance, length),
                   phosphor::transmissionBeerLambert(attenuationColor.z, attenuationDistance, length));
 }
+#include "exact_math_end.h"

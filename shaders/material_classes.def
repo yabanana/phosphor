@@ -15,8 +15,8 @@
 budget archived 64   # distinct MATERIAL_FEATURES values in the archive (class masks, scene unions, all-lobes)
 budget active 16     # feature classes of one scene served through bins; the excess runs the all-lobes pipeline
 
-kernel visibility_resolve       # the compute resolve of the visibility path
-kernel visibility_lit_resolve   # the same with the F10-F14 lighting inputs
+kernel phx_exact::visibility_resolve       # the compute resolve of the visibility path
+kernel phx_exact::visibility_lit_resolve   # the same with the F10-F14 lighting inputs
 
 manifest material_classes/material.json
 manifest material_classes/transmission.json

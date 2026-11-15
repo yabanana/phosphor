@@ -1,7 +1,9 @@
 #include "material_shading.h"
 #include "renderer/emission_pack.h"
 #include "temporal_motion.h"
+#include "materials/exact_pragma_on.h"
 #include "renderer/visibility_math.h"
+#include "materials/exact_pragma_off.h"
 #include "renderer/visibility_layout.h"
 #include "pipeline/material_classes.generated.metal.h"
 
@@ -99,6 +101,7 @@ kernel void visibility_classify(const device GPUInstance *instances [[buffer(2)]
     }
 }
 
+#include "materials/exact_math_begin.h"
 static void resolveVisibilityPixel(constant FrameConstants &frame, const device GPUVertex *vertices,
                                    const device GPUInstance *instances, const device GPUMaterial *materials,
                                    const device GPULight *lights, const device TextureHandle *textures,
@@ -207,6 +210,7 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
                                                                                        : 0.0f;
     reactive.write(float4(reactiveValue), pixel);
 }
+#include "materials/exact_math_end.h"
 
 kernel void visibility_resolve(
     constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],

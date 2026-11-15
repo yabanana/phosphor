@@ -73,9 +73,19 @@ u16 saltConstantIndex() { return gen::kSaltConstantIndex; }
 
 u16 materialFeaturesConstantIndex() { return gen::kMaterialFeaturesConstantIndex; }
 
+std::string exactModuleKernel(const std::string& name) {
+    return name == "visibility_resolve" || name == "visibility_lit_resolve" ? "phx_exact::" + name : name;
+}
+
+PipelineDesc inExactModule(const PipelineDesc& desc) {
+    PipelineDesc out = desc;
+    out.functions[0] = exactModuleKernel(desc.functions[0]);
+    return out;
+}
+
 PipelineDesc withMaterialFeatures(const PipelineDesc& desc, u32 mask) {
     if (mask == 0) return desc;
-    PipelineDesc out = desc;
+    PipelineDesc out = inExactModule(desc);
     for (u32 i = 0; i < out.constantCount; ++i) {
         if (out.constants[i].index == gen::kMaterialFeaturesConstantIndex) {
             out.constants[i].bits = mask;

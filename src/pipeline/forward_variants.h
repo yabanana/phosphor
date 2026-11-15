@@ -74,6 +74,12 @@ struct Variant {
 /// features request exactly the pre-F15 pipelines).  Any other mask appends constant 22 (an
 /// existing constant 22 is replaced).
 [[nodiscard]] PipelineDesc withMaterialFeatures(const PipelineDesc& desc, u32 mask);
+/// F15.2 (ticket 21): the visibility resolve kernels of a scene with material features come from the exact-maths copy of the module
+/// (shaders/material_passes_exact.metal, namespace phx_exact): "visibility_resolve" -> "phx_exact::visibility_resolve", likewise the lit
+/// kernel; any other name is returned unchanged.  Both the class pipelines and the all-lobes pipeline use it, so they are bit-identical.
+[[nodiscard]] std::string exactModuleKernel(const std::string& name);
+/// `desc` with its first function mapped through exactModuleKernel.
+[[nodiscard]] PipelineDesc inExactModule(const PipelineDesc& desc);
 /// F15.1 (ticket 22): reserved constant TEXTURE_TRANSFORM (uint, index 26): 1 = per-slot KHR_texture_transform compiled in.
 [[nodiscard]] u16 textureTransformConstantIndex();
 /// `desc` with TEXTURE_TRANSFORM = 1 (an existing constant is replaced).

@@ -17,7 +17,8 @@ verification lock (exit 3 when it is held or another phosphor/soc_bench/f*_spike
                            capture and the 8-bit final image.  Measured (2026-11-14, M5 Max): a pipeline specialised by a
                            different MATERIAL_FEATURES value is NOT bit-identical to the all-lobes one in the linear float
                            capture -- the compiler schedules the shortened code differently (docs/adr/0003).
-                           Declared envelope (set from the first full corpus, where the worst case was 3.1e-6 relative = 37 ULP):
+                           Criterion: EXACT (RELATIVE_TOLERANCE 0; the compiler's fast-maths codegen differences, up to 1e-2 relative on
+                           ToyCar, were removed by the safe-maths module flag + scoped exact maths, ticket 21).  The former declared envelope was 1e-5:
                            per pixel and channel at most RELATIVE_TOLERANCE relative difference; reported next to it: the max ULP,
                            the bitwise differing pixels and the 8-bit differing pixels (image_diff, tolerance 0; max delta must
                            be <= 1 LSB).  A repeated ref run must be bit-identical (the run is deterministic).
@@ -50,7 +51,7 @@ import f15_export_manifests as ext  # noqa: E402
 MANIFEST_DIR = REPO / "shaders/material_classes"
 LOCK = pathlib.Path("/tmp/phosphor-gpu-verification.lock")
 EQUIV_FRAMES, EQUIV_RESOLUTION = 8, "640x360"
-RELATIVE_TOLERANCE = 1e-5  # declared codegen envelope of a specialised pipeline (first corpus: at most 3.1e-6 = 37 ULP, iridescence code)
+RELATIVE_TOLERANCE = 0.0  # exact (ticket 21): the exact-maths module makes class pipelines bit-identical to the all-lobes pipeline; an independent criterion, never loosened
 IMAGE_DIFF = REPO / "build/release/image_diff"
 BUDGET_WARMUP, BUDGET_FRAMES = 64, 32
 DROP_ALL = "511"

@@ -85,3 +85,87 @@ on [38, 64, 106, 113, 224]; all five are explained by manifests: 38 = ToyCar (cl
 - 3 budget: MET (38 permutations, 41 with terrain; metal-tt +11.7 % / +9.4 %; 0/0). Ticked.
 - 4 binning vs union on chess A/B/A: NOT MET (opt-log 2277 records correctness and provisional opt-in with no timing; chess A/B/A not run). Open.
 - 5 targeted archive update + pipelines script test: MET (+62 then +12 descriptors, 8/8). Ticked.
+
+## Exact-maths module for scenes with features (2026-11-15, owner option (a); branch f15c-bitexact-a from cl/f15-plan-c38b51 78d173d)
+
+Candidate B (a global `-fmetal-math-mode=safe` on the whole material module) cost +0.47/+0.63/+0.68 ms on Sponza D2 and was rejected.  Replaced by a second, exact copy of the visibility
+resolve kernels used only by scenes with F15 features.
+
+**Design.** `shaders/material_passes_exact.metal` = `namespace phx_exact { #include "visibility_resolve.metal" }`, compiled as its own module with
+`-fmetal-math-mode=safe -DPHOSPHOR_EXACT_MODULE=1 -Wno-modules-import-nested-redundant`, linked second (cmake/App.cmake, per-module flag hook; hot-reload build passes the same flags).  The namespace gives
+the kernels the names `phx_exact::visibility_resolve` / `phx_exact::visibility_lit_resolve` and makes every inline function private (no link-time merge with the base module's differently compiled
+copy; a namespaced kernel keeps its function-constant indices).  `shaders/materials/exact_math_begin/end.h` and `exact_pragma_on/off.h` are EMPTY in the base module; in the exact module they bracket bsdf.h,
+the body of material_shading.h, resolveVisibilityPixel and the shared headers with contract(off), math_mode(safe) and a private namespace of `metal::precise` using-declarations (the precise names are not
+exported: exporting them made every unqualified sqrt/length of the other kernels ambiguous).  layer_blend.h uses `metal::precise::exp` in the exact module.
+Selection: `pipe::forward::exactModuleKernel/inExactModule`, applied in `withMaterialFeatures` (union-specialised and all-lobes pipelines) and in `VisibilityRenderer::binPipeline` (class bins incl. the
+all-lobes overflow bin): a pipeline with MATERIAL_FEATURES or RESOLVE_BIN defined resolves from the copy; a featureless scene requests exactly today's descriptors.
+Not moved (not needed by the criterion): forward, lobe-guide DI, reflection, denoise kernels and the adaptive/tile resolves of feature scenes stay in the base module.
+
+**metal-tt relocation risk.** The separate module links second, the archive translates (build passes, archive 133 MB, `tools/archive_build_time.py` median 18.6 s of 3 on the loaded machine, branch before this change
+16.18 s per the earlier record), `archive_check.sh` all scenarios pass (full: 18 hits / 0 misses), `hitch_check.sh` 0 hitches, 21 archive hits, 0 misses, 0 render-thread compiles.  No relocation failure
+appeared with the namespaced, resolve-only module.
+
+**Archive.** `tools/exact_module_archive.py update|prune|check` (new): +131 compute descriptors of the two exact kernels (permutation harvest of 112 scenes and the layers harvest of 40 runs, binary x2) and
+-270 now-dead base-module resolve pipelines specialised with 22/24; `material_class_archive.py check`: 80 plan pipelines once each, 42 of 64 permutations; `material_classes.def` names the exact kernels.
+Class pipelines of texture-transform scenes (constant 26) are archived by this harvest as well.  ctest 37/37.
+
+**Verification so far.**
+- Featureless scenes: the 5 `f15_exact.sh` cases (sponza-d2, cornell-restir, cornell-clustered-ssr, manylights-restir, grid-sky) are cmp-identical to `litefix/exact-new`; `visual_check`
+  (EXTRA_ARGS=--pipeline-sync, BENCH8_ARGS="--instances 100000") 0 of 5,760,000 px on all 8 benches.  The generic-vs-variant forward difference (9/1/5/9/25 px, delta 1) is unchanged: that module is not touched.
+- Equivalence (ref = all-lobes vs class bins, 640x360, 8 frames, --pipeline-sync): SheenTestGrid, TransmissionTest, ToyCar (second run), combo-irid-specular-sun, base-grid-sun: 0 px / 0 ULP.
+  INTERMITTENT, not yet explained: the first ToyCar run showed 542 px on a single scanline (y = 265, x 600..680; relative up to 0.2); the same binaries rerun gave 0.  Needs the official runner's repeated-reference arm.
+- Budget run (7 feature scenes): measured-frame fallback draws 0, render-thread compiles 0, compiler calls 0 everywhere; whole-run archive misses: chess 0, combo-all-lobes 0 and one
+  `phx_exact::visibility_lit_resolve` in four scenes (harvest gap: a scene harvest only exercised its own lighting path), fixed in 3e52314 (requestBoth), re-harvest pending.  ToyCar also misses 8 pipelines of
+  texture-transform scenes that are NOT exact-module pipelines (Forward v7 forward_fs, indexed overflow fallback, material_lighting_guides, DI receiver guides): the base archive holds only 12 constant-26 descriptors,
+  so these predate this change (ticket 22 archive scope).
+- `layers-blk-all-e1` (layers agent, 2 ULP): not on this base.  The exact module covers the layer stack (resolveLayerStack, layer_blend.h with precise exp, the blend arithmetic under contract(off) / safe maths); expected to be
+  covered, to be re-tested by the orchestrator after the layers merge.
+
+**Open (held by the owner's battery rule, 26 % at the time; nothing GPU or builds started after it):** re-harvest with 3e52314 + archive update; the official `tools/f15_permutations.py equivalence` on every arm
+(repeated reference, overflow, app export, negative control; RELATIVE_TOLERANCE 0 is not set on this branch yet: set it only after the run is exact); the budget run on all scenes; the ToyCar scanline.
+Cost commands for the orchestrator: `python3 -I tools/f15_costs.py plan` lists the A/B/A runs of the feature items and the chess rig (A = tip build, B = this build, `--only` per item); D2 sanity:
+`zsh f15_exact.sh <build> OUT` case `sponza-d2` (cmp-identical image) plus the usual A/B/A of the D2 band.
+
+### Results of the exact module (2026-11-15, branch f15c-bitexact-a)
+
+**Official equivalence run** (`tools/f15_permutations.py equivalence`, every arm, build = ab0c133 + the archive of that commit, RELATIVE_TOLERANCE of the run 1e-5, the criterion now committed as 0):
+154 cases (119 scenes): class bins vs all-lobes **152 bit-identical** (0 px, 0 ULP, 8-bit 0); repeated reference arm 7 of 7 bit-identical; overflow bin (6 runs) 0 ULP; app manifest export 0 failures;
+negative control (every lobe dropped) leaves the envelope in 87 of 142 controls, every feature bit 0..8 discriminated by 6..26 scenes (the not-discriminated list is the known resolve-colour-neutral one).
+**Two cases fail: `corpus:ClearCoatCarPaint` (323 px, 8-bit 237 px, max delta 15) and `corpus:ToyCar` (282 px, 8-bit 77 px, max delta 2)**, both texture-transform scenes. See the non-determinism study below.
+
+**Non-determinism study (ToyCar class vs all-lobes, each run its own lock acquisition, ref and cls in separate processes; image hashes of the linear capture):**
+- exact module, archive of 8d305b0 (x4): run 0 ref e09f8ccd / cls 8c6d6655 (186 px, a triangle at x 337..351, y 228..233); run 1 ref 8c6d6655 / cls 9fe2763e (526 px, a block at x 602..636, y 153..).
+  The same few images appear in either arm: the variation is NOT class-vs-all-lobes.  Earlier, the first x1 run 542 px on the single scanline y = 265, x 600..680; the same binaries rerun gave 0.
+- exact module, final archive (x5): run 0 cls cce33d66 differs from ref 8c6d6655 (520 px, rows 154.., x 474..513); run 1 both 8c6d6655.  The canonical image 8c6d6655 is the common output.
+- exact module with `--no-pipeline-archive` (every pipeline JIT): 2 of 2 runs both arms 8c6d6655 (0 px).
+- integrated tip build (BASE module, orchestrator `build/release`): 4 of 4 runs deterministic (ref 7f73553d, cls 40a288e0; they differ by the known 19343 px of the unscoped maths), no scanline.
+- logs of a variant and a canonical run are the same in pipelines: all 8 frames binned, the same 4 archive misses (Forward v7, indexed overflow fallback, material_lighting_guides, DI receiver guides: the texture-transform
+  archive gap of ticket 22), no fallback draws.
+Reading: the variation needs archive-served pipelines in a texture-transform scene and is not caused by the class/all-lobes choice; with every pipeline JIT-compiled the output is stable and class = all-lobes.  Root cause NOT identified
+(candidates not yet tested: the 4 JIT-compiled non-exact pipelines of the TT scenes feeding the resolve, an archive-vs-JIT codegen difference of an exact kernel, a GPU-driven culling order/ties).  It is not in the resolve dispatch
+or in a missing barrier that I found: both arms use the same dispatch and the variation appears in the ref arm too.
+Runs still queued when this was written: 20 runs of the exact build, 6 no-archive runs, 20 base runs (flake study files /private/tmp/claude-501/bx/flake_*.out).
+
+**Budget run (full, 154 cases) of the exact build:** measured-frame fallback draws 0, render-thread compiles 0, compiler calls 0 in every case; whole-run archive misses 1 in every case = `phx_exact::visibility_lit_resolve` of the unbinned
+all-lobes union pipeline that the first archive prune had dropped (scenes whose union is the full lobe set, and the lit generic dispatch).  Fixed in the follow-up archive (+35 descriptors from the harvests, 143 MB, metal-tt 19.9 s median of 3
+on the loaded machine); re-run of the budget on it is pending.
+**Featureless regression, archive_check, hitch_check** on the same build as above: 5 exactness cases cmp-identical, visual_check 0 px on 8 benches, archive_check all pass (full: 18 hits, 0 misses), hitch_check 0 hitches (21 hits, 0 misses).
+
+**Flake study, counts (ToyCar class vs all-lobes, 640x360, 8 frames, `--pipeline-sync`, each run its own lock acquisition; killed after these):**
+- exact build with the committed archive: **8 of 15 runs differ** (155..1139 px; the differing image is the class arm in some runs and the REFERENCE arm in others, e.g. run 11 ref 6eee5273, run 12 ref 8a546fa7); the other 7 runs are bit-identical to the canonical image 8c6d6655 in both arms.
+- exact build with `--no-pipeline-archive`: **0 of 6** differ, both arms always 8c6d6655.
+- integrated tip (base module, archive): **0 of 15** differ (always ref 7f73553d / cls 40a288e0: the known 19343 px of unscoped maths).
+- Not found in the base build, so it is not a pre-existing nondeterminism of the resolve readback or dispatch (no scanline appears there in 15 runs).  It appears only with archive-served exact-module pipelines in a texture-transform scene
+  (ToyCar, ClearCoatCarPaint; the other 152 cases, 119 scenes incl. non-TT corpus scenes, are exact with the same archive).  Open hypotheses to test next: (1) an archive-built exact kernel differs from its JIT build for the
+  TEXTURE_TRANSFORM (26) specialisation (function constants live in namespace phx_exact; an archive entry that does not carry the constant would still run); (2) a data race that only the archived kernels' timing exposes (the
+  extension records of the per-slot texture transforms are read through `frame.materialExtensions`).  Suggested next experiment: archive-built vs JIT-built single kernel with GPU capture, or a build whose archive omits only the TT exact entries.
+
+**Archive-without-texture-transform experiment (12 ToyCar runs each, same method):** final archive (x6): **8 of 12** runs differ (160..1481 px, either arm); the same build with the 12 texture-transform exact entries removed from the
+archive (so those kernels are JIT-compiled; x7): **4 of 12** differ (186..2210 px; runs 0, 1, 10, 11, the quiet middle runs 2..9 were all canonical).  So the TEXTURE_TRANSFORM archive entries are not the (only) cause, and
+the rate follows the machine load (other agents' jobs ran in parallel) rather than the pipeline set.  Together with: base module 0 of 15, all-JIT exact module 0 of 6 and the shape of the variation (several rows of ~40 px wide blocks at
+varying places, either arm, varying image hashes) this points to a TIMING-DEPENDENT hazard that the slower exact resolve (and the faster archived start) exposes in the feature-scene frame, not to arithmetic: the arithmetic is exact (152 of 154
+cases, and the canonical image is reproduced by both arms in every quiet run).  Next step (not done): search the frame graph of the feature path for a resolve consumer or a bin/classify producer without the stage barrier the
+Metal 4 no-hazard-tracking rule requires (shaders/visibility_resolve.metal bins buffer written by visibility_classify, `visibility_renderer.cpp` dispatch order of the class bins, the passes reading the resolve targets), by forcing
+`--gpu-timing-serial` / a serialising barrier after every resolve dispatch: if the variation vanishes the hazard is confirmed.
+
+`--gpu-timing-serial` (x6, 10 ToyCar runs): 7 of 10 differ (370..1569 px): that switch does not remove the variation, so the hazard hypothesis above is still unconfirmed (that flag serialises timed units, it is not a barrier after every resolve dispatch).

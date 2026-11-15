@@ -61,6 +61,8 @@ list(REMOVE_ITEM PHOSPHOR_METAL_SHADERS
     ${CMAKE_SOURCE_DIR}/shaders/light_cluster_lobe.metal
     ${CMAKE_SOURCE_DIR}/shaders/reflection_lobe.metal
     ${CMAKE_SOURCE_DIR}/shaders/denoise_lobe.metal)
+list(REMOVE_ITEM PHOSPHOR_METAL_SHADERS ${CMAKE_SOURCE_DIR}/shaders/material_passes_exact.metal)
+list(PREPEND PHOSPHOR_METAL_SHADERS ${CMAKE_SOURCE_DIR}/shaders/material_passes_exact.metal)
 list(PREPEND PHOSPHOR_METAL_SHADERS ${CMAKE_SOURCE_DIR}/shaders/material_passes.metal)
 # Headers the shaders include (C++/MSL shared): an edit recompiles every shader.  F15: the list was hand-kept and
 # missed new headers (renderer/dfg_table.h, lobe_guide_pack.h, sheen_table.h, lobe_select.h, transmission_math.h,
@@ -99,6 +101,8 @@ if(PHOSPHOR_SHADER_DEBUG_INFO AND CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo
     set(PHOSPHOR_SHADER_HAS_DEBUG_INFO ON)
 endif()
 
+# F15.2 (ticket 21): the exact-maths copy of the resolve kernels (shaders/material_passes_exact.metal) is its own module, linked second.
+set(PHOSPHOR_METAL_EXTRA_FLAGS_material_passes_exact -fmetal-math-mode=safe -DPHOSPHOR_EXACT_MODULE=1 -Wno-modules-import-nested-redundant)
 set(PHOSPHOR_AIR_FILES)
 foreach(shader IN LISTS PHOSPHOR_METAL_SHADERS)
     get_filename_component(name ${shader} NAME_WE)
@@ -106,7 +110,7 @@ foreach(shader IN LISTS PHOSPHOR_METAL_SHADERS)
     add_custom_command(
         OUTPUT ${air}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${PHOSPHOR_SHADER_OUT}
-        COMMAND ${PHOSPHOR_METAL_COMMAND} ${PHOSPHOR_METAL_FLAGS} -c ${shader} -o ${air}
+        COMMAND ${PHOSPHOR_METAL_COMMAND} ${PHOSPHOR_METAL_FLAGS} ${PHOSPHOR_METAL_EXTRA_FLAGS_${name}} -c ${shader} -o ${air}
         DEPENDS ${shader} ${PHOSPHOR_SHADER_HEADERS}
                 ${PHOSPHOR_VARIANTS_MSL_HEADER} phosphor_variants
         COMMENT "Compiling Metal shader ${name}.metal"
@@ -147,7 +151,7 @@ foreach(shader IN LISTS PHOSPHOR_METAL_SHADERS)
     add_custom_command(
         OUTPUT ${air}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${PHOSPHOR_PROBE_OUT}
-        COMMAND ${PHOSPHOR_METAL_COMMAND} ${PHOSPHOR_METAL_FLAGS} -DPHOSPHOR_HOT_RELOAD_PROBE=1 -c ${shader} -o ${air}
+        COMMAND ${PHOSPHOR_METAL_COMMAND} ${PHOSPHOR_METAL_FLAGS} ${PHOSPHOR_METAL_EXTRA_FLAGS_${name}} -DPHOSPHOR_HOT_RELOAD_PROBE=1 -c ${shader} -o ${air}
         DEPENDS ${shader} ${PHOSPHOR_SHADER_OUT}/${name}.air
         COMMENT "Compiling hot-reload probe shader ${name}.metal"
         VERBATIM

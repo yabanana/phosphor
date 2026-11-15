@@ -57,6 +57,13 @@ public:
         return base;
     }
 
+    /// F15.2 (ticket 21): requests only the specialised pipeline of `slot` (a harvest of the other lighting path's kernel; the all-lobes
+    /// reference is a transient fallback and is not archived).
+    template <typename MakeDesc>
+    void requestSpecialised(PipelineCache& cache, u32 slot, u32 mask, MakeDesc&& makeDesc) {
+        if (mask != 0) (void)handleFor(cache, slot, mask, makeDesc);
+    }
+
     /// Requests issued so far (tests / logs).
     [[nodiscard]] size_t requests() const { return handles_.size(); }
 

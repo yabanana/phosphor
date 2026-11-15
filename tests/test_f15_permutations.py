@@ -66,7 +66,8 @@ class Permutations(unittest.TestCase):
             c = fp.compare_pfm(t / "a.pfm", t / "b.pfm")
             self.assertEqual((c["bitwise"], c["max_ulp"]), (1, 1))
             self.assertLess(c["max_rel"], 2e-7)
-            self.assertTrue(fp.within_envelope(c))
+            self.assertFalse(fp.within_envelope(c))  # the criterion is exact (ticket 21): one ULP is outside
+            self.assertTrue(fp.within_envelope(fp.compare_pfm(t / "a.pfm", t / "same.pfm")))
             big = [a[0], (0.5, 0.26, 0.125), a[2]]
             write_pfm(t / "c.pfm", big, 3, 1)
             c = fp.compare_pfm(t / "a.pfm", t / "c.pfm")
