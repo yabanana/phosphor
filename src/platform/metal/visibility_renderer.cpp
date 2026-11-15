@@ -231,10 +231,10 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
         servedGeneric_ = features_.serve(pipelines_, 110 + so, adaptive_ ? adaptivePipeline_ : generic_, shadeMask,
                                          [&] { return sssConstant(compute(adaptive_ ? "visibility_adaptive" : kernel)); });
         if (pipelines_.harvesting()) {
-            // F15.2 (ticket 21): the archive holds the exact-module resolve pipelines of both lighting paths, specialised (a scene of one path
-            // is exercised by runners of the other).
+            // F15.2 (ticket 21): the archive holds the exact-module resolve pipelines of both lighting paths, specialised and the all-lobes fallback (a scene of
+            // one path is exercised by runners of the other; serve() asks for the all-lobes pipeline until the specialised one is final).
             for (const char *k : {"visibility_resolve", "visibility_lit_resolve"})
-                features_.requestSpecialised(pipelines_, 500 + so + (std::string_view(k) == "visibility_lit_resolve" ? 100u : 0u), shadeMask,
+                features_.requestBoth(pipelines_, 500 + so + (std::string_view(k) == "visibility_lit_resolve" ? 100u : 0u), shadeMask,
                                       [&] { return sssConstant(compute(k)); });
         }
         servedTile_ = tile_ == pipe::INVALID_PIPELINE ? tile_ : features_.serve(pipelines_, 111, tile_, mask, [&] {

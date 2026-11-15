@@ -57,11 +57,14 @@ public:
         return base;
     }
 
-    /// F15.2 (ticket 21): requests only the specialised pipeline of `slot` (a harvest of the other lighting path's kernel; the all-lobes
-    /// reference is a transient fallback and is not archived).
+    /// F15.2 (ticket 21): requests the specialised pipeline AND the all-lobes reference of `slot`.  serve() asks for the all-lobes pipeline while the
+    /// specialised one is not final yet (the first frame of an archive lookup), so the archive must hold it too: a harvest records both.
     template <typename MakeDesc>
-    void requestSpecialised(PipelineCache& cache, u32 slot, u32 mask, MakeDesc&& makeDesc) {
-        if (mask != 0) (void)handleFor(cache, slot, mask, makeDesc);
+    void requestBoth(PipelineCache& cache, u32 slot, u32 mask, MakeDesc&& makeDesc) {
+        if (mask == 0) return;
+        (void)handleFor(cache, slot, mask, makeDesc);
+        if ((mask & MATERIAL_FEATURES_ALL) != 0)
+            (void)handleFor(cache, slot, MATERIAL_FEATURES_ALL | (mask & FEATURE_UNION_TEXTURE_TRANSFORM), makeDesc);
     }
 
     /// Requests issued so far (tests / logs).
