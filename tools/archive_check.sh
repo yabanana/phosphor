@@ -59,10 +59,13 @@ for f in "$script_json" "$metallib" "$full_archive" "$ref_dir/bench1.png"; do
 done
 rm -rf "$out_dir"
 mkdir -p "$out_dir"
-# Same-mode baseline: API validation only, no archive (every pipeline compiled).
+# Same-mode baseline: API validation only, no archive (every pipeline compiled).  --pipeline-sync: the
+# baseline is always drawn with the final pipelines.  Without it, under machine load, the forward variant
+# could still be compiling at the capture frame and the generic fallback drew the baseline (9 px of delta 1 on
+# bench 1, the F3.3 generic-vs-variant codegen difference; F15 ticket 24, 2026-11-15).
 baseline="$out_dir/baseline-noarchive.png"
 MTL_DEBUG_LAYER=1 MTL_DEBUG_LAYER_WARNING_MODE=nslog \
-    "$app" --bench 1 --warmup "$warmup" --frames 1 --no-ui --fixed-timestep --no-pipeline-archive \
+    "$app" --bench 1 --warmup "$warmup" --frames 1 --no-ui --fixed-timestep --no-pipeline-archive --pipeline-sync \
     --capture "$baseline" >"$out_dir/baseline-noarchive.log" 2>&1 || { echo "error: baseline capture failed" >&2; exit 2; }
 echo "baseline vs visual_check reference (cross-mode, information only): $("$diff_tool" "$ref_dir/bench1.png" "$baseline" 2>&1 | tail -1)"
 # Absolute paths: metal-tt resolves the library path in the script.
@@ -113,6 +116,19 @@ run_case() {
     local ignore='^\[INFO\]|^BENCH|^SCENE|^EXIT 0$|^MESHLET |^PIPELINES|^STARTUP|^SWITCH|^GRAPH-TRANSIENTS|^ASYNC-COMPUTE|Validation Enabled'
     [[ $allow_warn == 1 ]] && ignore="$ignore|^\[WARN\].*[Aa]rchive"
     messages=$(grep -Ev "$ignore" "$log" | grep -c . || true)
+    # The scenario run itself is asynchronous (its counters are what is checked).  When a fallback object drew
+    # any frame (PIPELINES "fallbacks F (draws D)" with D > 0: a missed or unavailable pipeline still compiling
+    # at the capture frame), its image depends on compile timing, so the pixels are compared on a second,
+    # synchronous capture of the same scenario (archive hits still come from the archive).
+    local fallback_draws
+    fallback_draws=$(sed -nE 's/.*fallbacks [0-9]+ \(draws ([0-9]+)\).*/\1/p' <<<"$line")
+    if [[ -n "$fallback_draws" && "$fallback_draws" != 0 ]]; then
+        MTL_DEBUG_LAYER=1 MTL_DEBUG_LAYER_WARNING_MODE=nslog \
+            "$app" --bench 1 --warmup "$warmup" --frames 1 --no-ui --fixed-timestep \
+            --pipeline-archive "$archive" "$@" --pipeline-sync --capture "$out_dir/$name-sync.png" >"$out_dir/$name-sync.log" 2>&1 || status=$?
+        capture="$out_dir/$name-sync.png"
+        echo "    ($name: $fallback_draws fallback draws in the asynchronous run; pixels compared on the synchronous capture)"
+    fi
     diff_ok=1
     pixels=$("$diff_tool" "$baseline" "$capture" --diff "$out_dir/$name-diff.png" 2>&1) || diff_ok=0
 }
