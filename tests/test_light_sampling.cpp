@@ -552,3 +552,24 @@ TEST_CASE("F15 light budget: exact up to the budget, hard-bounded and unbiased s
     // Negative control: dropping the inverse-probability weight loses almost all of the energy.
     CHECK(unweighted < 0.1 * exact);
 }
+
+TEST_CASE("F15.4 ticket 23: an emissive layer stack cuts the emitter out by its blended coverage, not by its own record") {
+    auto light = rectangle();
+    light.type = DI_LIGHT_TRIANGLE; light.flags = DI_LIGHT_TEXTURED_EMISSION;
+    GPUEmissiveSurface emitter{};
+    emitter.valid = 1; emitter.uv1[0] = 1; emitter.uv2[1] = 1;
+    GPUMaterial stack{};
+    stack.emissive[0] = stack.emissive[1] = stack.emissive[2] = 3; stack.emissiveTex = INVALID_TEXTURE_INDEX;
+    stack.baseColor[3] = 1; stack.alphaCutoff = 0.5f; stack.baseColorTex = INVALID_TEXTURE_INDEX; // the stack's own record alpha is 1: it never cuts
+    // A ramp coverage w(u) = u (layer 0 opaque weighted by the mask, layer 1 transparent): the emitter uv at (0.25, 0.2) is (0.4, 0.1) -> 0.4 < 0.5 cut,
+    // at (0.81, 0.2) the interpolated u is 0.9 * 0.2... computed by the sampler itself: compare against the ramp at the sampler's own uv.
+    const auto ramp = [](glm::dvec2 uv, void*) { return uv.x; };
+    const auto cutLeft = di::sampleTexturedLight(light, emitter, stack, {0.25, 0.2}, {0, 0, 0}, emitterTexture, nullptr, ramp);
+    REQUIRE(cutLeft.valid);
+    CHECK(cutLeft.radiance.x == 0);
+    const auto own = di::sampleTexturedLight(light, emitter, stack, {0.25, 0.2}, {0, 0, 0}, emitterTexture); // the stack's own alpha: never cuts
+    CHECK(own.radiance.x == doctest::Approx(3));
+    const auto keep = di::sampleTexturedLight(light, emitter, stack, {0.95, 0.2}, {0, 0, 0}, emitterTexture, nullptr, ramp);
+    REQUIRE(keep.valid);
+    CHECK(keep.radiance.x == doctest::Approx(3)); // u = (1 - sqrt(0.95)) * 0 + sqrt(0.95) * (1 - 0.2) * 1 ~ 0.78 >= 0.5
+}

@@ -4,6 +4,8 @@
 #include "materials/bsdf.h"
 #include "renderer/lobe_guide_pack.h"
 #include "texture_transform_core.h" // F15.1 (ticket 22): per-slot texture transforms of emitter surfaces
+#include "renderer/layer_blend.h"   // F15.4 (ticket 23): the coverage of a layer stack that is an emitter
+#include "layer_resolve.h"
 // F15.1 (ticket 07): the lobe-guide kernels are separate entry points ("<name>_lobe", compiled by
 // restir_di_lobe.metal / light_cluster_lobe.metal with PHOSPHOR_DI_LOBE, linked into the first material module) that always carry the reserved function
 // constant MATERIAL_FEATURES (22, shaders/variants.def).  Everything else, the base kernels included, never
@@ -129,7 +131,10 @@ inline DISample diSampleTexturedLight(GPUSampledLight l, uint lightIndex, float2
         const half alphaTexel = m.baseColorTex == INVALID_TEXTURE_INDEX ? half(1) :
                                 half(textures[m.baseColorTex].tex.sample(kDIEmitterSampler,
                                      texXfSlotUv(extensions, m.flags, m.textureTransformIndex, TT_SLOT_BASE_COLOR, lightUV), level(0.0f)).a);
-        const float alpha = m.baseColor[3] * float(alphaTexel);
+        // F15.4 (ticket 23): an emissive layer stack cuts the emitter out by its blended layer alpha, not by its own record's.
+        const float alpha = m.baseColor[3] * float(alphaTexel) *
+                            layerCoverage<DITextureHandle, LayerAlphaLevel0>(materials[emitter.materialIndex], materials, textures, lightUV,
+                                                                             float2(0.0f), float2(0.0f), extensions);
         if (!isfinite(alpha)) { s.valid = false; return s; }
         if (alpha < m.alphaCutoff) s.radiance = float3(0);
     }

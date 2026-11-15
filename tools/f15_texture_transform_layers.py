@@ -12,6 +12,19 @@ Coverage cases (the stack quad has alphaMode MASK, cutoff 0.5; layer 0 alpha 1, 
   stack-cache-shadow --shadows csm --shadow-cache on (shadow_cache_depth_fragment)
   Negative controls (each must FAIL): the stack's OWN record alpha (coverage 1 everywhere: visible / blocking everywhere) and the inverted ramp.
 
+Emitter case:
+  stack-emitter      an EMISSIVE layer stack (MASK cutoff 0.5, emissive strength 40, the same ramp mask) cuts the emitter out where the blended coverage is
+                     below the cutoff, so only the u >= 0.5 half of the quad lights the floor in front of it: the luminance of the floor next to the right half
+                     minus the left half is the gate (threshold 0.08 of the display range, as the emitter-texture case of f15_texture_transform_secondary.py);
+                     the CPU model is a form-factor sum over the emitting half; controls: the stack's OWN alpha (the whole quad emits: no left-right
+                     difference) and the inverted ramp (the other half emits).
+
+Dual-use case:
+  direct-and-layer   ONE material (palette base colour, a UNIFORM transform: the loader bakes it into the vertex uvs of the primitives that use it
+                     directly) is used by a quad directly AND as layer 1 of a stack (weight 1) on a second quad.  Both quads must show the palette
+                     through the transform exactly ONCE (cells against the CPU lookup, 0.995 as layer-tex); the control "applied twice" (the transform
+                     composed with itself: what a block applied on top of the baked uvs gives) and identity / other transforms must fail.
+
 Transform cases (layer 1 carries a per-slot transform on its base colour slot and a DIFFERENT transform on a decoy slot):
   layer-tex     weight 1 on layer 1 (constant mask), layer 1 base colour = the 4 x 4 palette: cell codes through the layer's transform against the
                 CPU README lookup; controls: identity and the transforms of other slots (the uniform-bake result)
@@ -56,6 +69,8 @@ CASES = {
     "stack-csm-shadow": {"kind": "cover", "view": "shadow", "shadows": ["--shadows", "csm"], "pitch": 0.0},
     "stack-cache-shadow": {"kind": "cover", "view": "shadow", "shadows": ["--shadows", "csm", "--shadow-cache", "on"], "pitch": 0.0},
     "stack-reflection": {"kind": "cover", "view": "reflection", "shadows": ["--shadows", "rt"], "pitch": 30.0},
+    "stack-emitter": {"kind": "emitter", "shadows": ["--shadows", "rt"], "pitch": 40.0},
+    "direct-and-layer": {"kind": "dual", "shadows": ["--shadows", "rt"], "pitch": 0.0},
     "layer-tex": {"kind": "tex", "shadows": ["--shadows", "rt"], "pitch": 0.0},
     "layer-mask": {"kind": "mask", "shadows": ["--shadows", "rt"], "pitch": 0.0},
     "layer-height": {"kind": "height", "shadows": ["--shadows", "rt"], "pitch": 0.0},
@@ -99,10 +114,14 @@ def build_scene(out: pathlib.Path, case):
     layer0 = {"name": "layerA", "pbrMetallicRoughness": {"baseColorFactor": [RED[0] / 255, RED[1] / 255, RED[2] / 255, 1.0], "metallicFactor": 0.0, "roughnessFactor": 1.0}}
     layer1 = {"name": "layerB", "pbrMetallicRoughness": {"baseColorFactor": [RED[0] / 255, RED[1] / 255, RED[2] / 255, 0.0], "metallicFactor": 0.0, "roughnessFactor": 1.0}}
     stack = {"name": "stack", "pbrMetallicRoughness": {"baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.0, "roughnessFactor": 1.0}}
-    if cfg["kind"] == "cover":
+    if cfg["kind"] in ("cover", "emitter"):
         layer0.update({"alphaMode": "MASK", "alphaCutoff": 0.5})
         layer1.update({"alphaMode": "MASK", "alphaCutoff": 0.5})
         stack.update(stack_alpha)
+        if cfg["kind"] == "emitter":
+            stack["pbrMetallicRoughness"]["baseColorFactor"] = [0, 0, 0, 1]
+            stack["emissiveFactor"] = [1, 1, 1]
+            stack["extensions"] = {"KHR_materials_emissive_strength": {"emissiveStrength": 40.0}}
         files["mask.png"] = ramp_png()
         L["mask"] = {"path": "mask.png"}
         L["layers"] = [{"material": "layerA", "maskChannel": "R"}, {"material": "layerB", "maskChannel": "G"}]
@@ -135,7 +154,22 @@ def build_scene(out: pathlib.Path, case):
     h = SIZE / 2
     view = cfg.get("view")
     quads = []
-    if view in ("visibility", "shadow") or cfg["kind"] in ("tex", "mask", "height"):
+    if cfg["kind"] == "dual":
+        shared = {"name": "shared", "pbrMetallicRoughness": {"baseColorTexture": tex_json(index["palette"], T["alpha"]), "metallicFactor": 0.0, "roughnessFactor": 1.0}}
+        floor = {"name": "floor", "pbrMetallicRoughness": {"baseColorFactor": [0.9, 0.9, 0.9, 1], "metallicFactor": 0.0, "roughnessFactor": 1.0}}
+        files["mask.png"] = const_png((0, 255, 0))
+        L["mask"] = {"path": "mask.png"}
+        L["layers"] = [{"material": "layerA", "maskChannel": "R"}, {"material": "shared", "maskChannel": "G"}]
+        layer0["pbrMetallicRoughness"]["baseColorFactor"] = [0.2, 0.2, 0.2, 1.0]
+        layer1 = shared  # the tiny keeper quad below references it
+        quads.append((floor, (-2.0, 1.5, sec.FLOOR_Z), (4.0, 0, 0), (0, -3.0, 0)))
+        quads.append((shared, (-1.3, 0.6, 0.0), (1.2, 0, 0), (0, -1.2, 0)))      # the direct user (baked)
+        quads.append((stack, (0.1, 0.6, 0.0), (1.2, 0, 0), (0, -1.2, 0)))        # the stack, layer 1 = the same material
+    elif cfg["kind"] == "emitter":
+        floor = {"name": "floor", "pbrMetallicRoughness": {"baseColorFactor": [0.15, 0.15, 0.15, 1], "metallicFactor": 0.0, "roughnessFactor": 1.0}}
+        quads.append((floor, (-2.0, 0.0, 0.0), (4.0, 0, 0), (0, 0, 3.0)))
+        quads.append((stack, (-0.6, 1.2, 0.0), (1.2, 0, 0), (0, -1.2, 0)))
+    elif view in ("visibility", "shadow") or cfg["kind"] in ("tex", "mask", "height"):
         floor = {"name": "floor", "pbrMetallicRoughness": {"baseColorFactor": [0.9, 0.9, 0.9, 1], "metallicFactor": 0.0, "roughnessFactor": 1.0}}
         quads.append((floor, (-sec.FLOOR[0] / 2, sec.FLOOR[1] / 2, sec.FLOOR_Z), (sec.FLOOR[0], 0, 0), (0, -sec.FLOOR[1], 0)))
         quads.append((stack, (-h, h, 0.0), (SIZE, 0, 0), (0, -SIZE, 0)))
@@ -176,7 +210,8 @@ def build_scene(out: pathlib.Path, case):
         meshes.append({"primitives": [{"attributes": {"POSITION": a[0], "NORMAL": a[1], "TEXCOORD_0": a[2], "TANGENT": a[3]}, "indices": a[4], "material": qi}]})
         nodes.append({"mesh": qi, "name": material["name"] + f"-{qi}"})
     doc = {
-        "asset": {"version": "2.0", "generator": "tools/f15_texture_transform_layers.py"}, "extensionsUsed": ["KHR_texture_transform"],
+        "asset": {"version": "2.0", "generator": "tools/f15_texture_transform_layers.py"},
+        "extensionsUsed": ["KHR_texture_transform"] + sorted({e for m in materials for e in m.get("extensions", {})}),
         "scene": 0, "scenes": [{"nodes": list(range(len(nodes)))}], "nodes": nodes, "meshes": meshes, "materials": materials,
         "textures": [{"source": i, "sampler": 0} for i in range(len(names))], "images": [{"uri": base.data_uri(images[n])} for n in names],
         "samplers": [{"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497}],
@@ -281,24 +316,58 @@ def evaluate_cover(case, img, cam, log_text):
     return res
 
 
-def half_rg(transform, region):
-    return None
+def emitter_difference(emits, n=40):
+    """Normalised model irradiance difference left - right of the floor regions next to the quad (z = 0, facing +Z, y in [0, 1.2]); `emits(u, v)` says
+    whether the quad point emits (a form-factor sum, as f15_texture_transform_secondary.emitter_irradiance)."""
+    def irradiance(region):
+        x0, x1, z0, z1 = region
+        total = 0.0
+        for a in range(5):
+            for b in range(5):
+                P = (x0 + (x1 - x0) * (a + .5) / 5, 0.0, z0 + (z1 - z0) * (b + .5) / 5)
+                for i in range(n):
+                    for j in range(n):
+                        u, v = (i + .5) / n, (j + .5) / n
+                        if not emits(u, v):
+                            continue
+                        S = (-0.6 + 1.2 * u, 1.2 - 1.2 * v, 0.0)
+                        w = (P[0] - S[0], P[1] - S[1], P[2] - S[2])
+                        r2 = sum(c * c for c in w)
+                        r = math.sqrt(r2)
+                        total += (w[2] / r) * (S[1] / r) / r2
+        return total
+    l, r = irradiance(sec.EMITTER_REGIONS["left"]), irradiance(sec.EMITTER_REGIONS["right"])
+    return (l - r) / (l + r) if l + r > 0 else 0.0
 
 
-def evaluate_tex(img, cam):
-    """Palette cells of layer 1 through its per-slot transform (stack weight 1) against the CPU lookup, the primary fixture's decode."""
+def evaluate_emitter(img, cam):
+    (cl, nl), (cr, nr) = sec.region_pixels(cam, img, "emitter", "left"), sec.region_pixels(cam, img, "emitter", "right")
+    measured = (sum(cl) - sum(cr)) / 3.0
+    th, mm = 0.08, 0.3
+    mclass = sec.klass(measured, th)
+    cands = {"reference": lambda u, v: u >= CUT, "own-alpha": lambda u, v: True, "inverted-ramp": lambda u, v: u < CUT}
+    model = {n: round(emitter_difference(f), 3) for n, f in cands.items()}
+    agree = {n: 1.0 if sec.klass(m, mm) == mclass else 0.0 for n, m in model.items()}
+    return {"valid_pixels": nl + nr, "measured_difference": round(measured, 4), "threshold": th, "model_difference": model, "agreement": agree,
+            "measured_class": mclass, "gate_ok": agree["reference"] == 1.0 and mclass != 0,
+            "controls_discriminate": all(v == 0.0 for n, v in agree.items() if n != "reference")}
+
+
+def evaluate_tex(img, cam, cx=0.0):
+    """Palette cells of a quad centred at x = cx (z = 0) through the per-slot transform against the CPU lookup, the primary fixture's decode."""
     pix = img.load()
-    xs, ys = zip(*[cam.project((sx * SIZE / 2, sy * SIZE / 2, 0.0)) for sx in (-1, 1) for sy in (-1, 1)])
+    xs, ys = zip(*[cam.project((cx + sx * SIZE / 2, sy * SIZE / 2 + (0.0 if cx == 0.0 else 0.0), 0.0)) for sx in (-1, 1) for sy in (-1, 1)])
     samples = []
+    T = base.TRANSFORMS["alpha"]
     for py in range(int(min(ys)) + 6, int(max(ys)) - 6, 2):
         for px in range(int(min(xs)) + 6, int(max(xs)) - 6, 2):
             d = cam.ray(px, py)
             t = (0.0 - cam.position[2]) / d[2]
             P = tuple(cam.position[i] + d[i] * t for i in range(3))
-            u, v = (P[0] + SIZE / 2) / SIZE, (SIZE / 2 - P[1]) / SIZE
+            u, v = (P[0] - cx + SIZE / 2) / SIZE, (SIZE / 2 - P[1]) / SIZE
             if not (0.0 <= u <= 1.0 and 0.0 <= v <= 1.0):
                 continue
-            tu, tv = base.transform_uv(base.TRANSFORMS["alpha"], u, v)
+            tu, tv = base.transform_uv(T, u, v)
             if base.edge_distance(tu * base.CELLS, tv * base.CELLS) < base.EDGE_MARGIN:
                 continue
             samples.append((u, v, pix[px, py]))
@@ -306,19 +375,30 @@ def evaluate_tex(img, cam):
     for _, _, rgb in samples:
         for c in range(3):
             lo[c], hi[c] = min(lo[c], rgb[c]), max(hi[c], rgb[c])
-    cands = {"reference": base.TRANSFORMS["alpha"], "identity": base.IDENTITY}
+    once = lambda u, v: base.transform_uv(T, u, v)
+    cands = {"reference": once, "applied-twice": lambda u, v: base.transform_uv(T, *base.transform_uv(T, u, v)),
+             "identity": lambda u, v: (u, v)}
     for k in ("baseColor", "emissive", "occlusion", "normal"):
-        cands[f"uniform-bake:{k}-transform"] = base.TRANSFORMS[k]
+        cands[f"uniform-bake:{k}-transform"] = (lambda tk: (lambda u, v: base.transform_uv(base.TRANSFORMS[tk], u, v)))(k)
     agree = {n: 0 for n in cands}
     for u, v, rgb in samples:
         seen = sum(int(rgb[c] > (lo[c] + hi[c]) / 2.0) << (2 - c) for c in range(3))
-        for n, t in cands.items():
-            col, row, _, _ = base.cell_of(*base.transform_uv(t, u, v))
+        for n, f in cands.items():
+            col, row, _, _ = base.cell_of(*f(u, v))
             agree[n] += int(base.code_at(col, row) == seen)
     res = {"valid_pixels": len(samples), "agreement": {n: round(a / len(samples), 4) for n, a in agree.items()}, "threshold": base.AGREEMENT_MIN}
     res["gate_ok"] = res["agreement"]["reference"] >= base.AGREEMENT_MIN
     res["controls_discriminate"] = all(v < base.CONTROL_MAX for n, v in res["agreement"].items() if n != "reference")
     return res
+
+
+def evaluate_dual(img, cam):
+    direct, layered = evaluate_tex(img, cam, -0.7), evaluate_tex(img, cam, 0.7)
+    out = {"valid_pixels": direct["valid_pixels"] + layered["valid_pixels"], "direct": direct, "layered": layered,
+           "agreement": {"direct:" + k: v for k, v in direct["agreement"].items()} | {"layered:" + k: v for k, v in layered["agreement"].items()}, "threshold": base.AGREEMENT_MIN}
+    out["gate_ok"] = direct["gate_ok"] and layered["gate_ok"]
+    out["controls_discriminate"] = direct["controls_discriminate"] and layered["controls_discriminate"]
+    return out
 
 
 def quad_halves_rg(img, cam):
@@ -379,8 +459,12 @@ def evaluate(case, capture, log_text):
     kind = CASES[case]["kind"]
     if kind == "cover":
         res = evaluate_cover(case, img, cam, log_text)
+    elif kind == "emitter":
+        res = evaluate_emitter(img, cam)
     elif kind == "tex":
         res = evaluate_tex(img, cam)
+    elif kind == "dual":
+        res = evaluate_dual(img, cam)
     else:
         res = evaluate_region_case(case, img, cam)
     res["case"] = case
@@ -393,7 +477,7 @@ def selftest():
         with tempfile.TemporaryDirectory() as tmp:
             build_scene(pathlib.Path(tmp), case)
             doc = json.loads((pathlib.Path(tmp) / "scene.gltf").read_text())
-            assert {m["name"] for m in doc["materials"]} >= {"stack", "layerA", "layerB"}
+            assert {m["name"] for m in doc["materials"]} >= ({"stack", "layerA", "shared"} if CASES[case]["kind"] == "dual" else {"stack", "layerA", "layerB"})
             ov = json.loads((pathlib.Path(tmp) / "overrides.json").read_text())["overrides"][0]
             assert ov["name"] == "stack" and len(ov["layers"]["layers"]) == 2
             assert (pathlib.Path(tmp) / "mask.png").is_file()
@@ -403,6 +487,8 @@ def selftest():
         assert ref == -1 and sec.klass(region_model(kind, base.IDENTITY), 0.3) == 1
         usable = [k for k in CONTROL_SLOTS[kind] if sec.klass(region_model(kind, base.TRANSFORMS[k]), 0.3) != ref]
         assert len(usable) >= 2, (kind, usable)
+    m_ref = emitter_difference(lambda u, v: u >= CUT)
+    assert sec.klass(m_ref, 0.3) == -1 and sec.klass(emitter_difference(lambda u, v: True), 0.3) == 0 and sec.klass(emitter_difference(lambda u, v: u < CUT), 0.3) == 1
     c = coverage_candidates()
     assert c["reference"](0.2, 0.5) == 0 and c["reference"](0.8, 0.5) == 1 and c["reference"](0.5, 0.5) is None
     assert c["own-alpha"](0.2, 0.5) == 1

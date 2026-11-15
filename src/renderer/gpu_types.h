@@ -61,6 +61,10 @@ PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_DOUBLE_SIDED = 1u << 0;
 /// F15.1 (ticket 22): the material carries per-slot KHR_texture_transform data: GPUMaterial::textureTransformIndex is the first of
 /// the MATERIAL_TT_RECORDS records of its transform block in the extension buffer (GPUTextureTransformRecord).
 PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_TEXTURE_TRANSFORM = 1u << 1;
+/// F15.4 (ticket 22): the transform block is valid for sampling this material as a LAYER of a stack.  A material whose uniform transform was baked
+/// into the vertex uvs of its direct users carries only this bit (its direct shading must not apply the block again); a per-slot material that is also
+/// a layer carries both.
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_LAYER_TRANSFORM = 1u << 2;
 // UNLIT: KHR_materials_unlit, lowered onto the emission path (renderer/material_description.h lowerUnlit).  The emission is the
 // displayed colour only: the surface is never a sampled emitter and GI rays hitting it read no emission.
 PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_UNLIT = 1u << 2;

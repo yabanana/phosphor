@@ -187,7 +187,7 @@ LightSample sampleLight(const GPUSampledLight& l, glm::dvec2 uv, glm::dvec3 rece
 
 LightSample sampleTexturedLight(const GPUSampledLight& l, const GPUEmissiveSurface& emitter,
                                const GPUMaterial& material, glm::dvec2 uv, glm::dvec3 receiver,
-                               TextureSample textures, void* user) {
+                               TextureSample textures, void* user, CoverageSample coverage) {
     auto sample = sampleLight(l, uv, receiver);
     if (!sample.valid || l.type != DI_LIGHT_TRIANGLE || !(l.flags & DI_LIGHT_TEXTURED_EMISSION)) return sample;
     if (!emitter.valid || (!textures && (material.emissiveTex != INVALID_TEXTURE_INDEX ||
@@ -201,7 +201,8 @@ LightSample sampleTexturedLight(const GPUSampledLight& l, const GPUEmissiveSurfa
     const auto texel = material.emissiveTex == INVALID_TEXTURE_INDEX ? glm::dvec4(1) : textures(material.emissiveTex, lightUV, user);
     sample.radiance = v3(material.emissive) * glm::dvec3(texel);
     if (material.alphaCutoff > 0) {
-        const double alpha = material.baseColor[3] * (material.baseColorTex == INVALID_TEXTURE_INDEX ? 1 : textures(material.baseColorTex, lightUV, user).w);
+        const double alpha = material.baseColor[3] * (material.baseColorTex == INVALID_TEXTURE_INDEX ? 1 : textures(material.baseColorTex, lightUV, user).w) *
+                             (coverage ? coverage(lightUV, user) : 1.0);
         if (!std::isfinite(alpha)) { sample.valid = false; return sample; }
         if (alpha < material.alphaCutoff) sample.radiance = glm::dvec3(0);
     }

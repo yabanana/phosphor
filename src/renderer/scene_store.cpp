@@ -301,8 +301,20 @@ struct SceneStore::Impl {
                     if (l.materialIndex < out.size()) out[l.materialIndex] = 1;
         return out;
     }
+    /// The transform flags of a material: MATERIAL_FLAG_TEXTURE_TRANSFORM for a PerSlot one (its direct users keep their uvs untouched), and
+    /// MATERIAL_FLAG_LAYER_TRANSFORM when it is a layer of a stack (PerSlot or uniform: nothing bakes a layer).  A uniform material that is both
+    /// used directly (baked into the uvs of its primitives) and as a layer carries ONLY the layer bit: no double application.
+    static u32 ttFlagBits(bool layerTarget, const MaterialDescription& d) {
+        const TextureTransformStatus st = analyzeTextureTransforms(d).status;
+        const bool perSlot = st == TextureTransformStatus::PerSlot;
+        return (perSlot ? MATERIAL_FLAG_TEXTURE_TRANSFORM : 0u) |
+               (layerTarget && (perSlot || st == TextureTransformStatus::Uniform) ? MATERIAL_FLAG_LAYER_TRANSFORM : 0u);
+    }
     bool ttNeeded(u32 idx, const MaterialDescription& d) const {
-        return needsTextureTransformBlock(d, idx < layerTarget_.size() && layerTarget_[idx] != 0);
+        return ttFlagBits(idx < layerTarget_.size() && layerTarget_[idx] != 0, d) != 0u;
+    }
+    u32 ttBits(u32 idx, const MaterialDescription* d) const {
+        return d ? ttFlagBits(idx < layerTarget_.size() && layerTarget_[idx] != 0, *d) : 0u;
     }
 
     /// A transform block: MATERIAL_TT_GROUPS adjacent groups (the pair is reused through ttFree_, never split).
@@ -332,8 +344,9 @@ struct SceneStore::Impl {
         if (isEmissive(gm)) ++emissiveCount_;
         countFeatures(cur, -1);
         countFeatures(gm, +1);
-        if (cur.flags & MATERIAL_FLAG_TEXTURE_TRANSFORM) --ttCount_;
-        if (gm.flags & MATERIAL_FLAG_TEXTURE_TRANSFORM) ++ttCount_;
+        constexpr u32 ttAny = MATERIAL_FLAG_TEXTURE_TRANSFORM | MATERIAL_FLAG_LAYER_TRANSFORM;
+        if (cur.flags & ttAny) --ttCount_;
+        if (gm.flags & ttAny) ++ttCount_;
         cur = gm;
         markMat(idx);
     }
@@ -376,7 +389,7 @@ struct SceneStore::Impl {
             for (u32 k = 0; k < MATERIAL_TT_RECORDS; ++k) setExt(block + k, recs[k]);
         }
         gm.flags = (gm.flags & ~(MATERIAL_FEATURES_ALL << MATERIAL_FEATURE_SHIFT)) | (mask << MATERIAL_FEATURE_SHIFT);
-        gm.flags = tt ? (gm.flags | MATERIAL_FLAG_TEXTURE_TRANSFORM) : (gm.flags & ~MATERIAL_FLAG_TEXTURE_TRANSFORM);
+        gm.flags = (gm.flags & ~(MATERIAL_FLAG_TEXTURE_TRANSFORM | MATERIAL_FLAG_LAYER_TRANSFORM)) | ttBits(idx, desc);
         gm.textureTransformIndex = tt ? block : 0u;
         gm.extensionIndex = group == NONE ? MATERIAL_EXTENSION_INVALID : group;
         setMaterial(idx, gm);
@@ -858,7 +871,7 @@ struct SceneStore::Impl {
         // The store owns the feature bits and the extension index of the library records.
         for (u32 i = 0; i < materials_.size(); ++i) {
             GPUMaterial base = materials_[i];
-            base.flags &= ~((MATERIAL_FEATURES_ALL << MATERIAL_FEATURE_SHIFT) | MATERIAL_FLAG_TEXTURE_TRANSFORM);
+            base.flags &= ~((MATERIAL_FEATURES_ALL << MATERIAL_FEATURE_SHIFT) | MATERIAL_FLAG_TEXTURE_TRANSFORM | MATERIAL_FLAG_LAYER_TRANSFORM);
             base.extensionIndex = MATERIAL_EXTENSION_INVALID;
             base.textureTransformIndex = 0;
             materials_[i] = base;
@@ -1175,7 +1188,8 @@ std::string SceneStore::Impl::verify(const ECS& ecs, const GpuScene& scene) cons
             } else if (tt) {
                 return fmt("material %u: transform needed without a block", idx);
             }
-            exp.flags = tt ? (exp.flags | MATERIAL_FLAG_TEXTURE_TRANSFORM) : (exp.flags & ~MATERIAL_FLAG_TEXTURE_TRANSFORM);
+            exp.flags = (exp.flags & ~(MATERIAL_FLAG_TEXTURE_TRANSFORM | MATERIAL_FLAG_LAYER_TRANSFORM)) |
+                        (desc ? ttFlagBits(idx < layerTargetsExp.size() && layerTargetsExp[idx] != 0, *desc) : 0u);
             exp.textureTransformIndex = tt ? blk : 0u;
         }
         const u32 got = materials_[idx].extensionIndex;
@@ -1200,7 +1214,7 @@ std::string SceneStore::Impl::verify(const ECS& ecs, const GpuScene& scene) cons
         const auto& libDesc = scene.materialDescriptions();
         for (u32 i = 0; i < libRegion; ++i) {
             GPUMaterial exp = expLib[i];
-            exp.flags &= ~((MATERIAL_FEATURES_ALL << MATERIAL_FEATURE_SHIFT) | MATERIAL_FLAG_TEXTURE_TRANSFORM);
+            exp.flags &= ~((MATERIAL_FEATURES_ALL << MATERIAL_FEATURE_SHIFT) | MATERIAL_FLAG_TEXTURE_TRANSFORM | MATERIAL_FLAG_LAYER_TRANSFORM);
             if (const std::string err = checkMaterial(i, exp, i < libDesc.size() && !lib.empty() ? &libDesc[i] : nullptr);
                 !err.empty())
                 return "library " + err;

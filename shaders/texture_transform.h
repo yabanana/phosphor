@@ -19,6 +19,11 @@ static TexXf texXfFor(const device GPUMaterialExtRecord *extensions, uint flags,
     return kTextureTransform != 0u ? texXfForOn(extensions, flags, index) : texXfNone();
 }
 
+// The block of a layer sub-material (valid for either bit of the flags): compiled out without the constant like texXfFor.
+static TexXf texXfForLayer(const device GPUMaterialExtRecord *extensions, uint flags, uint index) {
+    return kTextureTransform != 0u ? texXfForLayerOn(extensions, flags, index) : texXfNone();
+}
+
 static bool texXfHas(TexXf x, uint slot) {
     return kTextureTransform != 0u && texXfHasOn(x, slot);
 }

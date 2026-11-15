@@ -642,7 +642,7 @@ static LayerFeatureResult resolveLayerFeatures(GPUMaterialExt3 e3, const device 
             if (bits != 0u && lm.extensionIndex != MATERIAL_EXTENSION_INVALID) {
                 const float s = e3.uvScale[i];
                 const LayerFeatureSet own = layerFeaturesOf(bits, extBase + lm.extensionIndex, textures, uv * s, dx * s, dy * s,
-                                                        texXfFor(extBase, lm.flags, lm.textureTransformIndex));
+                                                        texXfForLayer(extBase, lm.flags, lm.textureTransformIndex));
                 // A feature the layer carries replaces the inherited finish; the others keep it.
                 if ((own.present & MATERIAL_FEATURE_SPECULAR_IOR) != 0u) {
                     S.v[i].ior = own.ior;

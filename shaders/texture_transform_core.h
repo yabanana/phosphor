@@ -33,6 +33,16 @@ static TexXf texXfForOn(const device GPUMaterialExtRecord *extensions, uint flag
     return x;
 }
 
+// The block of a LAYER sub-material: valid under either bit (MATERIAL_FLAG_LAYER_TRANSFORM alone = a uniform transform that direct users have baked).
+static TexXf texXfForLayerOn(const device GPUMaterialExtRecord *extensions, uint flags, uint index) {
+    TexXf x = texXfNone();
+    if (extensions != nullptr && (flags & (MATERIAL_FLAG_TEXTURE_TRANSFORM | MATERIAL_FLAG_LAYER_TRANSFORM)) != 0u) {
+        x.rec = reinterpret_cast<const device GPUTextureTransformRecord *>(extensions + index);
+        x.mask = x.rec[0].slotMask;
+    }
+    return x;
+}
+
 static bool texXfHasOn(TexXf x, uint slot) {
     return ((x.mask >> slot) & 1u) != 0u;
 }
@@ -92,14 +102,15 @@ static void texXfFrameOn(TexXf x, uint slot, thread float3 &T, thread float3 &B)
 // stack's mask / height and every layer's own textures use this: a layer's slots go through the block of ITS sub-material.
 static void texXfSlotUvDd(const device GPUMaterialExtRecord *extensions, uint flags, uint index, uint slot, thread float2 &uv, thread float2 &dx,
                           thread float2 &dy) {
-    if (extensions != nullptr && (flags & MATERIAL_FLAG_TEXTURE_TRANSFORM) != 0u) texXfUvOn(texXfForOn(extensions, flags, index), slot, uv, dx, dy);
+    if (extensions != nullptr && (flags & (MATERIAL_FLAG_TEXTURE_TRANSFORM | MATERIAL_FLAG_LAYER_TRANSFORM)) != 0u)
+        texXfUvOn(texXfForLayerOn(extensions, flags, index), slot, uv, dx, dy);
 }
 
 // A tangent-space normal vector read through a transformed normal-like slot, expressed in the mesh's tangent frame: the texel axes are
 // T' = inv00 T - inv10 B and B' = -inv01 T + inv11 B (texXfFrameOn), so (a, b) -> a T' + b B' in the (T, B) basis.  Unchanged without a transform.
 static float3 texXfRotateTn(const device GPUMaterialExtRecord *extensions, uint flags, uint index, uint slot, float3 tn) {
-    if (extensions != nullptr && (flags & MATERIAL_FLAG_TEXTURE_TRANSFORM) != 0u) {
-        const TexXf x = texXfForOn(extensions, flags, index);
+    if (extensions != nullptr && (flags & (MATERIAL_FLAG_TEXTURE_TRANSFORM | MATERIAL_FLAG_LAYER_TRANSFORM)) != 0u) {
+        const TexXf x = texXfForLayerOn(extensions, flags, index);
         if (texXfHasOn(x, slot)) {
             const GPUTextureTransform t = texXfGet(x, slot);
             const float det = t.m[0] * t.m[3] - t.m[1] * t.m[2];

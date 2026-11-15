@@ -27,9 +27,11 @@ struct LightSample {
 [[nodiscard]] GPUSampledLight fromPunctual(const GPULight& light, u32 id, u32 generation);
 [[nodiscard]] LightSample sampleLight(const GPUSampledLight& light, glm::dvec2 uv, glm::dvec3 receiver);
 using TextureSample = glm::dvec4 (*)(u32 textureIndex, glm::dvec2 uv, void* user); // LINEAR, LOD0
+/// F15.4 (ticket 23): the coverage factor of a layer stack that is an emitter (blended layer alpha at the emitter uv, LOD0); null = 1.
+using CoverageSample = double (*)(glm::dvec2 uv, void* user);
 [[nodiscard]] LightSample sampleTexturedLight(const GPUSampledLight& light, const GPUEmissiveSurface& emitter,
                                             const GPUMaterial& material, glm::dvec2 uv, glm::dvec3 receiver,
-                                            TextureSample textures, void* user = nullptr);
+                                            TextureSample textures, void* user = nullptr, CoverageSample coverage = nullptr);
 // CPU oracle for the GPU extraction kernel; production transforms live on GPU.
 [[nodiscard]] GPUSampledLight updateEmissive(const GPUSampledLight& source, const GPUEmissiveSurface& emitter,
                                            std::span<const GPUInstance> instances, std::span<const GPUMaterial> materials);

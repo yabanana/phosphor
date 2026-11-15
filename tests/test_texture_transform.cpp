@@ -254,3 +254,50 @@ TEST_CASE("F15.4 ticket 22: a layer stack with a transform is PerSlot (never bak
     CHECK(offsetof(GPUTemporalParams, materialExtensions) == 184);
     CHECK(sizeof(GPUTemporalParams) == 192);
 }
+
+TEST_CASE("F15.4 ticket 22: a material used directly AND as a layer is never transformed twice") {
+    for (const bool perSlot : {false, true}) {
+        GpuScene scene;
+        ECS ecs;
+        SceneStore store;
+        const MeshData plane = ProceduralMeshes::generatePlane(1.0f, 1.0f, 1, 1);
+        const MeshHandle mesh = scene.uploadMesh(plane.positions, plane.normals, plane.tangents, plane.uvs, plane.indices);
+        MaterialDescription sub;
+        sub.base.baseColorTexture.index = 4;
+        sub.base.baseColorTexture.transform = makeTransform(0.1f, 0.0f, 0.0f, 2.0f, 2.0f);
+        if (perSlot) {
+            sub.base.emissiveTexture.index = 5;
+            sub.base.emissiveTexture.transform = makeTransform(0.0f, 0.3f, 0.5f, 1.0f, 1.0f);
+        }
+        const u32 subIdx = scene.addMaterial(GPUMaterial{}, sub, "sub", MaterialSupportReport{});
+        MaterialDescription stack;
+        stack.layers = LayerStack{};
+        stack.layers->layers.resize(2);
+        stack.layers->layers[0].materialIndex = subIdx;
+        stack.layers->layers[1].materialIndex = subIdx;
+        const u32 stackIdx = scene.addMaterial(GPUMaterial{}, stack, "stack", MaterialSupportReport{});
+        for (const u32 material : {subIdx, stackIdx}) {
+            const EntityID e = ecs.createEntity();
+            TransformComponent xf{};
+            xf.updateMatrix();
+            ecs.addComponent(e, std::move(xf));
+            MeshInstanceComponent mi{};
+            mi.meshHandle = mesh;
+            mi.materialIndex = material;
+            mi.setVisible(true);
+            ecs.addComponent(e, std::move(mi));
+        }
+        store.sync(ecs, scene);
+        const std::string v = store.verifyAgainstEcs(ecs, scene);
+        REQUIRE_MESSAGE(v.empty(), v);
+        const GPUMaterial& m = store.materials()[subIdx];
+        // The layer use has its block; the DIRECT use applies it only when the material is per-slot (a uniform transform is baked into the
+        // vertex uvs of its direct users: the block must not be applied to them again).
+        CHECK((m.flags & MATERIAL_FLAG_LAYER_TRANSFORM) != 0u);
+        CHECK(((m.flags & MATERIAL_FLAG_TEXTURE_TRANSFORM) != 0u) == perSlot);
+        CHECK(m.textureTransformIndex % MATERIAL_EXT_RECORDS == 0u);
+        CHECK(store.textureTransformInUse());
+        const GPUMaterial& s = store.materials()[stackIdx];
+        CHECK((s.flags & (MATERIAL_FLAG_TEXTURE_TRANSFORM | MATERIAL_FLAG_LAYER_TRANSFORM)) == 0u);
+    }
+}
