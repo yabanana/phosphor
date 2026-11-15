@@ -1401,7 +1401,7 @@ replica (the first set; the effect range reflects it).
 Absolute RT sun through glass at 1280x720 (`--shadows rt`, median of 3): pane-sun frame p50 2.20 ms (`Solar RT visibility` 0.108), volume-pane 2.21 (0.110), water-sun 2.21 (0.108).
 The "lite" sun kernel serves scenes without transmission; the A arm of 2a (factor 0 tops) runs it, and the delta above is the whole price of the glass kernel.
 Absolute map cost at the default 2048 (pane-sun@csm): `CSM transmittance 0..3` 0.025 / 0.021 / 0.021 / 0.021 ms (about 0.09 ms for four cascades).
-Memory (graph report `heap_bytes`, aliased): chess shadow rig with `--shadow-map-size 8192` 1 144.6 MiB (tops opaque) -> 2 172.9 MiB (glass), +1 028 MiB = four cascades of a
+Memory (graph report `heap_bytes`, aliased): chess shadow rig with `--shadow-map-size 8192` 1 144.6 MiB (tops opaque) -> 2 172.6 MiB (glass), +1 028 MiB = four cascades of a
 256 MiB (8192^2 x 4 B) transmittance map; the default 2048 map is 1/16 of that (64 MiB for four cascades, derived, not measured here). In 2d the off arm still creates
 the maps (heap_bytes 179.88 MiB in both arms), so the map memory is isolated only by the chess A/B.
 

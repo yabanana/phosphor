@@ -174,5 +174,16 @@ Quiet-machine measurements for this ticket:
   resolve GPU time per active-layer count; >= 5 % rule of decision 05). TERRAIN DONE 2026-11-15 (quiet machine, load 2.0, 90 runs, A/B/A x 3
   replicas, `build/f15-layers-timing/summary.md`): resolve mean ms union single 0.089, layers-1..4 0.136 / 0.162 / 0.183 / 0.208, full 0.204;
   binning (resolve + classification) single 0.106, layers-1..4 0.143 / 0.160 / 0.182 / 0.216, full 0.206. Binning never lowers the resolve by
-  5 % (full +1 %, layers-4 +4 %, layers-2 -1 %): stays opt-in, union stays the default. Chess binning A/B/A still to run;
+  5 % (full +1 %, layers-4 +4 %, layers-2 -1 %): stays opt-in, union stays the default. Chess binning A/B/A: see the next entry;
+- QUIET-MACHINE COSTS RECORDED 2026-11-15 (cfb9e11, `tools/f15_costs.py`, 129 runs, A/B/A x 3 replicas, 256 frames, 0 GPU allocations, 0 fallbacks; tables in `docs/perf-log.md`
+  "F15 ticket 24: quiet-machine cost of the F15 features"; costs to record, not gates):
+  - transmission RT (chess back-light 720p, tops transmission 0 vs 1): frame p50 +10.67 ms (+9.38..+10.85), `Local clustered RT shading` +9.18, each of the 8 reflection samples +0.17..0.18;
+    no opaque-glass switch on the procedural fixtures (absolute 14.8 / 17.4 ms glass-behind-glass / roughness-ior, declared `--rt off` 4.2 ms);
+  - transmissive shadows, chess shadow rig 1080p glass vs opaque tops: RT +0.148 ms frame (within A-A spread 0.167; `Solar temporal moments` +0.099 RGB history, `Solar RT visibility` +0.027);
+    CSM 8192 +1.03 ms (`CSM transmittance` 4 x 0.195, PCSS +0.128) and +1 028 MiB of map memory; CSM 2048 pane fixtures: map receiver `CSM PCSS visibility` +0.075 ms, transmittance passes 4 x 0.021 ms;
+  - subsurface diffusion (chess side-light 1080p, sss off vs on): frame p50 +0.411 ms, `Subsurface diffusion` 0.431 + clear 0.025 ms = 6.1 ns per subsurface pixel (71 152 px, whole-frame figure), +64 MiB unaliased heap;
+  - iridescence per light: NOT measurable, no film-off twin and no light-count option (absolute pass times recorded; static 187 flops per `bsdfThinFilm` stays the only per-light figure);
+  - GI-back lookup (`--thin-gi-back`): `DDGI back irradiance` pass +0.175 ms (720p), frame delta not significant (+0.34, A-A spread 0.38), +7.25 MiB;
+  - binning vs union on chess (resolve + classification): side-light -1.8 %, shadow rig +6.7 %, back-light +9.8 % (A-A noise 2.6 / 0.9 / 4.3 %): the >= 5 % rule of decision 05 is not met (opt-log), with the
+    terrain result union stays default, binning opt-in. CHESS DONE.
 - Sponza D2 interleaved A/B for the GI-mode environment fix and for the energy-preserving a-trous experiment.
