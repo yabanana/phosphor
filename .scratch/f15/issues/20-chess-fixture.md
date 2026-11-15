@@ -151,3 +151,21 @@ Declared behaviour, no engine change (an energy-conserving filter would change e
 - 3 pawn-top shadows: MET qualitative (RT T_luma 0.391; CSM needs --shadow-map-size 8192). Ticked.
 - 4 support report + conversion note: MET (fixtures/chess/README.md). Ticked.
 Open: scattering weight map not in the pinned subset (weight 1); profile_shape_ignores_textures; API-layer "Redundant call to setDepthStencilState/setViewport" notices on chess and subsurface fixtures carried to 24 and not recorded there; CSM cascade fit to the scene for small casters (candidate); chess binning A/B/A not run.
+
+## F15 closure, loader-misc (2026-11-15): redundant API-layer notices removed; the back-light rig under shader validation
+
+**Redundant `setDepthStencilState` / `setViewport` notices (96 + 96 per capture): FIXED (commit 65f2f10).**  Graph dump of a ReSTIR + RT capture: render pass 2 fuses "Visibility opaque B" and "Visibility alpha B" in one
+encoder and both call `MeshRenderer::encodeRaster`, which set the same depth-stencil state and viewport again: one pair per frame (98 lines in a 49-frame capture, 192 in the 96-frame corpus captures, the "known baseline notices" of
+tickets 15, 20 and 22).  Fix: `src/platform/metal/render_state_tracker.h` (the executor registers the encoder of every plain render group, the passes set the two states through `metal_state::setDepthStencil / setViewport`, which skip
+a value the registered encoder holds; unregistered encoders always get the call).  State stays at Metal's defaults where it was (ImGui, scene passes untouched).  Evidence: notices 98 -> 0 on every capture of
+tools/f15_unlit_lights_check.py (12 captures, now a failure criterion of that tool); `MTL_DEBUG_LAYER_WARNING_MODE=assert` under lldb exits 0; images unchanged: visual_check 8/8 0 px (BENCH8_ARGS 100000), the five F13 exactness
+PFMs byte-identical, DiffuseTransmissionTest validation clean.  Still printed, a DIFFERENT family: `Redundant call to setComputePipelineState`, 7 per frame with `--reflection-samples 8` (84 in a 12-frame chess capture; 0 with 1 sample):
+every reflection sample is its own graph pass fused in one compute encoder and each dispatch sets the same pipeline; ~50 direct `setComputePipelineState` sites make a tracker unsafe there (a stale entry would run the wrong
+kernel).  Proposal: collapse the eight sample passes into one pass with eight dispatches (changes the per-pass timing units and the graph key: its own ticket), or give every compute encoder the same registered tracker once all sites go through it.
+
+**Back-light rig under shader validation: EXPLAINED, runnable configuration delivered.**  The "GPU timeout waiting for frame event" is the engine's 5 s frame wait (`kWaitTimeoutMs`, metal_context.cpp) giving up on a slow frame, not a
+validation message: the rig costs 620 ms per frame at 1920x1080 without validation (`build/f15-chess-valid2`, 4 frames) and shader validation makes a frame several times slower (640x360, the exact capture flags of
+tools/f15_chess_check.py: 220 ms plain, 1126 ms validated with `--debug-lighting 1` (5.1x), 383 ms validated without it), so the 1080p frame needs more than 5 s (reproduced: `GPU timeout True` at 1920x1080 with validation,
+exit 1, 0 validation messages).  A longer wait would put multi-second command buffers in front of the WindowServer watchdog (CLAUDE.md GPU safety), so the wait stays.  The rig is validated at 640x360 with the exact flags:
+`tools/f15_chess_validate.py` (12 frames, `--debug-lighting 1`, archive off, no accumulation): transmission 0 and 1 both exit 0, 0 validation messages, 0 timeouts, 1.03 s (transmission 0) / 1.02 s (transmission 1) per frame (1.13 / 1.21 s in the diagnostic run); the 640x360 / 8-sample configuration that
+the first record listed as timing out did NOT time out here (frame 1.1 s, far below the 5 s wait); the earlier timeout at that size is not reproduced (machine contention at the time is a guess, not verified).

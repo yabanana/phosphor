@@ -159,3 +159,16 @@ Batch logs: `build/f15-exact/battery09.log`, `battery09b.log`,
 - 5 side by side: MET qualitative (ticket 22 report; C22-D3 fixed in e9569ac). Ticked.
 - 6 archive/hitch/O7: MET (+19 descriptors). Ticked.
 Open: coat-normal-texture numeric fixture (ticket 22 closure); coat-only union (mask 2) not archived (no fixture uses it).
+
+## F15 closure, loader-misc (2026-11-15): coat-only union (mask 2) archived and fixture
+
+Open item: "coat-only union (mask 2) not archived (no fixture uses it)".  DONE.
+
+- Fixture `clearcoat-grid-coat-only-sun` (bench scenario, no reference, no gate): `clearcoat-grid-sun` without the ior block of row 4, so every sphere carries the clearcoat block only and the scene's feature union is 2
+  (clearcoat-grid-sun is 3).  tests/test_material_validation.cpp pins the union of both (negative control: the reference is 3) and the manifest `shaders/material_classes/material.json` exports the scene (union 2).
+- Before the update the fixture capture reported 2 archive misses (tools/f15_coat_only_check.py, 1280x720, legacy + SSR); targeted update (rules-file recipe, commit 271d751, KEPT file
+  `.scratch/f15/harvest/loader-misc-1.json`, +3 compute descriptors specialised with MATERIAL_FEATURES = 2; the coplanar fixture of ticket 06 shares the mask).  After the rebuild: 0 archive misses, 0 render-thread compiles
+  (both the coat-only capture and its clearcoat-grid-sun reference).
+- Image criterion (fixed from float rounding, see the docstring: the first version asked for bit equality and failed with a largest difference of 1.8e-7, the two specialisations are different compiled programs):
+  every pixel outside row 4's band equals the reference pixel to within 1e-6 (0 pixels above, largest 1.79e-7) and inside the band 9 610 pixels differ by more than 1e-3 (largest 0.384: row 4 lost its ior 2.4 block,
+  the negative control).  The coat model itself is unchanged: the scene is the sun gate's grid, only the specialisation differs.

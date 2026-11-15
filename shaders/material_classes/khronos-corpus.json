@@ -178,6 +178,33 @@
         {
           "lobes": [],
           "mask": 0,
+          "materials": 5
+        },
+        {
+          "lobes": [
+            "specular_ior"
+          ],
+          "mask": 1,
+          "materials": 8
+        },
+        {
+          "lobes": [
+            "subsurface"
+          ],
+          "mask": 128,
+          "materials": 16
+        }
+      ],
+      "family": "corpus",
+      "name": "corpus:DiffuseTransmissionTest",
+      "union": 129,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
           "materials": 6
         }
       ],

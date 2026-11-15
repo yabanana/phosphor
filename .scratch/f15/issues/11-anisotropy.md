@@ -184,3 +184,17 @@ Batch log: `build/f15-exact/battery11.log`.
 - 4 side by side: MET qualitative (ticket 22; C22-D5 declared single-bounce reflection of neighbours). Ticked.
 - 5 archive/hitch/O7: MET (+17 descriptors). Ticked.
 Open: direction-texture fixture; declared-environment fit 6.4-7.0 % gap on metal strength 1 and composite complement fit not proven as a bound; narrow-lobe sun and non-constant environment for the bent normal not exercised; denoiser lobe-id for anisotropic highlights not covered; primitive without tangent shaded as strength 0 (declared).
+
+## F15 closure, loader-misc (2026-11-15): tangent frame repair
+
+- The residue "a primitive without a tangent frame is shaded as strength 0" had two real sources, not one: (a) the loader ALREADY generates MikkTSpace tangents for a primitive without TANGENT (completeGeometry;
+  doctest "missing normals and tangents are generated"), so the common case was not a defect; (b) SUPPLIED tangents that are degenerate (zero, parallel to the normal, non-finite) and the MikkTSpace result on
+  a degenerate UV mapping (it returns zero tangents) reach the shader as `dot(T, T) <= 1e-8`, which shades anisotropy as strength 0.
+- Fix (e8b6399): `repairTangentFrames` (src/scene/mesh_processing.cpp) replaces every unusable tangent of a primitive whose material carries an anisotropy block by a perpendicular of the normal (authored
+  handedness w kept; usable tangents untouched).  Only anisotropy primitives are touched, every other mesh keeps its data bit for bit.
+- Fixtures (tests/test_gltf_unlit_lights.cpp "tangent frames: ..."): a +Z quad with supplied zero tangents is repaired on an anisotropy material (4 of 4 vertices usable, unit, orthogonal to N, w 1) and the
+  SAME data on a plain material stays degenerate (4 of 4 unusable: the state before the fix, the negative control); a tangent parallel to the normal with w -1 is repaired with w -1 kept while the other three
+  authored tangents are bit-identical; generated tangents on an all-equal UV mapping are usable after the repair; unit test of `repairTangentFrames` (3 repaired of 4, idempotent).
+- Still declared: an anisotropy primitive built by a bench through `GpuScene::uploadMesh` without tangents gets (1, 0, 0, 1) (the synthetic fixtures use combed spheres on purpose); a repaired tangent frame
+  has the arbitrary direction of `anyPerpendicular`, so the anisotropy ROTATION of such a vertex is relative to that arbitrary direction (glTF requires tangents for anisotropic materials; an asset that
+  ships none, or degenerate ones, has no authored direction to honour).

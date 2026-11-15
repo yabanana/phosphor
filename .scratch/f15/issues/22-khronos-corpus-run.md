@@ -119,3 +119,20 @@ Open: numeric texture fixtures (coat normal, anisotropy direction, iridescence t
   (default) against the same scene with every transform removed (unused: remove the `KHR_texture_transform` blocks from the generated glTF: a copy of build_gltf without them) - the per-pixel cost of one extra 2x3 matrix per slot
   (about 40 flops per slot sampled); Sponza D2 `--frames` A/B against 3ef8f41 (bit-identical output; the shader code of the generic and class pipelines differs only by dead branches, expected equal within noise); GlamVelvetSofa
   at 1080p with and without the constant (same scene, `withTextureTransform` skipped) for the real cost of the transform on a textured model.
+
+## F15 closure, loader-misc (2026-11-15): DiffuseTransmissionTest renders; the redundant-call notices are gone
+
+- **DiffuseTransmissionTest** (`C22-R1`) was refused because it REQUIRES KHR_materials_unlit and KHR_lights_punctual.  Both are rendered now (ticket 04 section, commit e8b6399): 22 of 24 models render, 2 are refused
+  (TextureTransformMultiTest and GlamVelvetSofa: non-uniform texture transform, owner "texxform" agent).  Capture `build/f15-corpus-dt/run` (declared rig, 1024x768): exit 0, `status rendered`, the loader prints the known
+  `BLEND rendered opaque` warning only, 0 archive misses after the targeted update (19 misses of 15 pipelines before: the unlit + thin-subsurface union had never been harvested; `.scratch/f15/harvest/loader-misc-2.json`:
+  +17 compute, +3 render, +1 tile descriptors, constant 22), 0 fallback draws, 0 GPU allocations; under API + shader validation (`validate`, archive off): 0 validation messages and 0 notices.  Side by side: the factor row
+  goes from the opaque teal at factor 0 to the transmitted white at factor 1, the colour factor row to red, the stripe and logo textures modulate the transmitted lobe (qualitative, own camera, declared rig sun: the file's
+  directional light is not imported under the rig).  Notes, page text and the research report are updated (tools/f15_corpus_notes.json, tools/f15_corpus_page.py, docs/research/2026-11-14-f15-khronos-corpus-report.md).
+- **KHR_materials_unlit numerically** (tools/f15_unlit_lights_check.py, `build/f15-unlit-lights2`): a flat and a 55-degree tilted unlit panel show their base colour with error 0.00000 (limit 0.002, half-float ulps), the lit
+  panels of the same colours differ by 0.13 / 0.20; the lit twin of the whole file fails the unlit predicate (error 0.17).  GI (tools/f15_unlit_gi_check.py, DDGI, `build/f15-unlit-gi`): an unlit panel lights nothing (wall patch delta
+  +0.00000, noise floor 0.00000) while its emissive twin lights the wall by +0.327; shader validation of the `gi_common.h` edit: 0 messages.  KHR_lights_punctual numerically: directional 0.743 vs 0.764 (Lambert), node turned 180 degrees
+  0.000, grazing 0.003 (disk bound 0.0036), point 0.956 / 0.581 vs 0.978 / 0.600, spot on axis 1.100 vs 1.132, outside the cone 0.000 (all within the declared 6 %; the spot between the cones follows the engine's smoothstep,
+  angular factor 0.60 measured vs 0.616 smoothstep and 0.578 linear, the informative formula of the specification would give 0.334: declared in ticket 04).
+- **The `Redundant call to setDepthStencilState / setViewport` baseline of this ticket (96 + 96 per capture, "known notices") is gone** (commit 65f2f10): the cause was the fused "Visibility opaque B" + "Visibility alpha B"
+  encoder repeating the same two calls; the corpus runner's KNOWN_NOTICE family stays for older binaries.  DiffuseTransmissionTest is the first corpus capture with 0 notices; the other models need the next full corpus run
+  (not repeated here: the orchestrator owns the final corpus run).

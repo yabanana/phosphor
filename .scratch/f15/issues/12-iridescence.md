@@ -182,3 +182,21 @@ combinations with other lobes (composed, unvalidated), `tools/archive_check.sh` 
 - 3 per-light cost + side by side: PARTIAL (static cost 187 flops / 27 transcendentals per film; side by side done in 22; GPU per-light timing never taken, no perf-log or opt-log entry). Open.
 - 4 archive/hitch/O7: MET (+7 descriptors; battery12). Ticked.
 Open: GPU per-light timing; thickness and factor texture numeric fixtures.
+
+## F15 closure, loader-misc (2026-11-15): per-light cost fixtures
+
+Open item "per-light cost, film-free arm" (no timing taken here: other agents run in parallel; the orchestrator measures on a quiet machine).
+
+- New bench scenarios (src/testbench/material_validation.cpp; no reference, no gate, so the runner `tools/f15_check.py` does not list them and `tools/test_f15_check.py` / the C++ mirror test exempt them):
+  `iridescence-cost-nofilm` (the film-free twin of `iridescence-grid-point`: identical spheres, rig, roughness 0.3 copper rows, every sphere keeps the iridescence block, so the feature union is 16 and the
+  specialised pipelines are the same; thickness 0 in all six columns disables the film by the orchestrator's rule of 2026-11-13), `iridescence-cost-lights8` (the grid with EIGHT point lights on the same 9 m arc,
+  250/8 W/sr each: the same total intensity) and `iridescence-cost-nofilm-lights8`.  tests/test_material_validation.cpp pins that the twins differ from the grid only in thickness and light count and that every
+  twin keeps union 16 (negative control: the reference grid is not film-free).
+- tools/f15_costs.py items (A/B/A per replica, 3 replicas, 256 frames, `--gpu-timing-serial`): `t4-iridescence-film-1light-legacy`, `-8lights-legacy`, `-1light-clustered`, `-8lights-clustered`
+  (A = film off, B = film).  The film cost per light is (delta of the 8-light item minus delta of the 1-light item) / 7 on the `Material resolve` pass (legacy) or the DI shading pass (clustered).
+- Exact commands for the orchestrator (quiet machine, `BIN` = the build to measure):
+
+      python3 -I tools/f15_costs.py run --binary $BIN --out build/f15-costs/t4 --only t4-iridescence-film-1light-legacy,t4-iridescence-film-8lights-legacy,t4-iridescence-film-1light-clustered,t4-iridescence-film-8lights-clustered
+      python3 -I tools/f15_costs.py summarize --out build/f15-costs/t4
+
+  (`plan` prints the exact phosphor command lines; the sentinel and A-A noise rules of the script apply.)

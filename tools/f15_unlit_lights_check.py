@@ -305,6 +305,10 @@ def run(out, binary):
         if code != 0:
             print(text[-1500:])
             return 1
+        if notices:
+            # tickets 20 / 22: the fused render encoders must not repeat depth-stencil / viewport calls any more (98 lines per capture before 65f2f10)
+            print(f"FAIL: {notices} 'Redundant call' notices in {name}")
+            return 1
     return verify(out)
 
 

@@ -63,3 +63,19 @@ Roadmap: F15.1, F15.3
 - Tests: test_texture_transform.cpp (pack against the README formula, 20-slot map, store allocate / flag / free / reuse / verify, marker, pipeline
   constant), test_gltf_loader.cpp (UV-set copy, uniform bake on set 1, mixed sets), test_gltf_materials.cpp (required extension, per-slot rendered,
   mixed sets refused), test_material_description.cpp (analysis).
+
+## F15 closure, loader-misc (2026-11-15)
+
+- **Final report schema number: 12.**  `BENCH_REPORT_SCHEMA_VERSION == 12` (src/diagnostics/bench_report.h; 11 -> 12 in 4727b0f, the `materials` section is `phosphor.materials.v2`).  No later ticket bumped it
+  (tickets 05-23 only add fields to the materials/report sections that already exist), and this closure does not either: unlit adds one more `encodings` entry ("unlit"), a value inside the same section.
+  Doctests: tests/test_bench_report.cpp "F15 bench report: schema 12 carries the materials support section only when present" pins the number (`CHECK(BENCH_REPORT_SCHEMA_VERSION == 12)` and the
+  document's `schema_version`), tests/test_launch_options.cpp compares the constant on four report paths, tests/test_gltf_materials.cpp "support report: summary line, detail and JSON" pins
+  `"schema": "phosphor.materials.v2"`.  Ticket-04 box 4 ("schema bump") is therefore closed at 12.
+- **KHR_materials_unlit and KHR_lights_punctual are rendered** (they were "reported unsupported, a model that requires them is refused", decision 02; docs/plans/F15.md line 22 scoped them out and the
+  closure brief overrides it).  Unlit: `lowerUnlit` (emission = base colour, no reflection, features dropped, `MATERIAL_FLAG_UNLIT`), encoding "unlit" Approximated `no_vertex_color_stream`
+  (the specification multiplies the base colour by COLOR_0 when present; the engine has no COLOR_0 stream for ANY material, so lit materials ignore it too; adding it touches GPUVertex, the meshlet
+  and mesh paths and every shader that fetches a vertex: not small, not done).  Lights: `src/scene/gltf_lights.*` and the loader's light import (directional lux and point/spot candela used as
+  W/m2 and W/sr, factor 1, `GltfLoader::setPhotometricToEngine(1/683)` for watts; infinite range = 1e5 m; negative intensity and invalid cones clamped with a warning).  The spot cone falloff is the engine's
+  (smoothstep of cos in the forward, resolve and GI paths, LINEAR in ReSTIR's `restir_common.h`), not the informative formula of the specification (t^2); the extension leaves the blend between the cones
+  implementation-defined.  The ReSTIR / resolve difference is an older inconsistency, reported to the orchestrator (owner decision: unify on one falloff changes every existing spot scene).
+  Commit e8b6399.  Fixtures: tests/test_gltf_unlit_lights.cpp (CPU) and tools/f15_unlit_lights_check.py (GPU), see ticket 22.

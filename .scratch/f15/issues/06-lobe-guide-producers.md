@@ -64,3 +64,24 @@ ddbd504; archive b7cfea0. Batch log: `build/f15-exact/battery06.log`.
 - 3 allocation only for non-empty union, Sponza unchanged: PARTIAL (allocation and visual_check 8/8 0 px, F13 exact 0 px, Sponza +32 768 B = DFG table; per-category report memory not quoted; D2 band not met). Open.
 - 4 archive/hitch: MET (b7cfea0, ddbd504; hitch 0), under API validation only; the shader-validation abort (buffer 3 unbound, 6a64b0e) was found in 08b and fixed in 039e22b. Ticked.
 Open: no coplanar-overlap fixture proving the raster_order_group need (no owner in 07/08); the visibility resolve does not write the guide (pre-resolve kernel covers every meshlet pixel), deviation recorded in commits only.
+
+## F15 closure, loader-misc (2026-11-15): coplanar-overlap fixture for the raster order group
+
+Open item: "no coplanar-overlap fixture proving the raster_order_group need of `forward_di_receiver_guide_fs`".  DONE (with a finding about what the proof needs).
+
+- Fixture `lobe-guide-coplanar` (bench scenario, src/testbench/material_validation.cpp): ONE draw of 16 exactly coplanar, fully overlapping quads (identical positions, so one depth per pixel; a culled back quad
+  gives the scene bounds a z extent, the reflection probe needs it), the vertex normals of layer i tilted by (i - 7.5) x 4 degrees about +X, one coat-only material, sun.  Forced through the overflow receivers
+  with `--debug-meshlets 1 --debug-meshlets-corrupt count` (the meshlet self-check FAILs by design, exit 1, like tools/f15_lobe_guide_overflow_check.sh).  All 16 fragments of a pixel pass the equal-depth test,
+  the colour attachments keep the last, the guide must keep the record of the same fragment: for a coat-only material the coat normal of the guide IS the shading normal of the fragment, and
+  `--debug-lobe-guide 1` compares it with the shading normal of the colour attachments, so it fails when the guide kept another layer.  Runner: `tools/f15_lobe_guide_coplanar_check.py` (4 captures x 20 checked
+  frames, 1280x720, 62 500 pixels per frame covered by the stack); new debug options `--debug-lobe-guide-no-rog` (entry point `forward_di_receiver_guide_norog_fs`: the same body, shared function
+  `diReceiverGuideBody`, without the attribute) and `--debug-lobe-guide-delay` (`DI_LOBE_GUIDE_DELAY`, gpu_types.h bit 12: a bounded data-dependent delay before the write, up to 16 384 dependent fma, longest for
+  the first layer).  Neither is used by the engine.
+- **Result**, `build/f15-coplanar` on the M5 Max: with the raster order group 20 of 20 frames pass with equal cost per fragment and 20 of 20 with the skewed cost; the control WITHOUT the group passes 20 of 20 frames when every
+  fragment costs the same (a first version of this fixture, 4 coplanar instances in four draws, also passed: the hardware completes equal-cost fragments in submission order, so that control proves nothing) and FAILS 20 of 20 frames
+  with the skewed cost, 11 148 to 12 948 mismatching pixels out of 62 500 per frame (the guide of a pixel holds an earlier layer than the colour attachments).  The raster order group is therefore needed whenever overlapping
+  fragments complete out of submission order (different materials, textures, cache misses), and this fixture shows it; it is not needed, and not observable, while their cost is equal.  Fixture failed before: the control
+  (no group) is the "before" state.
+- Criteria were fixed before the delay captures (docstring of the tool): with the group every checked frame passes and at least 32 000 pixels are extended; the control must fail on at least one frame.
+- Tests: tests/test_material_validation.cpp "lobe-guide-coplanar is one mesh of 16 coplanar layers ..." (identical positions, distinct normals, union = coat only), tests/test_launch_options.cpp (the two options need `--debug-lobe-guide`).
+- The visibility resolve still does not write the guide (deviation of ticket 06): the pre-resolve guide kernel covers every meshlet pixel; unchanged.

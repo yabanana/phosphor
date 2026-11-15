@@ -204,3 +204,16 @@ coat/sheen/aniso light branches); metals with weight (rule unit-tested only); vo
 - 3 negative control + support report labels: MET (transmission-front-only control fails; 4727b0f). Ticked.
 - 4 archive/hitch/O7: MET (+17 then +7 descriptors). Ticked.
 Open: GI at -N is DDGI only (c0de265, ticket 19), its cost unmeasured; thin + coat composed on sun and delta lights only (ab42590), thin + sheen/aniso/iridescence/ior refused by the reference; back-lit thin receiver uses standard sun visibility; 8 background compiler calls in restir/clustered captures never explained.
+
+## F15 closure, loader-misc (2026-11-15): the 8 background compiler calls explained
+
+Open item: "8 background compiler calls in restir/clustered captures never explained".  DONE: they are exactly the linked RT compute pipelines, routed through the compiler by policy; there is no archive gap to close.
+
+- `PipelineCache::resolve` (src/platform/metal/pipeline_cache.cpp) sends every COMPUTE pipeline with `linkedFunctions` (the RT kernels linking `rt_alpha_generic` / `rt_alpha_lite`) through the Compiler, never through
+  the archive: "the direct Archive static-link path retained a linked function in the F9 lifetime checks" (comment at the routing line).  They are counted as compiler calls by design, with `archive` NotTried (so they are
+  not archive misses either).  The log now names them (`Pipeline linked compute (compiler by policy, never archived): <label>`).
+- Evidence (`build/f15-irid-smoke/iridescence-grid-point-clustered.log`, 960x540, `--lighting clustered --rt on`): `compiler calls 8 (335.0 ms, max 73.3 ms)`, archive hits 155, misses 0, render-thread compiles 0,
+  and exactly eight such lines: rt_trace_rays, restir_di_shade_rt, light_cluster_shade_rt, reflection_rt, ao_rtao, reflection_capture_rt and light_cluster_shade_rt_lobe at the two feature masks (1 and 511); the ReSTIR
+  runs add restir_di_shade_rt_lobe and reflection_rt_lobe (the Khronos corpus rig, `--lighting restir`, `--reflections rt`: 9 lines, the rest of its 28 calls are archive misses of an unharvested model).  Same count as
+  ticket 07's "6 base RT plus 2 lobe RT on workers".  The compile runs on the utility-QoS workers (335 ms of summed CPU at startup, 0 on the render thread), so it never reaches a frame.
+- Not changed: archiving them again would reintroduce the lifetime retention of ticket F9 (the policy is older than F15 and measured); the cost is startup CPU on workers only.
