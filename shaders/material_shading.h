@@ -66,6 +66,8 @@ static half4 sampleOr(const device TextureHandle *table, uint index, float2 uv, 
     return half4(table[index].tex.sample(kMaterialSampler, uv, gradient2d(dx, dy)));
 }
 
+#include "texture_transform.h"
+
 static float3 evaluateLight(float3 N, float3 V, float3 L, float3 radiance, float3 albedo, float metallic,
                             float roughness) {
     const float3 H = normalize(V + L);
@@ -435,21 +437,23 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
                                   bool omitSpecularAmbient = false, bool physicalGI = false, bool externalDiffuse = false,
                                   float3 environment = float3(0), float sunAngularRadius = 0.0f) {
     const device GPUMaterial &m = materials[in.materialIndex];
+    // F15.1 (ticket 22): the per-slot texture transforms of the material (compiled out without kTextureTransform).
+    const TexXf xf = texXfFor(frame.materialExtensions, m.flags, m.textureTransformIndex);
 
-    const half4 baseTex = sampleOr(textures, m.baseColorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy);
-    const half4 mrTex = sampleOr(textures, m.metallicRoughnessTex, in.uv, half4(1.0h), in.uvDx, in.uvDy);
-    const half4 aoTex = sampleOr(textures, m.occlusionTex, in.uv, half4(1.0h), in.uvDx, in.uvDy);
+    const half4 baseTex = sampleSlot(textures, m.baseColorTex, TT_SLOT_BASE_COLOR, xf, in.uv, half4(1.0h), in.uvDx, in.uvDy);
+    const half4 mrTex = sampleSlot(textures, m.metallicRoughnessTex, TT_SLOT_METAL_ROUGH, xf, in.uv, half4(1.0h), in.uvDx, in.uvDy);
+    const half4 aoTex = sampleSlot(textures, m.occlusionTex, TT_SLOT_OCCLUSION, xf, in.uv, half4(1.0h), in.uvDx, in.uvDy);
     // EMISSIVE == false: no material of the scene emits, so the texture fetch
     // is skipped.  The multiply-add below stays unconditional on purpose: a
     // branch around it changes the compiler's contraction of the generic
     // pipeline by 1 LSB in some pixels (measured), and adding factor(0) * 1
     // leaves the result exact.
     const half4 emTex = (kEmissive && (kResolveClass == 4u || (kResolveClass & 2u) != 0u))
-                            ? sampleOr(textures, m.emissiveTex, in.uv, half4(1.0h), in.uvDx, in.uvDy)
+                            ? sampleSlot(textures, m.emissiveTex, TT_SLOT_EMISSIVE, xf, in.uv, half4(1.0h), in.uvDx, in.uvDy)
                             : half4(1.0h);
     const half4 nTex =
         (kResolveClass == 4u || (kResolveClass & 1u) != 0u)
-            ? sampleOr(textures, m.normalTex, in.uv, half4(0.5h, 0.5h, 1.0h, 1.0h), in.uvDx, in.uvDy)
+            ? sampleSlot(textures, m.normalTex, TT_SLOT_NORMAL, xf, in.uv, half4(0.5h, 0.5h, 1.0h, 1.0h), in.uvDx, in.uvDy)
             : (m.normalTex == INVALID_TEXTURE_INDEX ? half4(0.5h, 0.5h, 1.0h, 1.0h)
                                                     : half4(half(128.0f / 255.0f), half(128.0f / 255.0f), 1.0h, 1.0h));
 
@@ -518,9 +522,9 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     float transFactor = 0.0f, volThickness = 0.0f, volAttenuationDistance = INFINITY;
     float3 volAttenuationColor = float3(1.0f);
     if (transOn) {
-        transFactor = saturate(e1.transmissionFactor * float(sampleOr(textures, e1.transmissionTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).r));
+        transFactor = saturate(e1.transmissionFactor * float(sampleSlot(textures, e1.transmissionTex, TT_SLOT_TRANSMISSION, xf, in.uv, half4(1.0h), in.uvDx, in.uvDy).r));
         if (volOn) {
-            volThickness = e1.volumeThickness * float(sampleOr(textures, e1.volumeThicknessTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).g) * in.volumeScale;
+            volThickness = e1.volumeThickness * float(sampleSlot(textures, e1.volumeThicknessTex, TT_SLOT_VOLUME_THICKNESS, xf, in.uv, half4(1.0h), in.uvDx, in.uvDy).g) * in.volumeScale;
             volAttenuationColor = float3(e1.attenuationColor[0], e1.attenuationColor[1], e1.attenuationColor[2]);
             volAttenuationDistance = e1.attenuationDistance;
         }
@@ -530,11 +534,11 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     // film (strength 0 = the base model, the orchestrator's interpretation of the unspecified d = 0).
     BsdfIrid irid = bsdfIridNone();
     if (iridOn) {
-        const float t = float(sampleOr(textures, e1.iridescenceThicknessTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).g);
+        const float t = float(sampleSlot(textures, e1.iridescenceThicknessTex, TT_SLOT_IRIDESCENCE_THICKNESS, xf, in.uv, half4(1.0h), in.uvDx, in.uvDy).g);
         irid.thickness = e1.iridescenceThicknessMin * (1.0f - t) + e1.iridescenceThicknessMax * t;
         irid.ior = e1.iridescenceIor;
         irid.strength = irid.thickness > 0.0f
-                            ? saturate(e1.iridescenceFactor * float(sampleOr(textures, e1.iridescenceFactorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).r))
+                            ? saturate(e1.iridescenceFactor * float(sampleSlot(textures, e1.iridescenceFactorTex, TT_SLOT_IRIDESCENCE, xf, in.uv, half4(1.0h), in.uvDx, in.uvDy).r))
                             : 0.0f;
     }
     // F15.1 (ticket 16/17): subsurface (record 2), same gating.  Mode 0 = thin; mode 1 = volumetric: its weight, colour and profile
@@ -549,29 +553,29 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     if (thinOn) {
         e2 = *reinterpret_cast<const device GPUMaterialExt2*>(frame.materialExtensions + m.extensionIndex + 2u);
         if (e2.mode == 0u || e2.mode == 1u) {
-            thin.weight = saturate(e2.weight * float(sampleOr(textures, e2.weightTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).a));
+            thin.weight = saturate(e2.weight * float(sampleSlot(textures, e2.weightTex, TT_SLOT_SUBSURFACE_WEIGHT, xf, in.uv, half4(1.0h), in.uvDx, in.uvDy).a));
             thin.color = float3(e2.color[0], e2.color[1], e2.color[2]) *
-                         float3(sampleOr(textures, e2.colorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).rgb);
+                         float3(sampleSlot(textures, e2.colorTex, TT_SLOT_SUBSURFACE_COLOR, xf, in.uv, half4(1.0h), in.uvDx, in.uvDy).rgb);
             thinResolved = e2.mode == 0u;
             volResolved = e2.mode == 1u;
         }
     }
     CoatParams coat{0.0f, 0.04f, float3(0.0f)};
     if (coatOn) {
-        coat.factor = saturate(e0.clearcoatFactor * float(sampleOr(textures, e0.clearcoatFactorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).r));
-        coat.roughness = clamp(e0.clearcoatRoughness * float(sampleOr(textures, e0.clearcoatRoughnessTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).g), 0.04f, 1.0f);
+        coat.factor = saturate(e0.clearcoatFactor * float(sampleSlot(textures, e0.clearcoatFactorTex, TT_SLOT_COAT, xf, in.uv, half4(1.0h), in.uvDx, in.uvDy).r));
+        coat.roughness = clamp(e0.clearcoatRoughness * float(sampleSlot(textures, e0.clearcoatRoughnessTex, TT_SLOT_COAT_ROUGHNESS, xf, in.uv, half4(1.0h), in.uvDx, in.uvDy).g), 0.04f, 1.0f);
     }
     SheenParams sheen{float3(0.0f), 0.07f};
     if (sheenOn) {
         sheen.color = float3(e0.sheenColor[0], e0.sheenColor[1], e0.sheenColor[2]) *
-                      float3(sampleOr(textures, e0.sheenColorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).rgb);
-        sheen.roughness = bsdfSheenRoughness(e0.sheenRoughness * float(sampleOr(textures, e0.sheenRoughnessTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).a));
+                      float3(sampleSlot(textures, e0.sheenColorTex, TT_SLOT_SHEEN_COLOR, xf, in.uv, half4(1.0h), in.uvDx, in.uvDy).rgb);
+        sheen.roughness = bsdfSheenRoughness(e0.sheenRoughness * float(sampleSlot(textures, e0.sheenRoughnessTex, TT_SLOT_SHEEN_ROUGHNESS, xf, in.uv, half4(1.0h), in.uvDx, in.uvDy).a));
     }
     if (specExt) {
         const float specularWeight =
-            e0.specularFactor * float(sampleOr(textures, e0.specularTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).a);
+            e0.specularFactor * float(sampleSlot(textures, e0.specularTex, TT_SLOT_SPECULAR, xf, in.uv, half4(1.0h), in.uvDx, in.uvDy).a);
         const float3 specularColor = float3(e0.specularColor[0], e0.specularColor[1], e0.specularColor[2]) *
-                                     float3(sampleOr(textures, e0.specularColorTex, in.uv, half4(1.0h), in.uvDx, in.uvDy).rgb);
+                                     float3(sampleSlot(textures, e0.specularColorTex, TT_SLOT_SPECULAR_COLOR, xf, in.uv, half4(1.0h), in.uvDx, in.uvDy).rgb);
         spec = bsdfSpecularParams(e0.ior, specularWeight, specularColor);
         lobeIor = e0.ior;
         lobeSpecularWeight = specularWeight;
@@ -593,22 +597,28 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         const float3 Tn = normalize(T);
         const float3 B = cross(N, Tn) * in.tangent.w;
         if (anisoOn) {
-            const float4 at = float4(sampleOr(textures, e1.anisotropyTex, in.uv, half4(1.0h, 0.5h, 1.0h, 1.0h), in.uvDx, in.uvDy));
+            const float4 at = float4(sampleSlot(textures, e1.anisotropyTex, TT_SLOT_ANISOTROPY, xf, in.uv, half4(1.0h, 0.5h, 1.0h, 1.0h), in.uvDx, in.uvDy));
             float2 d = at.xy * 2.0f - 1.0f;
             const float dl = length(d);
             d = dl > 1e-6f ? d / dl : float2(1.0f, 0.0f);
             const float cs = cos(e1.anisotropyRotation), sn = sin(e1.anisotropyRotation);
-            anisoDir = Tn * (cs * d.x - sn * d.y) + B * (sn * d.x + cs * d.y);
+            float3 Ta = Tn, Ba = B; // the frame of the anisotropy texture slot (rotated with its KHR_texture_transform)
+            texXfFrame(xf, TT_SLOT_ANISOTROPY, Ta, Ba);
+            anisoDir = Ta * (cs * d.x - sn * d.y) + Ba * (sn * d.x + cs * d.y);
             anisoStrength = saturate(e1.anisotropyStrength * at.z);
         }
         float3 tn = float3(nTex.xyz) * 2.0 - 1.0;
         tn.xy *= m.normalScale;
         if (layersOn) tn = layerTn;
-        N = normalize(Tn * tn.x + B * tn.y + N * tn.z);
+        float3 Tm = Tn, Bm = B; // the frame of the normal texture slot (rotated with its KHR_texture_transform)
+        texXfFrame(xf, TT_SLOT_NORMAL, Tm, Bm);
+        N = normalize(Tm * tn.x + Bm * tn.y + N * tn.z);
         if (coatOn && e0.clearcoatNormalTex != INVALID_TEXTURE_INDEX) {
-            float3 cn = float3(sampleOr(textures, e0.clearcoatNormalTex, in.uv, half4(0.5h, 0.5h, 1.0h, 1.0h), in.uvDx, in.uvDy).xyz) * 2.0 - 1.0;
+            float3 cn = float3(sampleSlot(textures, e0.clearcoatNormalTex, TT_SLOT_COAT_NORMAL, xf, in.uv, half4(0.5h, 0.5h, 1.0h, 1.0h), in.uvDx, in.uvDy).xyz) * 2.0 - 1.0;
             cn.xy *= e0.clearcoatNormalScale;
-            coat.normal = normalize(Tn * cn.x + B * cn.y + N0 * cn.z);
+            float3 Tc = Tn, Bc = B;
+            texXfFrame(xf, TT_SLOT_COAT_NORMAL, Tc, Bc);
+            coat.normal = normalize(Tc * cn.x + Bc * cn.y + N0 * cn.z);
         } else coat.normal = N0;
     } else coat.normal = N0;
 

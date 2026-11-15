@@ -164,6 +164,11 @@ public:
     /// F15.1: OR of the feature bits (MaterialFeature bit values, unshifted) of
     /// the live materials; 0 for a scene without features (Sponza, benches).
     [[nodiscard]] u32 featureUnion() const;
+    /// F15.1 (ticket 22): a live material carries per-slot KHR_texture_transform data (MATERIAL_FLAG_TEXTURE_TRANSFORM): the scene's
+    /// shading pipelines compile the transform (reserved constant TEXTURE_TRANSFORM); false for Sponza and every featureless scene.
+    [[nodiscard]] bool textureTransformInUse() const;
+    /// featureUnion() with FEATURE_UNION_TEXTURE_TRANSFORM or-ed in when textureTransformInUse(): what FeaturePipelines::serve takes.
+    [[nodiscard]] u32 pipelineFeatureUnion() const { return featureUnion() | (textureTransformInUse() ? FEATURE_UNION_TEXTURE_TRANSFORM : 0u); }
     /// F15.1 (ticket 17): a live material carries the subsurface feature in VOLUMETRIC mode (record 2 mode 1) with a weight above 0 (or a
     /// weight texture): the scene needs the diffuse-irradiance target and the diffusion pass.
     [[nodiscard]] bool volumetricSubsurface() const;

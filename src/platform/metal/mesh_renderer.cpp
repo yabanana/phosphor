@@ -362,7 +362,7 @@ void MeshRenderer::prepareFrame(const SceneStore& store, const GpuScene& scene, 
             options_.debugView == MeshletDebugView::Meshlets || options_.debugView == MeshletDebugView::Cull;
         // F15.1: the scene's feature union specialises the meshlet forward pipeline too.
         const pipe::PipelineHandle served = featurePipelines_.serve(
-            pipelines_, options_.genericOnly ? 1000u : vi, handle, scene_.featureUnion(), [&] {
+            pipelines_, options_.genericOnly ? 1000u : vi, handle, scene_.pipelineFeatureUnion(), [&] {
                 return meshDesc(options_.genericOnly
                                     ? pipe::forward::genericDesc(rg::Format::BGRA8Srgb)
                                     : pipe::forward::pipelineDesc(pipe::forward::variantAt(vi), rg::Format::BGRA8Srgb,

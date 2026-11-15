@@ -147,6 +147,9 @@ public:
     [[nodiscard]] u32 forwardVariantIndex() const { return variantIndex_; }
     /// F15.1: feature union of the frame's scene (SceneStore::featureUnion), for the other renderers.
     [[nodiscard]] u32 featureUnion() const { return featureUnion_; }
+    /// F15.1 (ticket 22): featureUnion() with FEATURE_UNION_TEXTURE_TRANSFORM when a live material has per-slot transforms.
+    [[nodiscard]] u32 pipelineFeatureUnion() const { return pipelineUnion_; }
+    [[nodiscard]] bool textureTransformInUse() const { return (pipelineUnion_ & FEATURE_UNION_TEXTURE_TRANSFORM) != 0u; }
     [[nodiscard]] MTL::DepthStencilState* depthState() const { return depthState_; }
     void countCommands(u32 n) const { count(0, n); }
 
@@ -182,7 +185,7 @@ private:
     pipe::PipelineHandle      generic_ = pipe::INVALID_PIPELINE;
     std::vector<pipe::PipelineHandle> variants_;
     FeaturePipelines          featurePipelines_;
-    u32                       featureUnion_ = 0;
+    u32                       featureUnion_ = 0, pipelineUnion_ = 0;
     MTL::RenderPipelineState* pipeline_ = nullptr;
     bool                      usingFallback_ = false;
     MTL::DepthStencilState*   depthState_ = nullptr;

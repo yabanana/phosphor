@@ -349,7 +349,11 @@ GltfMaterialParse parseGltfMaterial(const tinygltf::Material& material, const Gl
         d.subsurface = s;
     }
 
-    info.transformStatus = analyzeTextureTransforms(d).status;
+    {
+        const auto analysis = analyzeTextureTransforms(d);
+        info.transformStatus = analysis.status;
+        info.transformReason = analysis.reason;
+    }
 
     for (const std::string& problem : validate(d)) info.warnings.push_back("invalid value: " + problem);
     for (const std::string& note : validationWarnings(d)) info.warnings.push_back(note);
@@ -387,12 +391,12 @@ std::vector<RequiredExtensionProblem> unsupportedRequiredExtensions(const tinygl
         } else if (!isExtensionRendered(name, table)) {
             out.push_back({name, "parsed, but its feature is not rendered yet"});
         } else if (name == EXT_TEXTURE_TRANSFORM) {
-            // Only uniform transforms are baked into UV0.
+            // Uniform transforms are baked into UV0, per-slot ones are evaluated on the GPU; a material mixing UV sets is not rendered.
             for (size_t i = 0; i < model.materials.size(); ++i) {
                 const auto parsed = parseGltfMaterial(model.materials[i], [](int index, bool) { return static_cast<u32>(index); });
-                if (parsed.info.transformStatus == TextureTransformStatus::NonUniform) {
+                if (parsed.info.transformStatus == TextureTransformStatus::Unsupported) {
                     out.push_back({name, "material " + std::to_string(i) + " ('" + model.materials[i].name +
-                                             "') has a non-uniform transform"});
+                                             "') cannot be rendered: " + analyzeTextureTransforms(parsed.description).reason});
                     break;
                 }
             }

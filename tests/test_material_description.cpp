@@ -241,8 +241,8 @@ TEST_CASE("material description: texture transform analysis") {
     UvTransform t;
     t.scale = {2.0f, 2.0f};
     d.base.baseColorTexture.transform = t;
-    // Another present texture without the transform: not uniform.
-    CHECK(analyzeTextureTransforms(d).status == TextureTransformStatus::NonUniform);
+    // Another present texture without the transform: per-slot (F15.1 ticket 22: evaluated on the GPU).
+    CHECK(analyzeTextureTransforms(d).status == TextureTransformStatus::PerSlot);
     d.base.normalTexture.transform = t;
     const auto uniform = analyzeTextureTransforms(d);
     CHECK(uniform.status == TextureTransformStatus::Uniform);
@@ -251,11 +251,23 @@ TEST_CASE("material description: texture transform analysis") {
     UvTransform other = t;
     other.offset = {0.1f, 0.0f};
     d.base.normalTexture.transform = other;
-    CHECK(analyzeTextureTransforms(d).status == TextureTransformStatus::NonUniform);
+    CHECK(analyzeTextureTransforms(d).status == TextureTransformStatus::PerSlot);
 
+    // A common non-zero UV set is not an error (the loader copies it into UV0); mixed sets are.
     d.base.normalTexture.transform = t;
     d.base.normalTexture.texCoord = 1;
-    CHECK(analyzeTextureTransforms(d).status == TextureTransformStatus::NonUniform);
+    const auto mixed = analyzeTextureTransforms(d);
+    CHECK(mixed.status == TextureTransformStatus::Unsupported);
+    CHECK_FALSE(mixed.reason.empty());
+    d.base.baseColorTexture.texCoord = 1;
+    const auto common = analyzeTextureTransforms(d);
+    CHECK(common.status == TextureTransformStatus::Uniform);
+    CHECK(common.uvSet == 1u);
+    d.base.baseColorTexture.transform.reset();
+    d.base.normalTexture.transform.reset();
+    const auto plain = analyzeTextureTransforms(d);
+    CHECK(plain.status == TextureTransformStatus::None);
+    CHECK(plain.uvSet == 1u);
 }
 
 TEST_CASE("material description: forEachTexture visits feature slots") {

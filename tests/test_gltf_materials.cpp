@@ -464,10 +464,38 @@ TEST_CASE("glTF materials: KHR_texture_transform parsing and uniform analysis") 
             }
         CHECK(found);
     }
-    SUBCASE("a transform applied to only one texture is unsupported for that material") {
+    SUBCASE("a transform applied to only one texture is evaluated per slot") {
         const auto p = parseOne(R"({"pbrMetallicRoughness":{"baseColorTexture":{"index":0,
             "extensions":{"KHR_texture_transform":{"scale":[2,2]}}}},"normalTexture":{"index":1}})");
-        CHECK(p.info.transformStatus == TextureTransformStatus::NonUniform);
+        CHECK(p.info.transformStatus == TextureTransformStatus::PerSlot);
+        const auto report = buildSupportReport(p.description, p.info);
+        bool found = false;
+        for (const auto& f : report.encodings)
+            if (f.feature == "texture_transform") {
+                found = true;
+                CHECK(f.level == SupportLevel::Implemented);
+            }
+        CHECK(found);
+    }
+    SUBCASE("different transforms on extension textures are evaluated per slot") {
+        const auto p = parseOne(R"({"pbrMetallicRoughness":{"baseColorTexture":{"index":0,
+            "extensions":{"KHR_texture_transform":{"scale":[2,2]}}}},
+            "extensions":{"KHR_materials_clearcoat":{"clearcoatFactor":1,"clearcoatTexture":{"index":1,
+            "extensions":{"KHR_texture_transform":{"scale":[4,4]}}}}}})");
+        CHECK(p.info.transformStatus == TextureTransformStatus::PerSlot);
+    }
+    SUBCASE("a texCoord override to another UV set: the set is copied into UV0 (single set per material)") {
+        const auto p = parseOne(R"({"pbrMetallicRoughness":{"baseColorTexture":{"index":0,
+            "extensions":{"KHR_texture_transform":{"scale":[2,2],"texCoord":1}}}}})");
+        CHECK(p.description.base.baseColorTexture.texCoord == 1u);
+        CHECK(p.info.transformStatus == TextureTransformStatus::Uniform);
+        CHECK(analyzeTextureTransforms(p.description).uvSet == 1u);
+    }
+    SUBCASE("two UV sets inside one material are unsupported and say why") {
+        const auto p = parseOne(R"({"pbrMetallicRoughness":{"baseColorTexture":{"index":0,
+            "extensions":{"KHR_texture_transform":{"scale":[2,2],"texCoord":1}}}},"normalTexture":{"index":1}})");
+        CHECK(p.info.transformStatus == TextureTransformStatus::Unsupported);
+        CHECK_FALSE(p.info.transformReason.empty());
         const auto report = buildSupportReport(p.description, p.info);
         bool found = false;
         for (const auto& f : report.encodings)
@@ -477,19 +505,6 @@ TEST_CASE("glTF materials: KHR_texture_transform parsing and uniform analysis") 
             }
         CHECK(found);
         CHECK_FALSE(report.warnings.empty());
-    }
-    SUBCASE("different transforms on extension textures are unsupported") {
-        const auto p = parseOne(R"({"pbrMetallicRoughness":{"baseColorTexture":{"index":0,
-            "extensions":{"KHR_texture_transform":{"scale":[2,2]}}}},
-            "extensions":{"KHR_materials_clearcoat":{"clearcoatFactor":1,"clearcoatTexture":{"index":1,
-            "extensions":{"KHR_texture_transform":{"scale":[4,4]}}}}}})");
-        CHECK(p.info.transformStatus == TextureTransformStatus::NonUniform);
-    }
-    SUBCASE("a texCoord override to another UV set is not bakeable") {
-        const auto p = parseOne(R"({"pbrMetallicRoughness":{"baseColorTexture":{"index":0,
-            "extensions":{"KHR_texture_transform":{"scale":[2,2],"texCoord":1}}}}})");
-        CHECK(p.description.base.baseColorTexture.texCoord == 1u);
-        CHECK(p.info.transformStatus == TextureTransformStatus::NonUniform);
     }
     SUBCASE("no transform: not reported") {
         const auto p = parseOne(R"({"pbrMetallicRoughness":{"baseColorTexture":{"index":0}}})");
@@ -565,22 +580,23 @@ TEST_CASE("glTF extensions: required extensions must be rendered, not merely par
               "extensions":{"KHR_texture_transform":{"scale":[2,2]}}}}}]})");
         CHECK(unsupportedRequiredExtensions(m).empty());
     }
-    SUBCASE("a required KHR_texture_transform with a non-uniform transform is refused") {
+    SUBCASE("a required KHR_texture_transform with per-slot transforms is rendered (F15.1 ticket 22)") {
         const auto m = loadModel(R"({"asset":{"version":"2.0"},
             "extensionsUsed":["KHR_texture_transform"],"extensionsRequired":["KHR_texture_transform"],
             "materials":[{"name":"mixed","pbrMetallicRoughness":{"baseColorTexture":{"index":0,
               "extensions":{"KHR_texture_transform":{"scale":[2,2]}}}},"normalTexture":{"index":1}}]})");
+        CHECK(unsupportedRequiredExtensions(m).empty());
+    }
+    SUBCASE("a required KHR_texture_transform on a material that mixes UV sets is refused and says why") {
+        const auto m = loadModel(R"({"asset":{"version":"2.0"},
+            "extensionsUsed":["KHR_texture_transform"],"extensionsRequired":["KHR_texture_transform"],
+            "materials":[{"name":"twosets","pbrMetallicRoughness":{"baseColorTexture":{"index":0,"texCoord":1,
+              "extensions":{"KHR_texture_transform":{"scale":[2,2]}}}},"normalTexture":{"index":1}}]})");
         const auto bad = unsupportedRequiredExtensions(m);
         REQUIRE(bad.size() == 1);
         CHECK(bad[0].name == "KHR_texture_transform");
-        CHECK(bad[0].reason.find("non-uniform") != std::string::npos);
-        CHECK(bad[0].reason.find("mixed") != std::string::npos);
-    }
-    SUBCASE("a non-uniform transform is fine when the extension is only optional") {
-        const auto m = loadModel(R"({"asset":{"version":"2.0"},"extensionsUsed":["KHR_texture_transform"],
-            "materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0,
-              "extensions":{"KHR_texture_transform":{"scale":[2,2]}}}},"normalTexture":{"index":1}}]})");
-        CHECK(unsupportedRequiredExtensions(m).empty());
+        CHECK(bad[0].reason.find("UV sets") != std::string::npos);
+        CHECK(bad[0].reason.find("twosets") != std::string::npos);
     }
     SUBCASE("unsupported required extensions are named") {
         for (const char* name : {"KHR_materials_unlit", "KHR_lights_punctual", "KHR_draco_mesh_compression",

@@ -40,6 +40,7 @@ struct MaterialSupportTable {
     FeatureSupportEntry base;               // glTF core metallic-roughness
     FeatureSupportEntry emissiveStrength;   // KHR_materials_emissive_strength (folded)
     FeatureSupportEntry textureTransformUniform; // baked into UV0 when uniform per material
+    FeatureSupportEntry textureTransformPerSlot; // F15.1 (ticket 22): per-slot transforms evaluated on the GPU
 };
 
 /// The table of this build.
@@ -53,6 +54,7 @@ struct MaterialSourceInfo {
     std::vector<std::string> unknownExtensions; // those the loader does not parse
     bool                     emissiveStrengthUsed = false;
     TextureTransformStatus   transformStatus = TextureTransformStatus::None;
+    std::string              transformReason; // why the status is Unsupported
     std::vector<std::string> warnings;          // parse problems, validation messages
 };
 

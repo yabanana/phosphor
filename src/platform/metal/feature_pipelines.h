@@ -35,11 +35,15 @@ public:
     template <typename MakeDesc>
     pipe::PipelineHandle serve(PipelineCache& cache, u32 slot, pipe::PipelineHandle base, u32 mask, MakeDesc&& makeDesc) {
         if (mask == 0) return base;
+        // F15.1 (ticket 22): FEATURE_UNION_TEXTURE_TRANSFORM rides on the mask (SceneStore::pipelineFeatureUnion): the lobe bits keep
+        // their meaning, the marker becomes the TEXTURE_TRANSFORM constant of the specialised and of the all-lobes pipeline.
+        const u32 lobes = mask & MATERIAL_FEATURES_ALL;
+        const u32 tt = mask & FEATURE_UNION_TEXTURE_TRANSFORM;
         const pipe::PipelineHandle spec = handleFor(cache, slot, mask, makeDesc);
         if (cache.isFinal(spec)) return spec;
         pipe::PipelineHandle all = pipe::INVALID_PIPELINE;
-        if (mask != MATERIAL_FEATURES_ALL) {
-            all = handleFor(cache, slot, MATERIAL_FEATURES_ALL, makeDesc);
+        if (lobes != 0 && lobes != MATERIAL_FEATURES_ALL) {
+            all = handleFor(cache, slot, MATERIAL_FEATURES_ALL | tt, makeDesc);
             if (cache.isFinal(all)) return all;
         }
         // Render pipelines get a flexible fallback object while they compile;
@@ -62,7 +66,9 @@ private:
         const u64 key = (u64(slot) << 32) | mask;
         auto it = handles_.find(key);
         if (it == handles_.end()) {
-            it = handles_.emplace(key, cache.request(pipe::forward::withMaterialFeatures(makeDesc(), mask))).first;
+            pipe::PipelineDesc desc = pipe::forward::withMaterialFeatures(makeDesc(), mask & MATERIAL_FEATURES_ALL);
+            if (mask & FEATURE_UNION_TEXTURE_TRANSFORM) desc = pipe::forward::withTextureTransform(desc);
+            it = handles_.emplace(key, cache.request(desc)).first;
         }
         return it->second;
     }

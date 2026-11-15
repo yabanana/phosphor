@@ -25,6 +25,14 @@ using MaterialExtGroup = std::array<GPUMaterialExtRecord, MATERIAL_EXT_RECORDS>;
 /// iridescence/transmission/volume, subsurface, layer stack).
 [[nodiscard]] MaterialExtGroup packMaterialExtensions(const MaterialDescription& desc);
 
+/// F15.1 (ticket 22): the transform block of a material with per-slot KHR_texture_transform (status PerSlot): MATERIAL_TT_RECORDS
+/// records, slot s at record s / 3.  Absent or identity slots keep a zero record entry and no mask bit.
+using TextureTransformBlock = std::array<GPUMaterialExtRecord, MATERIAL_TT_RECORDS>;
+[[nodiscard]] bool needsTextureTransformBlock(const MaterialDescription& desc);
+[[nodiscard]] TextureTransformBlock packTextureTransforms(const MaterialDescription& desc);
+/// uv' = M uv + o with the matrices of the KHR_texture_transform README (computed in double, stored as float).
+[[nodiscard]] GPUTextureTransform makeGpuTextureTransform(const UvTransform& t);
+
 /// Typed view of a record (copy; the layouts are scalars only).
 template <typename T>
 [[nodiscard]] T unpackExtRecord(const GPUMaterialExtRecord& r) {

@@ -195,7 +195,11 @@ bool GpuScene::setMaterialDescription(u32 index, const MaterialDescription& d) {
     info.unknownExtensions = materialSupport_[index].unknownExtensions;
     for (const FeatureSupport& e : materialSupport_[index].encodings)
         if (e.feature == "emissive_strength") info.emissiveStrengthUsed = true;
-    info.transformStatus = analyzeTextureTransforms(d).status;
+    {
+        const auto analysis = analyzeTextureTransforms(d);
+        info.transformStatus = analysis.status;
+        info.transformReason = analysis.reason;
+    }
     info.warnings        = validationWarnings(d);
     materialSupport_[index] = buildSupportReport(d, info);
     return true;

@@ -312,13 +312,24 @@ MeshHandle GltfLoader::processPrimitive(const tinygltf::Model& model,
     }
     if (!hasUVs) geom.uvs.assign(vertexCount, glm::vec2{0.0f});
 
-    // KHR_texture_transform: when every texture of the primitive's material
-    // shares one transform on UV0 it is baked into UV0 (affine maps commute
-    // with interpolation); otherwise the support report marks it unsupported
-    // and UVs stay untouched.
-    if (hasUVs && prim.material >= 0 && prim.material < static_cast<int>(model.materials.size())) {
+    // KHR_texture_transform and texCoord (F15.1 ticket 22).  The engine has ONE UV stream per mesh (UV0), so the UV set that every
+    // texture of the primitive's material samples (glTF texCoord, usually 0) is copied into UV0 when it is another one; a material
+    // that mixes UV sets is reported unsupported and keeps UV0.  A transform shared by every texture of the material is baked into
+    // UV0 (affine maps commute with interpolation: exact); anything else (slots that differ, transformed and plain slots mixed) is
+    // evaluated per slot on the GPU from the material's transform block and leaves the UVs untouched.
+    if (prim.material >= 0 && prim.material < static_cast<int>(model.materials.size())) {
         const auto analysis = analyzeTextureTransforms(parsedMaterial(model, prim.material).description);
-        if (analysis.status == TextureTransformStatus::Uniform) bakeUvTransform(analysis.transform, geom.uvs);
+        if (analysis.status != TextureTransformStatus::Unsupported && analysis.uvSet != 0) {
+            const std::string name = "TEXCOORD_" + std::to_string(analysis.uvSet);
+            if (auto it = prim.attributes.find(name); it != prim.attributes.end()) {
+                auto set = readAccessor<glm::vec2>(model, it->second);
+                if (set.size() == vertexCount) {
+                    geom.uvs = std::move(set);
+                    hasUVs   = true;
+                }
+            }
+        }
+        if (hasUVs && analysis.status == TextureTransformStatus::Uniform) bakeUvTransform(analysis.transform, geom.uvs);
     }
 
     // Indices (generate sequential ones for non-indexed primitives)

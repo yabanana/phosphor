@@ -29,7 +29,7 @@ TEST_CASE("extension records: sizes and offsets are frozen") {
     CHECK(MATERIAL_FEATURE_SHIFT == 8);
     CHECK(offsetof(GPUMaterial, flags) == 68);
     CHECK(offsetof(GPUMaterial, extensionIndex) == 72);
-    CHECK(offsetof(GPUMaterial, pad1) == 76);
+    CHECK(offsetof(GPUMaterial, textureTransformIndex) == 76);
 
     CHECK(offsetof(GPUMaterialExt0, ior) == 0);
     CHECK(offsetof(GPUMaterialExt0, specularFactor) == 4);

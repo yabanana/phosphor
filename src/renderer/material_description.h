@@ -294,17 +294,25 @@ void forEachTexture(MaterialDescription& desc,
 void forEachTexture(const MaterialDescription& desc,
                     const std::function<void(const char* slot, const MaterialTextureRef&)>& fn);
 
-/// Uniform texture transform analysis (KHR_texture_transform).
+/// KHR_texture_transform analysis of one material.
 enum class TextureTransformStatus : u8 {
     None,        // no texture carries a transform
-    Uniform,     // every present texture shares one transform on UV0
-    NonUniform,  // transforms differ, mix transformed and plain textures or use another UV set
+    Uniform,     // every present texture shares one transform: baked into the mesh UVs by the loader
+    PerSlot,     // slots differ, or transformed and plain slots mix: per-slot transforms on the GPU (F15.1 ticket 22)
+    Unsupported, // see TextureTransformAnalysis::reason
 };
 struct TextureTransformAnalysis {
     TextureTransformStatus status = TextureTransformStatus::None;
     UvTransform            transform; // valid when Uniform
+    /// The UV set (glTF texCoord) every present texture of the material samples; the loader copies that set into UV0.
+    /// Meaningful unless status is Unsupported because of mixed sets.
+    u32                    uvSet = 0;
+    std::string            reason; // when Unsupported
 };
 [[nodiscard]] TextureTransformAnalysis analyzeTextureTransforms(const MaterialDescription& desc);
+
+/// TT_SLOT_* of a texture slot name of forEachTexture, or ~0u for a slot that has no GPU transform (layer mask / height textures).
+[[nodiscard]] u32 textureTransformSlot(const char* slotName);
 
 /// uv' = T * R * S * uv with the matrices of the KHR_texture_transform README.
 [[nodiscard]] std::array<float, 2> applyUvTransform(const UvTransform& t, float u, float v);

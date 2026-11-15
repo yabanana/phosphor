@@ -58,6 +58,9 @@ PHOSPHOR_GPU_CONSTANT u32 INVALID_TEXTURE_INDEX = 0xFFFFFFFFu;
 // DOUBLE_SIDED: glTF `doubleSided`; back-face culling is disabled for the
 // material and back faces are lit with the flipped normal.
 PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_DOUBLE_SIDED = 1u << 0;
+/// F15.1 (ticket 22): the material carries per-slot KHR_texture_transform data: GPUMaterial::textureTransformIndex is the first of
+/// the MATERIAL_TT_RECORDS records of its transform block in the extension buffer (GPUTextureTransformRecord).
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_TEXTURE_TRANSFORM = 1u << 1;
 
 // F15.1 (ticket 05): material FEATURE bits live in GPUMaterial::flags from bit
 // MATERIAL_FEATURE_SHIFT: bit (8 + MaterialFeature value) is set while the
@@ -77,6 +80,10 @@ PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_SUBSURFACE   = 1u << 7;
 PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_LAYERS       = 1u << 8;
 /// Every feature bit: the value of the all-lobes reference pipeline.
 PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURES_ALL         = (1u << 9) - 1u;
+/// F15.1 (ticket 22), HOST ONLY: marker or-ed into the feature union handed to FeaturePipelines::serve when a live material carries
+/// per-slot texture transforms (SceneStore::pipelineFeatureUnion).  Never a MATERIAL_FEATURES constant value: serve() strips it and sets
+/// the reserved constant TEXTURE_TRANSFORM instead.  Outside MATERIAL_FEATURES_ALL.
+PHOSPHOR_GPU_CONSTANT u32 FEATURE_UNION_TEXTURE_TRANSFORM = 1u << 31;
 /// GPUMaterial::extensionIndex of a material without an extension group.
 PHOSPHOR_GPU_CONSTANT u32 MATERIAL_EXTENSION_INVALID    = 0xFFFFFFFFu;
 /// Records of the extension group of one extended material (fixed, so
@@ -98,7 +105,7 @@ struct GPUMaterial {
     float alphaCutoff;
     u32 flags;                 // MATERIAL_FLAG_* | feature bits << MATERIAL_FEATURE_SHIFT
     u32 extensionIndex;        // first of the MATERIAL_EXT_RECORDS extension records, or MATERIAL_EXTENSION_INVALID
-    u32 pad1;
+    u32 textureTransformIndex; // F15.1 (ticket 22): first record of the transform block when MATERIAL_FLAG_TEXTURE_TRANSFORM is set, else 0
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterial) == 80, "GPUMaterial layout");
 
@@ -185,6 +192,50 @@ struct GPUMaterialExt3 {
     u32   pad;
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterialExt3) == 80, "GPUMaterialExt3 layout");
+
+// ---------------------------------------------------------------------------
+// F15.1 (ticket 22): per-slot KHR_texture_transform.  A material with non-uniform transforms (slots that differ, or a mix of
+// transformed and plain slots) owns a TRANSFORM BLOCK of MATERIAL_TT_RECORDS consecutive records in the extension buffer (two
+// adjacent extension groups, allocated and freed together by the SceneStore).  Slot s (TT_SLOT_*) is stored at record s / 3,
+// transform s % 3.  Record 0 word `slotMask` has bit s set when slot s has a non-identity transform; the other slots sample the
+// plain UV.  uv' = M uv + o with M = R S of the specification (m = {m00, m01, m10, m11}, row major).
+// ---------------------------------------------------------------------------
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_TT_RECORDS = 2u * MATERIAL_EXT_RECORDS;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_BASE_COLOR       = 0;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_METAL_ROUGH      = 1;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_NORMAL           = 2;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_OCCLUSION        = 3;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_EMISSIVE         = 4;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_SPECULAR         = 5;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_SPECULAR_COLOR   = 6;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_COAT             = 7;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_COAT_ROUGHNESS   = 8;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_COAT_NORMAL      = 9;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_SHEEN_COLOR      = 10;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_SHEEN_ROUGHNESS  = 11;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_ANISOTROPY       = 12;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_IRIDESCENCE      = 13;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_IRIDESCENCE_THICKNESS = 14;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_TRANSMISSION     = 15;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_VOLUME_THICKNESS = 16;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_SUBSURFACE_WEIGHT = 17;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_SUBSURFACE_COLOR = 18;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_SUBSURFACE_RADIUS = 19;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_COUNT            = 20;
+
+struct GPUTextureTransform {
+    float m[4];                // m00, m01, m10, m11
+    float o[2];                // offset
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUTextureTransform) == 24, "GPUTextureTransform layout");
+
+/// One record of a transform block (three transforms and two spare words; `slotMask` is only meaningful in record 0).
+struct GPUTextureTransformRecord {
+    GPUTextureTransform t[3];
+    u32 slotMask;
+    u32 reserved;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUTextureTransformRecord) == 80, "GPUTextureTransformRecord layout");
 
 /// One record of the extension buffer, untyped (the scatter payload).
 struct GPUMaterialExtRecord {

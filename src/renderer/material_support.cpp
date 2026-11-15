@@ -36,6 +36,7 @@ const MaterialSupportTable& currentSupportTable() {
         t.base.level                    = SupportLevel::Implemented;
         t.emissiveStrength.level        = SupportLevel::Implemented;
         t.textureTransformUniform.level = SupportLevel::Implemented;
+        t.textureTransformPerSlot.level = SupportLevel::Implemented;
         // F15.1: ior + specular shade every primary light path: the resolve and forward paths (direct sun and
         // analytic lights, environment, GI diffuse weight), ReSTIR and clustered DI (ticket 07: lobe guide), and
         // (ticket 08) the specular transport (SSR, RT reflections, probes/environment split-sum) and the composite
@@ -246,10 +247,14 @@ MaterialSupportReport buildSupportReport(const MaterialDescription& desc, const 
             r.encodings.push_back(entry("texture_transform", table.textureTransformUniform, "KHR_texture_transform",
                                         InputLabel::Ratified));
             break;
-        case TextureTransformStatus::NonUniform:
+        case TextureTransformStatus::PerSlot:
+            r.encodings.push_back(entry("texture_transform", table.textureTransformPerSlot, "KHR_texture_transform (per slot)",
+                                        InputLabel::Ratified));
+            break;
+        case TextureTransformStatus::Unsupported:
             r.encodings.push_back(entry("texture_transform", FeatureSupportEntry{}, "KHR_texture_transform",
                                         InputLabel::Ratified));
-            r.warnings.push_back("texture_transform: textures of this material use different transforms or UV sets");
+            r.warnings.push_back("texture_transform: " + info.transformReason);
             break;
     }
     return r;

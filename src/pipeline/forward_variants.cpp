@@ -86,6 +86,20 @@ PipelineDesc withMaterialFeatures(const PipelineDesc& desc, u32 mask) {
     return out;
 }
 
+u16 textureTransformConstantIndex() { return gen::kTextureTransformConstantIndex; }
+
+PipelineDesc withTextureTransform(const PipelineDesc& desc) {
+    PipelineDesc out = desc;
+    for (u32 i = 0; i < out.constantCount; ++i) {
+        if (out.constants[i].index == gen::kTextureTransformConstantIndex) {
+            out.constants[i].bits = 1u;
+            return out;
+        }
+    }
+    out.constant(gen::kTextureTransformConstantIndex, ConstantType::UInt, 1u);
+    return out;
+}
+
 PipelineDesc withAllLobes(const PipelineDesc& desc) { return withMaterialFeatures(desc, MATERIAL_FEATURES_ALL); }
 
 PipelineDesc genericDesc(rg::Format color) {

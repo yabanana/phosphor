@@ -74,6 +74,11 @@ struct Variant {
 /// features request exactly the pre-F15 pipelines).  Any other mask appends constant 22 (an
 /// existing constant 22 is replaced).
 [[nodiscard]] PipelineDesc withMaterialFeatures(const PipelineDesc& desc, u32 mask);
+/// F15.1 (ticket 22): reserved constant TEXTURE_TRANSFORM (uint, index 26): 1 = per-slot KHR_texture_transform compiled in.
+[[nodiscard]] u16 textureTransformConstantIndex();
+/// `desc` with TEXTURE_TRANSFORM = 1 (an existing constant is replaced).
+[[nodiscard]] PipelineDesc withTextureTransform(const PipelineDesc& desc);
+
 /// The reference / compile-fallback pipeline: constant 22 = every feature bit.  Distinct from
 /// `desc` itself, which (undefined => 0) has no extension lobes.
 [[nodiscard]] PipelineDesc withAllLobes(const PipelineDesc& desc);

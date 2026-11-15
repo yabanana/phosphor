@@ -306,19 +306,65 @@ TEST_CASE("glTF loader (F15): a uniform KHR_texture_transform is baked into UV0"
     CHECK(seen == 4);
 }
 
-TEST_CASE("glTF loader (F15): a non-uniform transform leaves UVs untouched and is reported unsupported") {
+TEST_CASE("glTF loader (F15, ticket 22): per-slot transforms leave the UVs untouched and the material carries them") {
     auto model = nlohmann::json::parse(quadWithoutNormalsOrTangents(
         R"({"pbrMetallicRoughness":{"baseColorTexture":{"index":0,"extensions":{"KHR_texture_transform":{"scale":[2,2]}}}},
             "normalTexture":{"index":0}})"));
     model["textures"] = nlohmann::json::array({nlohmann::json{{"source", 0}}});
     model["images"]   = nlohmann::json::array({nlohmann::json{{"uri", kTinyPng}}});
     GpuScene scene;
-    REQUIRE(loadModelJson(model, scene, "phosphor_f15_uv_nonuniform.gltf"));
+    REQUIRE(loadModelJson(model, scene, "phosphor_f15_uv_perslot.gltf"));
     for (const GPUVertex& v : scene.vertices()) CHECK((v.u == 0.0f || v.u == 1.0f));
-    bool unsupported = false;
+    CHECK(analyzeTextureTransforms(scene.materialDescriptions()[0]).status == TextureTransformStatus::PerSlot);
+    bool implemented = false;
     for (const auto& f : scene.materialSupport()[0].encodings)
-        if (f.feature == "texture_transform") unsupported = f.level == SupportLevel::Unsupported;
-    CHECK(unsupported);
+        if (f.feature == "texture_transform") implemented = f.level == SupportLevel::Implemented;
+    CHECK(implemented);
+}
+
+TEST_CASE("glTF loader (F15, ticket 22): the UV set every texture samples is copied into UV0; mixed sets are reported unsupported") {
+    auto withSecondSet = [](const std::string& materialJson) {
+        auto model = nlohmann::json::parse(quadWithoutNormalsOrTangents(materialJson));
+        std::vector<unsigned char> bytes = quadBytes();
+        const std::vector<float> uv1 = {0.25f, 0.75f, 0.5f, 0.75f, 0.5f, 0.25f, 0.25f, 0.25f};
+        append(bytes, uv1); // 32 bytes at offset 92
+        model["buffers"][0]["byteLength"] = 124;
+        model["buffers"][0]["uri"] = "data:application/octet-stream;base64," + base64(bytes);
+        model["bufferViews"].push_back({{"buffer", 0}, {"byteOffset", 92}, {"byteLength", 32}});
+        model["accessors"].push_back({{"bufferView", 3}, {"componentType", 5126}, {"count", 4}, {"type", "VEC2"}});
+        model["meshes"][0]["primitives"][0]["attributes"]["TEXCOORD_1"] = 3;
+        model["textures"] = nlohmann::json::array({nlohmann::json{{"source", 0}}});
+        model["images"]   = nlohmann::json::array({nlohmann::json{{"uri", kTinyPng}}});
+        return model;
+    };
+    SUBCASE("every texture on set 1 (no transform): UV0 := TEXCOORD_1") {
+        auto model = withSecondSet(R"({"pbrMetallicRoughness":{"baseColorTexture":{"index":0,"texCoord":1}},"normalTexture":{"index":0,"texCoord":1}})");
+        GpuScene scene;
+        REQUIRE(loadModelJson(model, scene, "phosphor_f15_uv_set1.gltf"));
+        int seen = 0;
+        for (const GPUVertex& v : scene.vertices()) {
+            if (v.px == -1 && v.py == -1) { CHECK(v.u == doctest::Approx(0.25f)); CHECK(v.v == doctest::Approx(0.75f)); ++seen; }
+            if (v.px == 1 && v.py == 1)   { CHECK(v.u == doctest::Approx(0.5f));  CHECK(v.v == doctest::Approx(0.25f)); ++seen; }
+        }
+        CHECK(seen == 2);
+    }
+    SUBCASE("a uniform transform on set 1 is baked into that set") {
+        auto model = withSecondSet(R"({"pbrMetallicRoughness":{"baseColorTexture":{"index":0,"texCoord":1,"extensions":{"KHR_texture_transform":{"offset":[1,0]}}}}})");
+        GpuScene scene;
+        REQUIRE(loadModelJson(model, scene, "phosphor_f15_uv_set1_bake.gltf"));
+        for (const GPUVertex& v : scene.vertices())
+            if (v.px == -1 && v.py == -1) { CHECK(v.u == doctest::Approx(1.25f)); CHECK(v.v == doctest::Approx(0.75f)); }
+    }
+    SUBCASE("two sets inside one material: UV0 stays, the report says why") {
+        auto model = withSecondSet(R"({"pbrMetallicRoughness":{"baseColorTexture":{"index":0,"texCoord":1}},"normalTexture":{"index":0}})");
+        GpuScene scene;
+        REQUIRE(loadModelJson(model, scene, "phosphor_f15_uv_mixed.gltf"));
+        for (const GPUVertex& v : scene.vertices()) CHECK((v.u == 0.0f || v.u == 1.0f));
+        bool unsupported = false;
+        for (const auto& f : scene.materialSupport()[0].encodings)
+            if (f.feature == "texture_transform") unsupported = f.level == SupportLevel::Unsupported;
+        CHECK(unsupported);
+    }
 }
 
 TEST_CASE("glTF loader (F15): image URIs outside the asset directory are refused") {

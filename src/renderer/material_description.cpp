@@ -1,5 +1,7 @@
 #include "renderer/material_description.h"
 
+#include <string_view>
+
 #include <algorithm>
 #include <cmath>
 
@@ -274,15 +276,46 @@ void forEachTexture(const MaterialDescription& desc,
     visitTextures<const MaterialDescription, const MaterialTextureRef>(desc, fn);
 }
 
+u32 textureTransformSlot(const char* slotName) {
+    static constexpr struct { const char* name; u32 slot; } kSlots[] = {
+        {"baseColorTexture", TT_SLOT_BASE_COLOR},         {"metallicRoughnessTexture", TT_SLOT_METAL_ROUGH},
+        {"normalTexture", TT_SLOT_NORMAL},                {"occlusionTexture", TT_SLOT_OCCLUSION},
+        {"emissiveTexture", TT_SLOT_EMISSIVE},            {"specularTexture", TT_SLOT_SPECULAR},
+        {"specularColorTexture", TT_SLOT_SPECULAR_COLOR}, {"clearcoatTexture", TT_SLOT_COAT},
+        {"clearcoatRoughnessTexture", TT_SLOT_COAT_ROUGHNESS}, {"clearcoatNormalTexture", TT_SLOT_COAT_NORMAL},
+        {"sheenColorTexture", TT_SLOT_SHEEN_COLOR},       {"sheenRoughnessTexture", TT_SLOT_SHEEN_ROUGHNESS},
+        {"anisotropyTexture", TT_SLOT_ANISOTROPY},        {"iridescenceTexture", TT_SLOT_IRIDESCENCE},
+        {"iridescenceThicknessTexture", TT_SLOT_IRIDESCENCE_THICKNESS}, {"transmissionTexture", TT_SLOT_TRANSMISSION},
+        {"thicknessTexture", TT_SLOT_VOLUME_THICKNESS},   {"subsurfaceWeightTexture", TT_SLOT_SUBSURFACE_WEIGHT},
+        {"subsurfaceColorTexture", TT_SLOT_SUBSURFACE_COLOR}, {"subsurfaceRadiusScaleTexture", TT_SLOT_SUBSURFACE_RADIUS},
+    };
+    for (const auto& e : kSlots)
+        if (std::string_view(e.name) == slotName) return e.slot;
+    return ~0u;
+}
+
 TextureTransformAnalysis analyzeTextureTransforms(const MaterialDescription& desc) {
     TextureTransformAnalysis result;
-    bool anyTransform = false, uniform = true, haveFirst = false;
+    bool anyTransform = false, uniform = true, haveFirst = false, haveSet = false;
     UvTransform first;
-    forEachTexture(desc, [&](const char*, const MaterialTextureRef& ref) {
+    forEachTexture(desc, [&](const char* slot, const MaterialTextureRef& ref) {
         if (!ref.present()) return;
         const UvTransform t = ref.transform.value_or(UvTransform{});
+        if (textureTransformSlot(slot) == ~0u) { // layer mask / height: tiled by the layer stack, no transform
+            if (!t.isIdentity() || ref.texCoord != 0) {
+                result.status = TextureTransformStatus::Unsupported;
+                if (result.reason.empty()) result.reason = std::string(slot) + " carries a transform or a UV set (layer textures use the layer tiling)";
+            }
+            return;
+        }
         if (!t.isIdentity()) anyTransform = true;
-        if (ref.texCoord != 0) uniform = false;
+        if (!haveSet) {
+            result.uvSet = ref.texCoord;
+            haveSet      = true;
+        } else if (ref.texCoord != result.uvSet) {
+            result.status = TextureTransformStatus::Unsupported;
+            result.reason = "the textures of this material use different UV sets (the engine has one UV stream per mesh)";
+        }
         if (!haveFirst) {
             first     = t;
             haveFirst = true;
@@ -290,8 +323,9 @@ TextureTransformAnalysis analyzeTextureTransforms(const MaterialDescription& des
             uniform = false;
         }
     });
+    if (result.status == TextureTransformStatus::Unsupported) return result;
     if (!anyTransform) return result;
-    result.status = uniform ? TextureTransformStatus::Uniform : TextureTransformStatus::NonUniform;
+    result.status = uniform ? TextureTransformStatus::Uniform : TextureTransformStatus::PerSlot;
     if (uniform) result.transform = first;
     return result;
 }

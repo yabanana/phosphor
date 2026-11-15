@@ -93,7 +93,7 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
 }
 pipe::PipelineHandle VisibilityRenderer::binPipeline(u32 mask, bool overflow) {
     // Bin pipelines are keyed by what they compile, not by the scene: the class table of the generator names them.
-    const u64 key = u64(mask) | (u64(overflow) << 16) | (u64(subsurface_) << 17) | (u64(dropLobes_) << 20);
+    const u64 key = u64(mask) | (u64(overflow) << 16) | (u64(subsurface_) << 17) | (u64(textureTransform_) << 18) | (u64(dropLobes_) << 20);
     auto it = binHandles_.find(key);
     if (it == binHandles_.end()) {
         const auto describe = [&](const char* kernel) {
@@ -101,6 +101,7 @@ pipe::PipelineHandle VisibilityRenderer::binPipeline(u32 mask, bool overflow) {
             const u32 compiled = overflow ? MATERIAL_FEATURES_ALL : (mask & ~dropLobes_); // dropLobes_: negative control
             if (compiled != 0u) d.constant(pipe::matclass::gen::kMaterialFeaturesConstantIndex, pipe::ConstantType::UInt, compiled);
             if (subsurface_) d.constant(kSssConstant, pipe::ConstantType::UInt, 1u);
+            if (textureTransform_) d = pipe::forward::withTextureTransform(d); // F15.1 (ticket 22)
             d.constant(pipe::matclass::gen::kResolveBinConstantIndex, pipe::ConstantType::UInt,
                        overflow ? VISIBILITY_BIN_OVERFLOW : (VISIBILITY_BIN_CLASS | mask));
             return d;
@@ -190,6 +191,10 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
     {
         // --resolve-features all: the all-lobes pipeline resolves the whole scene (reference of the class pipelines).
         const u32 mask = forceAllLobes_ && store.featureUnion() != 0u ? MATERIAL_FEATURES_ALL : store.featureUnion();
+        // F15.1 (ticket 22): per-slot texture transforms: the marker rides on the mask the shading pipelines are served with (the
+        // lobe-only `mask` keeps deciding binning, subsurface and the tile path).
+        textureTransform_ = store.textureTransformInUse();
+        const u32 shadeMask = mask | (textureTransform_ ? FEATURE_UNION_TEXTURE_TRANSFORM : 0u);
         // F15.2: a scene with features bins per feature class (the legacy normal/emission classes only serve scenes without).
         const bool featureBinsWanted = binning_ && !forceAllLobes_ && mask != 0u;
         subsurface_ = subsurfaceAllowed_ && !tileResolve_ && mask != 0u && store.volumetricSubsurface();
@@ -204,13 +209,13 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
                 servedResolve_[i] = resolve_[i]; // not used: the class bins below serve this scene
                 continue;
             }
-            servedResolve_[i] = features_.serve(pipelines_, 100 + so + i, resolve_[i], mask, [&] {
+            servedResolve_[i] = features_.serve(pipelines_, 100 + so + i, resolve_[i], shadeMask, [&] {
                 auto d = compute(kernel);
                 d.constant(21, pipe::ConstantType::UInt, i);
                 return sssConstant(d);
             });
         }
-        servedGeneric_ = features_.serve(pipelines_, 110 + so, adaptive_ ? adaptivePipeline_ : generic_, mask,
+        servedGeneric_ = features_.serve(pipelines_, 110 + so, adaptive_ ? adaptivePipeline_ : generic_, shadeMask,
                                          [&] { return sssConstant(compute(adaptive_ ? "visibility_adaptive" : kernel)); });
         servedTile_ = tile_ == pipe::INVALID_PIPELINE ? tile_ : features_.serve(pipelines_, 111, tile_, mask, [&] {
             auto d = compute("visibility_tile");
@@ -218,7 +223,7 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
             d.output(0, rg::Format::R32Uint);
             return d;
         });
-        servedFallback_ = features_.serve(pipelines_, 112 + so, subsurface_ ? fallbackSss_ : fallback_, mask,
+        servedFallback_ = features_.serve(pipelines_, 112 + so, subsurface_ ? fallbackSss_ : fallback_, shadeMask,
                                           [&] { return fallbackDesc(subsurface_); });
     }
     featureBins_ = binning_ && !forceAllLobes_ && store.featureUnion() != 0u;

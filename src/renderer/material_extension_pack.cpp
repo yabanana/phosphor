@@ -1,6 +1,7 @@
 #include "renderer/material_extension_pack.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace phosphor {
 
@@ -129,6 +130,39 @@ MaterialExtGroup packMaterialExtensions(const MaterialDescription& d) {
         out[3] = toRecord(r);
     }
     return out;
+}
+
+bool needsTextureTransformBlock(const MaterialDescription& desc) {
+    return analyzeTextureTransforms(desc).status == TextureTransformStatus::PerSlot;
+}
+
+GPUTextureTransform makeGpuTextureTransform(const UvTransform& t) {
+    const double c = std::cos(double(t.rotation)), s = std::sin(double(t.rotation));
+    const double sx = t.scale[0], sy = t.scale[1];
+    GPUTextureTransform g{};
+    g.m[0] = float(c * sx);
+    g.m[1] = float(-s * sy);
+    g.m[2] = float(s * sx);
+    g.m[3] = float(c * sy);
+    g.o[0] = t.offset[0];
+    g.o[1] = t.offset[1];
+    return g;
+}
+
+TextureTransformBlock packTextureTransforms(const MaterialDescription& desc) {
+    TextureTransformBlock block{};
+    if (!needsTextureTransformBlock(desc)) return block;
+    std::array<GPUTextureTransformRecord, MATERIAL_TT_RECORDS> recs{};
+    u32 mask = 0;
+    forEachTexture(desc, [&](const char* slot, const MaterialTextureRef& ref) {
+        const u32 s = textureTransformSlot(slot);
+        if (s == ~0u || !ref.present() || !ref.transform || ref.transform->isIdentity()) return;
+        recs[s / 3].t[s % 3] = makeGpuTextureTransform(*ref.transform);
+        mask |= 1u << s;
+    });
+    recs[0].slotMask = mask;
+    for (u32 i = 0; i < MATERIAL_TT_RECORDS; ++i) std::memcpy(&block[i], &recs[i], sizeof(GPUMaterialExtRecord));
+    return block;
 }
 
 } // namespace phosphor

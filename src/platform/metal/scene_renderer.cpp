@@ -350,8 +350,10 @@ u64 SceneRenderer::prepareFrame(const SceneStore& store, std::span<const GPULigh
     // F15.1: a scene with material features shades with the pipeline specialised by its feature
     // union (all-lobes reference while that compiles); union 0 keeps `handle` (today's pipelines).
     featureUnion_ = store.featureUnion();
+    pipelineUnion_ = store.pipelineFeatureUnion();
+    // F15.1 (ticket 22): the texture-transform marker rides on the mask handed to serve (featureUnion_ stays the lobe union).
     const pipe::PipelineHandle served = featurePipelines_.serve(
-        pipelines_, genericOnly_ ? 1000u : variantIndex_, handle, featureUnion_, [&] {
+        pipelines_, genericOnly_ ? 1000u : variantIndex_, handle, pipelineUnion_, [&] {
             return genericOnly_ ? pipe::forward::genericDesc(rg::Format::BGRA8Srgb)
                                 : pipe::forward::pipelineDesc(variant, rg::Format::BGRA8Srgb, salt_);
         });

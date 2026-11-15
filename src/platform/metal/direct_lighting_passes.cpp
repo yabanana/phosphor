@@ -117,8 +117,11 @@ struct DirectLightingPasses::Impl {
         // the base pipelines write no guide and the flexible fallback objects of a render pipeline are unspecialised, so
         // the guide is valid for consumers only when both producers are final and none is the base pipeline).
         reserveGuide(s.featureUnion(),u64(f.backingWidth)*f.backingHeight);
-        guideServed=features.serve(p,200,kernels[Guide],featureUnion,[&]{return lighting::kernel("material_lighting_guides");});
-        receiverServed=features.serve(p,201,receiver,featureUnion,[&]{return receiverDesc("forward_di_receiver_guide_fs");});
+        // F15.1 (ticket 22): both producers sample material textures: a scene with per-slot texture transforms compiles them in
+        // (the marker rides on the mask; featureUnion stays the lobe union that decides the guide).
+        const u32 shadeUnion=featureUnion|(s.textureTransformInUse()?FEATURE_UNION_TEXTURE_TRANSFORM:0u);
+        guideServed=features.serve(p,200,kernels[Guide],shadeUnion,[&]{return lighting::kernel("material_lighting_guides");});
+        receiverServed=features.serve(p,201,receiver,shadeUnion,[&]{return receiverDesc("forward_di_receiver_guide_fs");});
         {static const char* diNames[]={"restir_di_candidates_lobe","restir_di_temporal_lobe","restir_di_spatial_lobe"};
             // Only the active estimator's kernels are requested (RT shade pipelines are compiled, never archived).
             const bool ris=options.directLighting==DirectLightingMode::ReSTIR;
