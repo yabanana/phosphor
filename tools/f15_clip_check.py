@@ -630,6 +630,14 @@ def evaluate_transmission(out):
         negative["not_demonstrable"] = "transmission-custom fails the same gates: the control cannot show 'fails while custom passes'"
     if converged:
         result["transmission-rough-corrected"] = evaluate_rough(out, judged)
+        # Owner process check (2026-11-15): the control-noise-corrected metrics of the GATED smooth ROIs, reported next to the raw metrics that
+        # gate them.  Information only: the smooth gate stays the raw (uncorrected) judge it was accepted with; the corrected judge only subtracts
+        # control noise, so it can only lower a measured error.
+        smooth = {name: rough_corrected(out, name, config) for name in ("transmission-custom", "negative-refract-axis")}
+        result["transmission-smooth-corrected-info"] = {
+            "role": "diagnostic", "passed": True,
+            "expectation": "information only: corrected metrics of the gated smooth ROIs next to the raw gate metrics (the gate stays raw)",
+            "smooth_rois": {roi: {name: smooth[name][roi]["metrics"] for name in smooth} for roi in smooth["transmission-custom"]}}
     if not judged:
         for name in ("transmission-custom", "negative-refract-axis", "transmission-rough-corrected"):
             if name not in result:
@@ -698,6 +706,10 @@ def markdown(clips, adaptive, status):
                 lines.append(f"- {roi} [{case}] corrected p95 {m['p95']:.4f} max {m['max']:.4f} flicker {m['flicker']:.4f} (raw p95 {m['raw_p95']:.4f} max {m['raw_max']:.4f} flicker {m['raw_flicker']:.4f}; "
                              f"control floor p95 {m['control_floor_p95']:.4f} flicker {m['control_flicker']:.4f}) {'ok' if row['verdict']['passed'] else 'fails'}")
             lines.append(f"- {roi}: {'gated' if r['gated'] else 'information'}, judgeable {r['judgeable']}, discriminates (custom passes, raw fails) {r['passed']}")
+        for roi, cases in entry.get("smooth_rois", {}).items():
+            for case, m in cases.items():
+                lines.append(f"- (information) {roi} [{case}] raw p95 {m['raw_p95']:.4f} max {m['raw_max']:.4f} flicker {m['raw_flicker']:.4f} | corrected p95 {m['p95']:.4f} "
+                             f"max {m['max']:.4f} flicker {m['flicker']:.4f}")
         if "judged_failing" in entry:
             lines.append(f"- corrected judge: custom fails the unchanged gates on {entry['judged_failing']}; transmission-raw (the negative control) fails on {entry['raw_control_discriminates']}")
         if "not_judgeable" in entry:

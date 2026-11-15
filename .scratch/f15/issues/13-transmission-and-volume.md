@@ -401,3 +401,29 @@ Files / tools: `build/f15-clip-glass` (captures, control sums), `build/control_c
    a nearest-pixel match of the centre endpoint resamples a blurred, moving image with a sub-pixel position error that no blend or filter setting removes.  Candidate (not done): a sub-pixel,
    gradient-aware (bilinear on the endpoint offset) history for rough pixels or a rough-lobe-specific reprojection of the blurred image; that is a research item, not a one- or two-iteration change.
    `ROUGH_GATED` stays empty: the gate for r0.1 / r0.3 is MISSED (reported by transmission-rough-corrected), the owner decides.
+
+## Owner declaration of the rough-glass temporal ROIs (orchestrator, 2026-11-15)
+
+The owner chose "(b) Dichiararlo subito": the rough-glass temporal ROIs (transmission roughness <= 0.3) leave the F13.6 gate for F15 and
+stay measured as information (`transmission-rough-corrected`). The sub-pixel, gradient-aware history for rough transmissive pixels is the
+named future fix. Roughness 0.6 and smooth glass stay gated.
+
+Process check (owner rule: thresholds may only be tightened). The corrected judge (tools/f15_clip_bias.py) subtracts the converged control's
+own noise, estimated from its two independent halves, from the candidate's RMSE and flicker. Its thresholds are unchanged: p95 <= 0.06,
+max <= 0.15, flicker <= 0.02. It applies only to the rough ROIs (ROUGH_GATED is empty, so it never gates). Every existing gate keeps its
+raw judge: the smooth ROIs gate on the uncorrected metrics against the 110-seed control. tools/f15_clip_check.py now also reports the
+corrected metrics of the smooth ROIs next to the raw ones, as information (`transmission-smooth-corrected-info`).
+
+Values from the glass-temporal branch captures, evaluated by the orchestrator in build/clipcheck/f15-clip-glass. Raw p95 is the gating metric for the smooth ROIs:
+
+| ROI | custom raw p95 | custom corrected p95 | refract-axis raw / corrected p95 | role |
+|---|---|---|---|---|
+| smooth ior 1.33 | 0.0230 | 0.0229 | 0.1746 / 0.1746 | gated (raw), passes |
+| smooth ior 1.5 | 0.0236 | 0.0235 | 0.1691 / 0.1690 | gated (raw), passes |
+| smooth ior 2.0 | 0.0306 | 0.0304 | 0.1445 / 0.1445 | gated (raw), passes |
+| rough r0.1 ior 1.5 | 0.0890 | 0.0888 | 0.1494 / 0.1492 | declared, information |
+| rough r0.3 ior 1.5 | 0.0925 | 0.0918 | 0.0881 / 0.0870 | declared, information |
+| rough r0.6 ior 1.5 | 0.0508 | 0.0493 | 0.0555 / 0.0544 | information (passes) |
+
+Smooth glass passes under the uncorrected judge; the correction changes p95 by at most 0.0002. The refract-axis negative control fails the
+smooth gates under both judges. The final-tree clip run of the closure battery repeats these numbers.
