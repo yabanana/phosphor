@@ -169,3 +169,13 @@ Metal 4 no-hazard-tracking rule requires (shaders/visibility_resolve.metal bins 
 `--gpu-timing-serial` / a serialising barrier after every resolve dispatch: if the variation vanishes the hazard is confirmed.
 
 `--gpu-timing-serial` (x6, 10 ToyCar runs): 7 of 10 differ (370..1569 px): that switch does not remove the variation, so the hazard hypothesis above is still unconfirmed (that flag serialises timed units, it is not a barrier after every resolve dispatch).
+
+### Masked-defect hypothesis (orchestrator), 2026-11-15, branch f15c-bitexact-b
+
+- (a) NaN / Inf / garbage in the HDR captures of the 12 final-archive ToyCar runs (differing and identical): none.  Every image of both arms has 0 NaN, 0 Inf, 0 negative values and the same maximum (4923.9); the differing
+  pixels are ordinary values (relative differences 1e-8 .. 1e-1), not neutralised garbage.
+- (c) Texture-transform data: the host writes every word the shader can read.  `material_extension_pack.cpp:161` builds the block from a value-initialised `std::array<GPUTextureTransformRecord, MATERIAL_TT_RECORDS>` and copies ALL
+  MATERIAL_TT_RECORDS records (`:170`), `scene_store.cpp:389` stores all of them and `:431` zero-fills a freed block, so no `reserved` word, unused slot or tail record is uninitialised.  The shader reads a transform only when the material
+  flag is set and the slot's `slotMask` bit is set (`texture_transform_core.h` texXfForOn / texXfHasOn / texXfGet; texXfFrame, sampleSlot); a material without the block has `rec == nullptr, mask == 0`.  I found no read of an
+  unwritten or out-of-block word.
+- (b) shader validation with `--no-pipeline-archive` on the exact module: NOT run (battery 35 %, owner rule).  Pending.
