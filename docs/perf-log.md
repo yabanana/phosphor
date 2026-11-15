@@ -1464,3 +1464,63 @@ resolve, `--rt off`, saturated clocks, 64 warm-up + 256 measured frames, A/B/A x
 
 Per-replica effects (B / mean(A) - 1, median and range) are in `build/f15-layers-timing{,-cc0}/summary.md`.  The CC0 sets are the decision-12
 measurement; the procedural run is kept as the earlier stand-in.  Binning never lowers the resolve by >= 5 %: union stays the default.
+
+## F15 ticket 24: Sponza D2 band under the owner's option A (2026-11-15, M5 Max)
+
+**Owner decision (option A, relayed 2026-11-15).** The p95 cost of the F13 back-face continuation fix 26fe229 is attributed to F13, not to F15: it is
+measured on its own (with and without the continuation, same executable, interleaved) and logged here as an F13 correctness cost; the F15 band is
+measured against the ticket-03 baseline plus 26fe229 and stays at 0.10 ms (decision 11: median of three A/B/A GPU p95 deltas).  An attribution, not a
+wider threshold; no image changes.
+
+**Binaries** (`build/d2-skips/`, hashes in `binaries.sha256`; Sponza D2 command of `f15_d2_aba.sh`: 1080p, every feature, 128 + 256 frames,
+`--gpu-timing-serial --no-vsync`, one phosphor process at a time under the shared GPU lock, nothing else running):
+- `t03` = 2e1057a, the plan's cost baseline;
+- `t03fe` = 2e1057a + a measurement backport of 26fe229 (local branch `cl/f15-d2-t03-plus-26fe229`, 91bba50, never merged: the reflection-estimator and
+  probe-capture continuation; the refraction-walk part does not exist at 2e1057a).  Its D2 exactness capture differs from 2e1057a in 49 px (max 70), the
+  same count 26fe229 recorded against its parent, and its `--debug-lighting 4` continuation counters equal the closure tree's (316 / 7 and 369 / 19);
+- `s4` = the closure tree 29814ac, `s0` = the same tree with `kReflectionBackfaceSkips` 0 (executable byte-identical to `s4`, metallib differs only in
+  that constant; `s4`'s metallib is byte-identical to the closure build's); `s0` vs `s4` D2 exactness 934 px (max 122), as recorded before;
+- `s4lite` / `s0lite` = the same pair with the reflection_rt lite-payload fix (below), executable byte-identical between the two.
+- `final` = the F15 branch with that fix, 720ee63 (`build/release`; metallib byte-identical to `s4lite`'s).
+
+**1. Decision-11 A/B/A** (3 pairs each, `f15_d2_aba.sh`; GPU p95 per pair, ms):
+
+| comparison | what it measures | pair deltas | median | absolute new |
+|---|---|---|---|---|
+| s0 -> s4 (closure tree 29814ac) | F13 continuation cost on the 124-byte payload | +0.11 / +0.09 / +0.09 | **+0.086** | 15.48-15.62 |
+| t03fe -> s4 (closure tree 29814ac) | F15 band under option A, before the fix | +0.20 / +0.22 / +0.05 | **+0.198** (over 0.10) | 15.43-15.59 |
+| t03 -> t03fe | F13 continuation cost at the baseline (16-byte payload) | -0.05 / +0.08 / +0.01 | **+0.009** | 15.38-15.40 |
+| s0lite -> s4lite | F13 continuation cost on the shipped code | -0.05 / +0.09 / +0.07 | **+0.065** | 15.33-15.44 |
+| t03fe -> final | F15 band under option A | -0.04 / +0.04 / -0.10 | **-0.038** (within 0.10) | 15.33-15.39 |
+| t03 -> final | against the plain ticket-03 baseline | +0.02 / -0.02 / +0.08 | **+0.020** | 15.36-15.43 |
+
+0 GPU allocations in every run; final: startup pipelines 12.7 ms, archive 137 hits / 0 misses, 12 compiler calls (the linked RT pipelines), 0
+render-thread compiles.  Sky sentinel 0.76-0.93 ms on every binary (clean 0.674-0.677: the desktop compositor was active), so only the paired
+comparisons are meaningful; pairs whose two sentinels differ are noisier (the tail of `F13 reflection sample 0` alone moves by up to 0.4 ms between
+runs of one binary).
+
+**2. Six-replica interleaved rotation** (`f15_d2_rotation.sh`, order reversed every replica, `build/d2-skips/rot6`, s4lite = the fix):
+
+| binary | GPU p50 median | GPU p95 median (min-max) | refl. sample 0 p50 / p95 median | sky p95 median (min-max) | GPU allocations |
+|---|---|---|---|---|---|
+| s0 | 14.453 | 15.383 (15.35-15.46) | 2.709 / 3.584 | 0.790 (0.686-0.914) | [0] |
+| s4 | 14.463 | 15.512 (15.48-15.59) | 2.713 / 3.718 | 0.795 (0.783-0.928) | [0] |
+| s4lite | 14.444 | 15.419 (15.40-15.51) | 2.673 / 3.602 | 0.914 (0.788-0.917) | [0] |
+| t03 | 14.403 | 15.351 (15.32-15.42) | 2.656 / 3.620 | 0.830 (0.785-0.919) | [0] |
+| t03fe | 14.404 | 15.410 (15.36-15.50) | 2.658 / 3.600 | 0.796 (0.759-0.925) | [0] |
+
+| A -> B | median delta GPU p95 | per-replica GPU p95 deltas | median delta GPU p50 | median delta refl. sample 0 p95 |
+|---|---|---|---|---|
+| t03 -> t03fe | +0.065 | +0.09 / +0.05 / +0.11 / -0.06 / +0.08 / +0.04 | +0.006 | +0.072 |
+| s0 -> s4 | +0.139 | +0.18 / +0.14 / +0.20 / +0.11 / +0.14 / +0.02 | +0.015 | +0.123 |
+| t03fe -> s4 | +0.104 | +0.14 / +0.07 / +0.09 / +0.17 / +0.10 / +0.11 | +0.070 | +0.124 |
+| t03fe -> s4lite | +0.038 | +0.09 / +0.06 / -0.07 / +0.05 / +0.01 / +0.03 | +0.021 | -0.011 |
+| s4 -> s4lite | -0.086 | -0.05 / -0.01 / -0.16 / -0.12 / -0.09 / -0.09 | -0.025 | -0.127 |
+| t03 -> s4lite | +0.078 | +0.18 / +0.11 / +0.04 / -0.01 / +0.09 / +0.07 | +0.028 | +0.063 |
+
+**Reading.**  The F13 fix 26fe229 (about 3 900 continued transport rays per frame on D2, ~200 exhausting the bound of 4) costs **+0.01 to +0.07 ms
+of GPU p95** on Sponza D2 with the 16-byte payload: +0.009 (A/B/A) and +0.065 (rotation) at the baseline, +0.065 on the shipped code.  This is the
+F13 correctness cost the owner attributes to F13.  The ~0.2 ms seen at the closure tree was mostly not the continuation alone: it was the
+continuation multiplying the traversals of the 124-byte ticket-14 payload that `reflection_rt` still carried (an F15 cost), removed by the fix
+(docs/opt-log.md, "follow-up 3", adopted).  With it the F15 band is met under option A (-0.038 ms) and against the plain ticket-03 baseline (+0.020 ms);
+the absolute D2 gate holds (GPU p95 15.33-15.43 ms <= 16.67, 0 GPU allocations).  No image changes (F13 exactness 0 px, PFM bit-identical).

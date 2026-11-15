@@ -8,11 +8,11 @@ Roadmap: F15.1–F15.4
 
 **Status:** ready-for-agent
 
-- [ ] `ctest`, `metal_syntax_check`, `tools/visual_check.sh` (0 px vs the ticket-03 baseline), F13/F14 corpus, `variant_check`, `archive_check`, `hitch_check` green; API validation clean (shader validation where the F14.4 defect does not apply)
-- [ ] Sponza D2 GPU p95 A/B/A against the ticket-03 baseline within the decision-11 band; 0 GPU allocations
-- [ ] `--force-family apple9` run of the material bench with features
-- [ ] ROADMAP F15.1–F15.4 ticked only where verified; approximations and deferred items listed (caustics, dispersion, multiple-scattering compensation, back-lit thick subsurface if the hybrid is not triggered or not met, non-uniform texture transforms, coated emission of sampled emitters, GI/probe rays hitting glass as opaque)
-- [ ] perf-log, opt-log, RENDERER.md and per-ID handoff written; no push or PR without the owner
+- [ ] `ctest`, `metal_syntax_check`, `tools/visual_check.sh` (0 px vs the ticket-03 baseline), F13/F14 corpus, `variant_check`, `archive_check`, `hitch_check` green; API validation clean (shader validation where the F14.4 defect does not apply) — 2026-11-15: all green on 29814ac and, after the reflection fix, ctest / F13 exactness / visual_check / archive_check / f15_check on 720ee63 (corpus and hitch_check re-run on 720ee63 recorded below); STAYS UNTICKED until the real `metal_syntax_check` runs (it exists only on non-Apple hosts: the macOS emulation passes 48 / 49 files and the one failure is an emulation artefact in metalfx_lifetime.cpp, unchanged by F15 and identical to origin/main, whose Linux job is green; CI runs the real target on the owner's push)
+- [x] Sponza D2 GPU p95 A/B/A against the ticket-03 baseline within the decision-11 band; 0 GPU allocations (2026-11-15: median -0.038 ms against ticket 03 + 26fe229 under the owner's option A, +0.020 ms against the plain ticket-03 baseline; 0 allocations)
+- [x] `--force-family apple9` run of the material bench with features (2026-11-15: five feature scenarios, exit 0, 0 validation lines, report effective apple9)
+- [x] ROADMAP F15.1–F15.4 ticked only where verified; approximations and deferred items listed (caustics, dispersion, multiple-scattering compensation, back-lit thick subsurface if the hybrid is not triggered or not met, non-uniform texture transforms, coated emission of sampled emitters, GI/probe rays hitting glass as opaque) (2026-11-15: no box ticked, every ID keeps documented partial items; status lines per ID in ROADMAP, the list in docs/F15_HANDOFF.md)
+- [x] perf-log, opt-log, RENDERER.md and per-ID handoff written; no push or PR without the owner (2026-11-15: docs/F15_HANDOFF.md, RENDERER.md status, perf-log and opt-log entries; nothing pushed)
 
 ## Comments
 
@@ -192,6 +192,19 @@ section "Defects found during F15"; integrated by fast-forward to 6b6bf04; orche
     GPU p95 15.46 / 15.60, 15.44 / 15.49, 15.44 / 15.47 (A/B/A deltas +0.15 / +0.05 / +0.04, median +0.05 within the band), p50 median +0.07; so the
     F15 features alone meet the band and the excess is the continuation's cost. OWNER DECISION REQUESTED (2026-11-15): (A) declare it as the intrinsic
     cost of the 26fe229 correctness fix, or (B) reduce it by changing images under a new gate.
+  - OWNER DECISION 2026-11-15: option A (relayed by the parent session): the continuation's cost is the F13 fix's, measured on its own with and
+    without the continuation on the same executable; the F15 band stays 0.10 ms, measured against the ticket-03 baseline plus 26fe229; images unchanged.
+  - Measured literally (orchestrator, quiet machine, `build/d2-skips/`, perf-log entry "F15 ticket 24: Sponza D2 band under the owner's option A"):
+    backport of 26fe229 onto 2e1057a (`t03fe`, local branch cl/f15-d2-t03-plus-26fe229 / 91bba50, never merged; D2 exactness 49 px against 2e1057a
+    as 26fe229 recorded; continuation counters equal to the closure tree's).  On the closure tree 29814ac the F15 band still failed: A/B/A
+    t03fe -> 29814ac +0.20 / +0.22 / +0.05 (median +0.198), 6-replica rotation +0.104; the continuation cost +0.086 (A/B/A) / +0.139 (rotation) there
+    but only +0.009 / +0.065 at the baseline: the reflection pass still traced with the 124-byte ticket-14 payload and the continuation multiplied it.
+  - FIXED in F15 by 720ee63 (opt-log "follow-up 3", adopted): the base reflection_rt traces with RtPayloadLite and links rt_alpha_lite (templated
+    reflectionTraceVisible / reflectionSecondary / rtTraceSurface / diEndpointTransmittance; lobe kernels and the probe capture keep RtPayload;
+    archive +1 compute descriptor).  F13 exactness 5 cases 0 px and PFM bit-identical against 29814ac, visual_check 0 px, archive_check pass,
+    ctest 33/33.  Decision-11 A/B/A: t03fe -> final -0.04 / +0.04 / -0.10 (median -0.038, WITHIN the band); 2e1057a -> final median +0.020;
+    F13 continuation cost on the shipped code (s0lite -> s4lite, same executable) median +0.065 ms; absolute GPU p95 15.33-15.43 ms, 0 GPU
+    allocations. CRITERION MET.
 - Declared (owner noted, no objection): single-sided planes cast sun shadows from both sides in CSM (two-sided by contract) and RT.
 - CLOSED, not a defect (eac5233, ticket 13 "C22-D3 follow-up"): the 67 IORTestGrid "dark ring" pixels are a metric artefact. With
   reflections off a white transmissive sphere reads albedo 1 x environment 0.5 = the clear colour, so the ring set of the off image

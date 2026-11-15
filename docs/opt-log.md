@@ -2464,3 +2464,29 @@ back-light 720p +9.8 % (+8.2..+11.7, 4.3 %). The terrain result of 2026-11-15 (t
 **Mechanism:** the class resolve is cheaper (`Material resolve` -0.031 / -0.011 / -0.006 ms p50) but `Material classification` costs 0.026 / 0.028 / 0.014 ms, the same order; no scene pays it back.
 **Decision:** the >= 5 % rule is not met on any chess rig or on the terrain: the union pipeline stays the default, binning stays opt-in (`--material-binning on`). Not a change of the engine.
 Chess classes are not bit-identical to the union (ticket 21: up to 37 ULP) which would anyway have kept binning opt-in. The side-light rig is the only one with a lower mean (-1.8 %), inside its own noise.
+
+## 2026-11-15 — F15 ticket 24 follow-up 3: the base `reflection_rt` traces with the 16-byte payload (ADOPTED)
+
+**Trigger:** the owner's option A (the cost of the 26fe229 back-face continuation is F13's; the F15 band is measured against the ticket-03 baseline plus
+26fe229 and stays at 0.10 ms).  Measured literally, with a backport of 26fe229 onto 2e1057a (`t03fe`, local branch `cl/f15-d2-t03-plus-26fe229`, never
+merged), the closure tree 29814ac still missed the band: decision-11 A/B/A +0.20 / +0.22 / +0.05 (median +0.198 ms), and a 6-replica interleaved
+rotation in one window +0.104 ms.  The continuation itself costs almost nothing on the pre-ticket-14 payload (2e1057a -> t03fe +0.009 ms A/B/A,
++0.065 ms in the rotation) but +0.086 / +0.139 ms on the closure tree: the reflection pass still traced with the 124-byte `RtPayload` of ticket 14
+(8fbda9c had moved only RTAO, fog and the sun visibility to `RtPayloadLite`), and the continuation multiplies the traversals that carry it.  The
+earlier "lite reflection_rt" variant of follow-up 1 recovered ~0.1 ms of pass p95 in the clean window only; it had been measured against 2e1057a
+alone, where the continuation's traversals were not separated from the payload.
+**Change (720ee63):** `reflectionTraceVisible`, `reflectionSecondary`, `rtTraceSurface` and `diEndpointTransmittance` are templates over the payload type
+(default `RtPayload`, so every other caller is unchanged); the base `reflection_rt` kernel (scenes without material features: no transmissive
+material, so the secondary-hit shadow rays have transmittance 1 and `rt_alpha_lite` is exact) traces with `RtPayloadLite` and links `rt_alpha_lite`;
+the lobe kernels and `reflection_capture_rt` keep `RtPayload`.  While a feature scene's lobe kernel compiles, the base kernel serves as the counted
+fallback, as before; glass then shadows opaquely in those transient frames (like `shadow_sun_rt_lite`).  Archive: targeted update, +1 compute
+descriptor (`reflection_rt` linking `rt_alpha_lite`; the earlier `rt_alpha_generic` entry stays, unrequested, like those of `ao_rtao` and `fog_inject_rt`).
+**Images:** F13 exactness captures (5 cases) 0 px and PFM bit-identical against 29814ac; `visual_check` 0 px on 8 benches; D2 continuation counters
+unchanged (316 / 7, 369 / 19 at 720p with `--debug-lighting 4`).
+**Cost** (Sponza D2, quiet machine, `build/d2-skips/rot6`, `build/litefix/aba-*`; sky sentinel 0.76-0.93 on every binary, so only comparisons count):
+- 6-replica rotation: closure tree -> lite fix GPU p95 -0.086 ms (6 of 6 replicas negative, -0.01..-0.16), `F13 reflection sample 0` p95 -0.127 ms;
+- decision-11 A/B/A, t03fe -> final: GPU p95 -0.04 / +0.04 / -0.10 ms (median -0.038 ms, within 0.10); p50 median -0.047 ms;
+- decision-11 A/B/A, 2e1057a -> final (no attribution at all): +0.02 / -0.02 / +0.08 ms (median +0.020 ms);
+- absolute GPU p95 15.33-15.43 ms, 0 GPU allocations, archive 137 hits / 0 misses, 0 render-thread compiles.
+**Decision:** adopted (measured benefit in every replica, identical images); the F15 band is met under option A and also against the plain ticket-03
+baseline.  Not done: the lobe kernels of feature scenes without glass still trace with the full payload (a candidate, no measured need).
