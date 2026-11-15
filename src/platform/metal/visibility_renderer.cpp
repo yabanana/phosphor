@@ -180,7 +180,9 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
         previousInstances_[view_] = context_.memory().newBuffer(
             poseCapacity_, MTL::ResourceStorageModePrivate, MemoryCategory::Other, "Previous instance poses per view");
     const auto temporalUpload = context_.frameUploads().allocate(sizeof(temporal));
-    std::memcpy(temporalUpload.cpu, &temporal, sizeof(temporal));
+    GPUTemporalParams uploaded = temporal;
+    uploaded.materialExtensions = scene_.materialExtensionsAddress(); // F15.4 / F15.1 ticket 22: alpha tests read stacks and transforms
+    std::memcpy(temporalUpload.cpu, &uploaded, sizeof(uploaded));
     temporalAddress_ = temporalUpload.gpu;
     scene_.setTemporalInputs(previousInstances_[view_]->gpuAddress(), temporalAddress_);
     mesh_.setTemporalInputs(temporalAddress_);

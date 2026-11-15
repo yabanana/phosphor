@@ -143,6 +143,7 @@ struct SceneStore::Impl {
     // F15.1 (ticket 22): per-slot texture-transform blocks (MATERIAL_TT_RECORDS = two adjacent groups): matTt_[i] = first record of material
     // i's block (NONE: none), ttFree_ = first group id of each free block; ttCount_ = live materials with the transform flag.
     std::vector<u32>              matTt_, ttFree_;
+    std::vector<u8>               layerTarget_; // library material i is a layer of some stack (its transform is evaluated on the GPU even when uniform)
     u32 ttCount_ = 0;
     std::vector<GPUDeltaRecord>   extRecs_;
     std::vector<u32>              extDirty_;
@@ -291,17 +292,30 @@ struct SceneStore::Impl {
         return (extHigh_++) * MATERIAL_EXT_RECORDS;
     }
 
-    /// A transform block: two adjacent groups (the pair is reused through ttFree_, never split).
+    /// Library materials referenced as a layer by some library description: no primitive bakes a layer's own transform into a mesh.
+    static std::vector<u8> layerTargets(const GpuScene& scene) {
+        std::vector<u8> out(std::max<size_t>(1u, scene.materials().size()), 0);
+        for (const MaterialDescription& d : scene.materialDescriptions())
+            if (d.layers)
+                for (const MaterialLayer& l : d.layers->layers)
+                    if (l.materialIndex < out.size()) out[l.materialIndex] = 1;
+        return out;
+    }
+    bool ttNeeded(u32 idx, const MaterialDescription& d) const {
+        return needsTextureTransformBlock(d, idx < layerTarget_.size() && layerTarget_[idx] != 0);
+    }
+
+    /// A transform block: MATERIAL_TT_GROUPS adjacent groups (the pair is reused through ttFree_, never split).
     u32 allocTtBlock() {
-        static_assert(MATERIAL_TT_RECORDS == 2 * MATERIAL_EXT_RECORDS);
+        static_assert(MATERIAL_TT_RECORDS == MATERIAL_TT_GROUPS * MATERIAL_EXT_RECORDS);
         if (!ttFree_.empty()) {
             const u32 g = ttFree_.back();
             ttFree_.pop_back();
             return g * MATERIAL_EXT_RECORDS;
         }
-        if (extHigh_ + 2 > extCap_) growExt(std::max<u32>(extHigh_ + 2, std::max<u32>(4u, extCap_ + extCap_ / 2)));
+        if (extHigh_ + MATERIAL_TT_GROUPS > extCap_) growExt(std::max<u32>(extHigh_ + MATERIAL_TT_GROUPS, std::max<u32>(4u, extCap_ + extCap_ / 2)));
         const u32 g = extHigh_;
-        extHigh_ += 2;
+        extHigh_ += MATERIAL_TT_GROUPS;
         return g * MATERIAL_EXT_RECORDS;
     }
 
@@ -351,14 +365,14 @@ struct SceneStore::Impl {
             for (u32 k = 0; k < MATERIAL_EXT_RECORDS; ++k) setExt(group + k, recs[k]);
         }
         // F15.1 (ticket 22): the transform block of a PerSlot material (allocated on first need, kept, zeroed when the transforms go).
-        const bool tt = desc && needsTextureTransformBlock(*desc);
+        const bool tt = desc && ttNeeded(idx, *desc);
         u32 block = matTt_[idx];
         if (tt && block == NONE) {
             block = allocTtBlock();
             matTt_[idx] = block;
         }
         if (block != NONE) {
-            const TextureTransformBlock recs = tt ? packTextureTransforms(*desc) : TextureTransformBlock{};
+            const TextureTransformBlock recs = tt ? packTextureTransforms(*desc, true) : TextureTransformBlock{};
             for (u32 k = 0; k < MATERIAL_TT_RECORDS; ++k) setExt(block + k, recs[k]);
         }
         gm.flags = (gm.flags & ~(MATERIAL_FEATURES_ALL << MATERIAL_FEATURE_SHIFT)) | (mask << MATERIAL_FEATURE_SHIFT);
@@ -821,6 +835,7 @@ struct SceneStore::Impl {
         // Size the extension buffer for the extended materials of the scene (library and
         // entities) so the first sync is not a growth event; none: nothing allocated.
         u32 extended = 0;
+        layerTarget_ = layerTargets(*scene_);
         {
             const auto& desc = scene_->materialDescriptions();
             for (u32 i = 0; i < lib.size() && i < desc.size(); ++i)
@@ -829,10 +844,10 @@ struct SceneStore::Impl {
                 if (const MaterialComponent* mc = mat_->tryGet(e);
                     mc && mc->extension && (featureMask(*mc->extension) != 0 || (mc->extension->layers && layerFeatureUnion(*mc->extension->layers, desc) != 0)))
                     ++extended;
-            for (u32 i = 0; i < lib.size() && i < desc.size(); ++i) extended += needsTextureTransformBlock(desc[i]) ? 2u : 0u;
+            for (u32 i = 0; i < lib.size() && i < desc.size(); ++i) extended += ttNeeded(i, desc[i]) ? MATERIAL_TT_GROUPS : 0u;
             for (EntityID e : mat_->entities())
                 if (const MaterialComponent* mc = mat_->tryGet(e); mc && mc->extension && needsTextureTransformBlock(*mc->extension))
-                    extended += 2u;
+                    extended += MATERIAL_TT_GROUPS;
         }
         materials_.assign(lib.begin(), lib.end());
         if (materials_.empty()) materials_.push_back(toGPUMaterial(MaterialComponent{}));
@@ -1094,6 +1109,7 @@ struct SceneStore::Impl {
             // the library records; unchanged ones diff to nothing (O(library), only on an edit).
             if (scene.materialEditVersion() != editVersion_) {
                 editVersion_ = scene.materialEditVersion();
+                layerTarget_ = layerTargets(*scene_);
                 for (u32 i = 0; i < libRegion_; ++i) applyLibraryMaterial(i);
                 // F15.4: a stack's flags and record 3 carry the features of its layers, which live in the library: re-derive the entity stacks.
                 for (EntityID e : mat_->entities()) {
@@ -1133,6 +1149,7 @@ std::string SceneStore::Impl::verify(const ECS& ecs, const GpuScene& scene) cons
     if (materials_.size() < libRegion) return "materials_ smaller than the library";
     // F15.1: extension groups in use (owner material -> checked below; unowned groups are zero).
     std::vector<u8> groupOwned(extHigh_, 0);
+    const std::vector<u8> layerTargetsExp = layerTargets(scene); // F15.1 (ticket 22): layer sub-materials carry their transform block even when uniform
     // Expected record of a material: base data + feature bits of its description; the
     // extension index is allocation history, so it is taken from the mirror after
     // validating it (aligned, inside the used range, owned once, records equal the packing).
@@ -1141,16 +1158,18 @@ std::string SceneStore::Impl::verify(const ECS& ecs, const GpuScene& scene) cons
         const u32 mask = (desc ? featureMask(*desc) : 0u) | layerUnion;
         exp.flags = (exp.flags & ~(MATERIAL_FEATURES_ALL << MATERIAL_FEATURE_SHIFT)) | (mask << MATERIAL_FEATURE_SHIFT);
         // F15.1 (ticket 22): the transform block (allocation history again: validated, then taken from the mirror).
-        const bool tt = desc && needsTextureTransformBlock(*desc);
+        const bool tt = desc && needsTextureTransformBlock(*desc, idx < layerTargetsExp.size() && layerTargetsExp[idx] != 0);
         {
             const u32 blk = matTt_[idx];
             if (blk != NONE) {
-                if (blk % MATERIAL_EXT_RECORDS != 0 || blk / MATERIAL_EXT_RECORDS + 1 >= extHigh_)
+                if (blk % MATERIAL_EXT_RECORDS != 0 || blk / MATERIAL_EXT_RECORDS + MATERIAL_TT_GROUPS > extHigh_)
                     return fmt("material %u: bad transform block %u", idx, blk);
                 const u32 g = blk / MATERIAL_EXT_RECORDS;
-                if (groupOwned[g] || groupOwned[g + 1]) return fmt("material %u: transform block %u shared", idx, g);
-                groupOwned[g] = groupOwned[g + 1] = 1;
-                const TextureTransformBlock want = tt ? packTextureTransforms(*desc) : TextureTransformBlock{};
+                for (u32 k = 0; k < MATERIAL_TT_GROUPS; ++k) {
+                    if (groupOwned[g + k]) return fmt("material %u: transform block %u shared", idx, g);
+                    groupOwned[g + k] = 1;
+                }
+                const TextureTransformBlock want = tt ? packTextureTransforms(*desc, true) : TextureTransformBlock{};
                 for (u32 k = 0; k < MATERIAL_TT_RECORDS; ++k)
                     if (!sameBytes(ext_[blk + k], want[k])) return fmt("material %u: transform record %u differs", idx, k);
             } else if (tt) {
@@ -1371,9 +1390,11 @@ std::string SceneStore::Impl::verify(const ECS& ecs, const GpuScene& scene) cons
             freeSet[g] = 1;
         }
         for (u32 g : ttFree_) {
-            if (g + 1 >= extHigh_ || freeSet[g] || freeSet[g + 1] || groupOwned[g] || groupOwned[g + 1])
-                return fmt("transform block %u: bad free list", g);
-            freeSet[g] = freeSet[g + 1] = 1;
+            if (g + MATERIAL_TT_GROUPS > extHigh_) return fmt("transform block %u: bad free list", g);
+            for (u32 k = 0; k < MATERIAL_TT_GROUPS; ++k) {
+                if (freeSet[g + k] || groupOwned[g + k]) return fmt("transform block %u: bad free list", g);
+                freeSet[g + k] = 1;
+            }
         }
         for (u32 g = 0; g < extHigh_; ++g) {
             if (!groupOwned[g] && !freeSet[g]) return fmt("extension group %u leaked", g);

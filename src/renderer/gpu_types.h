@@ -203,7 +203,8 @@ PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterialExt3) == 80, "GPUMaterialExt3 layout");
 // transform s % 3.  Record 0 word `slotMask` has bit s set when slot s has a non-identity transform; the other slots sample the
 // plain UV.  uv' = M uv + o with M = R S of the specification (m = {m00, m01, m10, m11}, row major).
 // ---------------------------------------------------------------------------
-PHOSPHOR_GPU_CONSTANT u32 MATERIAL_TT_RECORDS = 2u * MATERIAL_EXT_RECORDS;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_TT_GROUPS  = 3;  // F15.1 (ticket 22, layers): 25 slots need 9 records
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_TT_RECORDS = MATERIAL_TT_GROUPS * MATERIAL_EXT_RECORDS;
 PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_BASE_COLOR       = 0;
 PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_METAL_ROUGH      = 1;
 PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_NORMAL           = 2;
@@ -224,7 +225,11 @@ PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_VOLUME_THICKNESS = 16;
 PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_SUBSURFACE_WEIGHT = 17;
 PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_SUBSURFACE_COLOR = 18;
 PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_SUBSURFACE_RADIUS = 19;
-PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_COUNT            = 20;
+// Layer stack (F15.4): the stack material's mask and the four layers' height textures.  A layer's OWN textures (base colour, normal, ...) go through
+// the transform block of the layer's sub-material (a library material), not through the stack's.
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_LAYER_MASK       = 20;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_LAYER_HEIGHT0    = 21; // + layer index (0..3)
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_COUNT            = 25;
 
 struct GPUTextureTransform {
     float m[4];                // m00, m01, m10, m11
@@ -232,7 +237,7 @@ struct GPUTextureTransform {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUTextureTransform) == 24, "GPUTextureTransform layout");
 
-/// One record of a transform block (three transforms and two spare words; `slotMask` is only meaningful in record 0).
+/// One record of a transform block (three transforms and two spare words; `slotMask` is only meaningful in record 0).  slotMask has 25 bits.
 struct GPUTextureTransformRecord {
     GPUTextureTransform t[3];
     u32 slotMask;

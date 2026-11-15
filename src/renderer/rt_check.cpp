@@ -109,6 +109,9 @@ AlphaDecision alphaTest(const GPURtRay& ray, const RtReferenceHit& hit,
     if (!std::isfinite(material.alphaCutoff) || !std::isfinite(material.baseColor[3]))
         throw std::invalid_argument("RT alpha material is nonfinite");
     if (material.alphaCutoff <= 0) return AlphaDecision::Accept;
+    // F15.4 (ticket 23): a layer stack's coverage is the blended layer alpha (the extension records the GPU reads are not part of this CPU
+    // reference): the decision is not mirrored, never decided from the stack's own record.
+    if ((material.flags & (MATERIAL_FEATURE_LAYERS << MATERIAL_FEATURE_SHIFT)) != 0u) return AlphaDecision::Ambiguous;
     if (material.baseColorTex == INVALID_TEXTURE_INDEX)
         return material.baseColor[3] >= material.alphaCutoff ? AlphaDecision::Accept : AlphaDecision::Reject;
     if (material.baseColorTex >= textures.size()) throw std::invalid_argument("RT CPU alpha texture is unavailable");

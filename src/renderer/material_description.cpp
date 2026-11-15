@@ -345,6 +345,9 @@ u32 textureTransformSlot(const char* slotName) {
         {"iridescenceThicknessTexture", TT_SLOT_IRIDESCENCE_THICKNESS}, {"transmissionTexture", TT_SLOT_TRANSMISSION},
         {"thicknessTexture", TT_SLOT_VOLUME_THICKNESS},   {"subsurfaceWeightTexture", TT_SLOT_SUBSURFACE_WEIGHT},
         {"subsurfaceColorTexture", TT_SLOT_SUBSURFACE_COLOR}, {"subsurfaceRadiusScaleTexture", TT_SLOT_SUBSURFACE_RADIUS},
+        {"layerMaskTexture", TT_SLOT_LAYER_MASK},         {"layerHeightTexture0", TT_SLOT_LAYER_HEIGHT0},
+        {"layerHeightTexture1", TT_SLOT_LAYER_HEIGHT0 + 1}, {"layerHeightTexture2", TT_SLOT_LAYER_HEIGHT0 + 2},
+        {"layerHeightTexture3", TT_SLOT_LAYER_HEIGHT0 + 3},
     };
     for (const auto& e : kSlots)
         if (std::string_view(e.name) == slotName) return e.slot;
@@ -358,13 +361,6 @@ TextureTransformAnalysis analyzeTextureTransforms(const MaterialDescription& des
     forEachTexture(desc, [&](const char* slot, const MaterialTextureRef& ref) {
         if (!ref.present()) return;
         const UvTransform t = ref.transform.value_or(UvTransform{});
-        if (textureTransformSlot(slot) == ~0u) { // layer mask / height: tiled by the layer stack, no transform
-            if (!t.isIdentity() || ref.texCoord != 0) {
-                result.status = TextureTransformStatus::Unsupported;
-                if (result.reason.empty()) result.reason = std::string(slot) + " carries a transform or a UV set (layer textures use the layer tiling)";
-            }
-            return;
-        }
         if (!t.isIdentity()) anyTransform = true;
         if (!haveSet) {
             result.uvSet = ref.texCoord;
@@ -382,7 +378,8 @@ TextureTransformAnalysis analyzeTextureTransforms(const MaterialDescription& des
     });
     if (result.status == TextureTransformStatus::Unsupported) return result;
     if (!anyTransform) return result;
-    result.status = uniform ? TextureTransformStatus::Uniform : TextureTransformStatus::PerSlot;
+    // A layer stack is never baked: its mask / height textures and the layers (uv * uvScale) are sampled in the stack's own uv space.
+    result.status = (uniform && !desc.layers) ? TextureTransformStatus::Uniform : TextureTransformStatus::PerSlot;
     if (uniform) result.transform = first;
     return result;
 }

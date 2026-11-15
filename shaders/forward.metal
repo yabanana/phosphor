@@ -154,9 +154,13 @@ fragment ShadowReceiverOutput forward_shadow_receiver_fs(
     const device TextureHandle* textures [[buffer(5)]],
     constant GPUTemporalParams& temporal [[buffer(8)]]) {
     const device auto& material = materials[in.materialIndex];
-    const float alpha = material.baseColor[3] * float(sampleOr(textures, material.baseColorTex, in.uv,
+    float alpha = material.baseColor[3] * float(sampleOr(textures, material.baseColorTex, in.uv,
                                                              half4(1), dfdx(in.uv)*exp2(temporal.mipBias),
                                                              dfdy(in.uv)*exp2(temporal.mipBias)).a);
+    {   // F15.4 (ticket 23): a layer stack's coverage (own alpha x the blended layer alpha), tested against the stack's cutoff
+        const float2 sdx = dfdx(in.uv) * exp2(temporal.mipBias), sdy = dfdy(in.uv) * exp2(temporal.mipBias);
+        alpha *= layerCoverage<TextureHandle, LayerRasterSamples>(material, materials, textures, in.uv, sdx, sdy, temporal.materialExtensions);
+    }
     if (alpha < material.alphaCutoff) discard_fragment();
     float3 n = cross(dfdx(in.worldPos), dfdy(in.worldPos));
     if (dot(n,n) < 1e-20f) discard_fragment();
@@ -178,7 +182,11 @@ fragment ShadowReceiverOutput forward_shadow_receiver_tt_fs(
     const device auto& material = materials[in.materialIndex];
     float2 uv = in.uv, dx = dfdx(in.uv)*exp2(temporal.mipBias), dy = dfdy(in.uv)*exp2(temporal.mipBias);
     texXfUvOn(texXfForOn(frame.materialExtensions, material.flags, material.textureTransformIndex), TT_SLOT_BASE_COLOR, uv, dx, dy);
-    const float alpha = material.baseColor[3] * float(sampleOr(textures, material.baseColorTex, uv, half4(1), dx, dy).a);
+    float alpha = material.baseColor[3] * float(sampleOr(textures, material.baseColorTex, uv, half4(1), dx, dy).a);
+    {   // F15.4 (ticket 23): a layer stack's coverage (own alpha x the blended layer alpha), tested against the stack's cutoff
+        const float2 sdx = dfdx(in.uv) * exp2(temporal.mipBias), sdy = dfdy(in.uv) * exp2(temporal.mipBias);
+        alpha *= layerCoverage<TextureHandle, LayerRasterSamples>(material, materials, textures, in.uv, sdx, sdy, temporal.materialExtensions);
+    }
     if (alpha < material.alphaCutoff) discard_fragment();
     float3 n = cross(dfdx(in.worldPos), dfdy(in.worldPos));
     if (dot(n,n) < 1e-20f) discard_fragment();

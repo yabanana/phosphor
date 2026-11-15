@@ -40,7 +40,7 @@ fragment float4 reflection_probe_capture_fs(ProbeVertexOut in [[stage_in]],bool 
     const device GPUSampledLight* sampled [[buffer(7)]],const device GPUEmissiveSurface* emitters [[buffer(8)]]){
     if(in.slot>=p.slotCount||in.material>=p.materialCount)discard_fragment();const GPUMaterial m=materials[in.material];
     const float2 dx=dfdx(in.uv),dy=dfdy(in.uv);const half4 baseTex=m.baseColorTex==INVALID_TEXTURE_INDEX?half4(1):probeSlotSample(textures,m.baseColorTex,p.materialExtensions,m,TT_SLOT_BASE_COLOR,in.uv,dx,dy);
-    if(m.baseColor[3]*float(baseTex.a)<m.alphaCutoff)discard_fragment();
+    if(m.baseColor[3]*float(baseTex.a)*layerCoverage<DITextureHandle,LayerAlphaGrad>(materials[in.material],materials,textures,in.uv,dx,dy,p.materialExtensions)<m.alphaCutoff)discard_fragment(); // F15.4 (ticket 23): a stack's coverage
     const bool front=frontFacing!=((instances[in.slot].flags&INSTANCE_FLAG_MIRRORED)!=0);float3 n=normalize(front?in.normal:-in.normal);
     const float3 geometric=normalize(cross(dfdx(in.world),dfdy(in.world)));float3 t=in.tangent-n*dot(n,in.tangent);
     // F15.4 (ticket 23): a layer stack's blended base parameters, normal and emission (gradient sampling of the capture, clamped mask).

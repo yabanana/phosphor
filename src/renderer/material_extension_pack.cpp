@@ -150,9 +150,14 @@ GPUTextureTransform makeGpuTextureTransform(const UvTransform& t) {
     return g;
 }
 
-TextureTransformBlock packTextureTransforms(const MaterialDescription& desc) {
+bool needsTextureTransformBlock(const MaterialDescription& desc, bool layerTarget) {
+    const TextureTransformStatus st = analyzeTextureTransforms(desc).status;
+    return st == TextureTransformStatus::PerSlot || (layerTarget && st == TextureTransformStatus::Uniform);
+}
+
+TextureTransformBlock packTextureTransforms(const MaterialDescription& desc, bool force) {
     TextureTransformBlock block{};
-    if (!needsTextureTransformBlock(desc)) return block;
+    if (!needsTextureTransformBlock(desc, force)) return block;
     std::array<GPUTextureTransformRecord, MATERIAL_TT_RECORDS> recs{};
     u32 mask = 0;
     forEachTexture(desc, [&](const char* slot, const MaterialTextureRef& ref) {

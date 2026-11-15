@@ -5,12 +5,14 @@
 #include "renderer/gpu_scene.h"
 #include "renderer/material_extension_pack.h"
 #include "renderer/scene_store.h"
+#include "renderer/temporal_layout.h"
 #include "scene/components.h"
 #include "scene/ecs.h"
 #include "scene/procedural.h"
 #include "null_texture_manager.h"
 
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <memory>
 
@@ -98,12 +100,12 @@ TEST_CASE("F15.1 ticket 22: every slot name of forEachTexture maps to a distinct
     d.volume = VolumeBlock{};
     d.subsurface = SubsurfaceBlock{};
     d.layers = LayerStack{};
+    d.layers->layers.resize(MATERIAL_LAYER_MAX); // the mask and the four height textures have slots of the stack's own block (F15.4)
     u32 seen = 0, mapped = 0, unmapped = 0;
     forEachTexture(d, [&](const char* name, const MaterialTextureRef&) {
         const u32 s = textureTransformSlot(name);
         if (s == ~0u) {
             ++unmapped;
-            CHECK((std::string(name).rfind("layer", 0) == 0));
             return;
         }
         REQUIRE(s < TT_SLOT_COUNT);
@@ -113,7 +115,7 @@ TEST_CASE("F15.1 ticket 22: every slot name of forEachTexture maps to a distinct
     });
     CHECK(mapped == TT_SLOT_COUNT);
     CHECK(seen == (1u << TT_SLOT_COUNT) - 1u);
-    CHECK(unmapped >= 1);
+    CHECK(unmapped == 0);
 }
 
 namespace {
@@ -229,4 +231,26 @@ TEST_CASE("F15.1 ticket 22: withTextureTransform appends constant 26 once; a des
     // Composes with a feature union without disturbing constant 22.
     const pipe::PipelineDesc both = withTextureTransform(withMaterialFeatures(base, MATERIAL_FEATURE_CLEARCOAT));
     CHECK(both.constantCount == base.constantCount + 2);
+}
+
+TEST_CASE("F15.4 ticket 22: a layer stack with a transform is PerSlot (never baked); a layer sub-material gets its block even when uniform") {
+    MaterialDescription stack;
+    stack.layers = LayerStack{};
+    stack.layers->mask.index = 3;
+    stack.layers->mask.transform = makeTransform(0.5f, 0.0f, 0.0f, 1.0f, 1.0f);
+    stack.layers->layers.resize(2);
+    CHECK(analyzeTextureTransforms(stack).status == TextureTransformStatus::PerSlot);
+    const TextureTransformBlock b = packTextureTransforms(stack);
+    CHECK(record(b, 0).slotMask == (1u << TT_SLOT_LAYER_MASK));
+    MaterialDescription sub;
+    sub.base.baseColorTexture.index = 4;
+    sub.base.baseColorTexture.transform = makeTransform(0.1f, 0.0f, 0.0f, 2.0f, 2.0f);
+    CHECK(analyzeTextureTransforms(sub).status == TextureTransformStatus::Uniform);
+    CHECK_FALSE(needsTextureTransformBlock(sub, false));
+    CHECK(needsTextureTransformBlock(sub, true)); // a layer target: no primitive bakes it
+    const TextureTransformBlock forced = packTextureTransforms(sub, true);
+    CHECK(record(forced, 0).slotMask == (1u << TT_SLOT_BASE_COLOR));
+    // the temporal parameters carry the extension buffer pointer at an 8-aligned offset, size unchanged
+    CHECK(offsetof(GPUTemporalParams, materialExtensions) == 184);
+    CHECK(sizeof(GPUTemporalParams) == 192);
 }

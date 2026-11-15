@@ -87,3 +87,32 @@ static void texXfFrameOn(TexXf x, uint slot, thread float3 &T, thread float3 &B)
         }
     }
 }
+
+// A slot's uv AND derivatives through the material's block, guarded by the material's flag (the values are untouched without one).  The layer
+// stack's mask / height and every layer's own textures use this: a layer's slots go through the block of ITS sub-material.
+static void texXfSlotUvDd(const device GPUMaterialExtRecord *extensions, uint flags, uint index, uint slot, thread float2 &uv, thread float2 &dx,
+                          thread float2 &dy) {
+    if (extensions != nullptr && (flags & MATERIAL_FLAG_TEXTURE_TRANSFORM) != 0u) texXfUvOn(texXfForOn(extensions, flags, index), slot, uv, dx, dy);
+}
+
+// A tangent-space normal vector read through a transformed normal-like slot, expressed in the mesh's tangent frame: the texel axes are
+// T' = inv00 T - inv10 B and B' = -inv01 T + inv11 B (texXfFrameOn), so (a, b) -> a T' + b B' in the (T, B) basis.  Unchanged without a transform.
+static float3 texXfRotateTn(const device GPUMaterialExtRecord *extensions, uint flags, uint index, uint slot, float3 tn) {
+    if (extensions != nullptr && (flags & MATERIAL_FLAG_TEXTURE_TRANSFORM) != 0u) {
+        const TexXf x = texXfForOn(extensions, flags, index);
+        if (texXfHasOn(x, slot)) {
+            const GPUTextureTransform t = texXfGet(x, slot);
+            const float det = t.m[0] * t.m[3] - t.m[1] * t.m[2];
+            if (fabs(det) > 1e-12f) {
+                const float i00 = t.m[3] / det, i01 = -t.m[1] / det, i10 = -t.m[2] / det, i11 = t.m[0] / det;
+                const float2 tp = float2(i00, -i10), bp = float2(-i01, i11);
+                const float tl = length(tp), bl = length(bp);
+                if (tl > 1e-12f && bl > 1e-12f) {
+                    const float2 ts = tp / tl, bs = bp / bl;
+                    return float3(tn.x * ts.x + tn.y * bs.x, tn.x * ts.y + tn.y * bs.y, tn.z);
+                }
+            }
+        }
+    }
+    return tn;
+}

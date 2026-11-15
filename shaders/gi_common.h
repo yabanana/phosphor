@@ -117,7 +117,7 @@ inline bool layerStackSurface(const device GPUMaterial& m,GPUMaterialExtPtr exte
                               float2 uv,float2 dx,float2 dy,thread LayerSurface& out) {
     if((m.flags&(MATERIAL_FEATURE_LAYERS<<MATERIAL_FEATURE_SHIFT))==0u||extensions==nullptr||m.extensionIndex==MATERIAL_EXTENSION_INVALID) return false;
     const GPUMaterialExt3 e3=*reinterpret_cast<const device GPUMaterialExt3*>(extensions+m.extensionIndex+3u);
-    out=resolveLayerBase<T,Samples>(e3,materials,textures,uv,dx,dy,true);
+    out=resolveLayerBase<T,Samples>(e3,materials,textures,uv,dx,dy,true,extensions,m.flags,m.textureTransformIndex);
     return true;
 }
 

@@ -1,6 +1,8 @@
 // One exported alpha entry shared by all statically linked RT consumers.
 #include "rt_common.h"
 #include "texture_transform_core.h" // F15.1 (ticket 22): per-slot texture transforms at the secondary sites
+#include "renderer/layer_blend.h"   // F15.4 (ticket 23): the stack coverage of the any-hit alpha test
+#include "layer_resolve.h"
 
 // F15.1 (ticket 14): the transmittance of ONE transmissive triangle crossed by a RT_PROBE_SHADOW_TRANSMITTED ray, accumulated in log space
 // into the payload (order independent: no sorting of the hits).  Hardware invokes the intersection function for every non-opaque triangle the
@@ -66,9 +68,22 @@ template<typename Payload>
 inline bool rtAlphaMaskedTest(uint primitive, float2 bary, float distance, ray_data Payload& payload, const device GPUMaterial& m,
                               const device GPUInstance& instance, const device GPURtMesh* meshes, const device RtTextureHandle* textures,
                               const device GPUVertex* vertices, const device uint* indices,
-                              const device GPUMaterialExtRecord* extensions) {
+                              const device GPUMaterialExtRecord* extensions, const device GPUMaterial* materials) {
     const device GPURtMesh& mesh = meshes[instance.meshIndex];
     if (primitive >= mesh.indexCount / 3u) return false;
+    // F15.4 (ticket 23): a layer stack's coverage is its own alpha x the blended layer alpha (level 0), tested against the stack's cutoff.
+    if ((m.flags & (MATERIAL_FEATURE_LAYERS << MATERIAL_FEATURE_SHIFT)) != 0u && extensions != nullptr && m.extensionIndex != MATERIAL_EXTENSION_INVALID) {
+        const uint sbase = mesh.indexOffset + 3u * primitive;
+        const device GPUVertex& sv0 = vertices[mesh.vertexOffset + indices[sbase]];
+        const device GPUVertex& sv1 = vertices[mesh.vertexOffset + indices[sbase + 1u]];
+        const device GPUVertex& sv2 = vertices[mesh.vertexOffset + indices[sbase + 2u]];
+        const float2 suv = float2(sv0.u, sv0.v) * (1.0f - bary.x - bary.y) + float2(sv1.u, sv1.v) * bary.x + float2(sv2.u, sv2.v) * bary.y;
+        float own = m.baseColor[3];
+        if (m.baseColorTex != INVALID_TEXTURE_INDEX)
+            own *= float(half(textures[m.baseColorTex].tex.sample(kRtAlphaSampler, texXfSlotUv(extensions, m.flags, m.textureTransformIndex, TT_SLOT_BASE_COLOR, suv), level(0)).a));
+        own *= layerCoverage<RtTextureHandle, LayerAlphaLevel0>(m, materials, textures, suv, float2(0.0f), float2(0.0f), extensions);
+        return own >= m.alphaCutoff;
+    }
     if (m.baseColorTex == INVALID_TEXTURE_INDEX) return m.baseColor[3] >= m.alphaCutoff;
     const uint base = mesh.indexOffset + 3u * primitive;
     const device GPUVertex& v0 = vertices[mesh.vertexOffset + indices[base]];
@@ -129,7 +144,7 @@ bool rt_alpha_generic(uint primitive [[primitive_id]], uint slot [[user_instance
         if (!transmissive) ++payload.opaqueAlphaTests;
         return true;
     }
-    return rtAlphaMaskedTest(primitive, bary, distance, payload, m, instance, meshes, textures, vertices, indices, extensions);
+    return rtAlphaMaskedTest(primitive, bary, distance, payload, m, instance, meshes, textures, vertices, indices, extensions, materials);
 }
 
 // F15 ticket 24: the entry of every pipeline that never traces a RT_PROBE_SHADOW_TRANSMITTED ray.  The payload is the 16-byte
@@ -157,5 +172,5 @@ bool rt_alpha_lite(uint primitive [[primitive_id]], uint slot [[user_instance_id
         if (!transmissive) ++payload.opaqueAlphaTests;
         return true;
     }
-    return rtAlphaMaskedTest(primitive, bary, distance, payload, m, instance, meshes, textures, vertices, indices, extensions);
+    return rtAlphaMaskedTest(primitive, bary, distance, payload, m, instance, meshes, textures, vertices, indices, extensions, materials);
 }

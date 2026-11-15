@@ -31,7 +31,10 @@ using MaterialExtGroup = std::array<GPUMaterialExtRecord, MATERIAL_EXT_RECORDS>;
 /// records, slot s at record s / 3.  Absent or identity slots keep a zero record entry and no mask bit.
 using TextureTransformBlock = std::array<GPUMaterialExtRecord, MATERIAL_TT_RECORDS>;
 [[nodiscard]] bool needsTextureTransformBlock(const MaterialDescription& desc);
-[[nodiscard]] TextureTransformBlock packTextureTransforms(const MaterialDescription& desc);
+/// `force` packs a UNIFORM description too (a layer sub-material is never baked into a mesh: SceneStore::layerTargets).
+[[nodiscard]] TextureTransformBlock packTextureTransforms(const MaterialDescription& desc, bool force = false);
+/// A material the block applies to: PerSlot, or Uniform when `layerTarget` (a layer of some stack: no primitive bakes its transform).
+[[nodiscard]] bool needsTextureTransformBlock(const MaterialDescription& desc, bool layerTarget);
 /// uv' = M uv + o with the matrices of the KHR_texture_transform README (computed in double, stored as float).
 [[nodiscard]] GPUTextureTransform makeGpuTextureTransform(const UvTransform& t);
 

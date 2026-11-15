@@ -508,6 +508,15 @@ bool applyMaterialOverridesToScene(const std::string& json, GpuScene& scene, con
             ref.index = resolve(ref.path, ref.colorSpace == TextureColorSpace::SRGB);
             (void)slot;
         });
+        // F15.4 (texxform): a layer names its material; the scene resolves the name to the library index (the first material of that name).
+        if (d.layers)
+            for (MaterialLayer& l : d.layers->layers)
+                if (!l.materialName.empty())
+                    for (size_t k = 0; k < names.size(); ++k)
+                        if (names[k] == l.materialName) {
+                            l.materialIndex = static_cast<u32>(k);
+                            break;
+                        }
         scene.setMaterialDescription(static_cast<u32>(sceneIndex[c]), d);
     }
     return true;

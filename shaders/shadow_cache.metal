@@ -6,6 +6,8 @@
 using namespace metal;
 using namespace phosphor;
 #include "texture_transform_core.h" // F15.1 (ticket 22): the base colour slot transform of the cache alpha test
+#include "renderer/layer_blend.h"   // F15.4 (ticket 23): the stack coverage of the alpha test
+#include "layer_resolve.h"
 
 // F10.5 adds buffer18 GPUShadowCacheParams, 19 CPU conservative static class,
 // 20 expected GPUShadowCacheTile[64], 21 persistent GPUShadowCacheTile[64].
@@ -96,6 +98,7 @@ fragment void shadow_cache_depth_fragment(CacheDepthOut in [[stage_in]],
         constexpr sampler alphaSampler(filter::linear,mip_filter::linear,address::repeat);
         float alpha=m.baseColor[3];
         if(m.baseColorTex!=INVALID_TEXTURE_INDEX)alpha*=float(half(textures[m.baseColorTex].tex.sample(alphaSampler,texXfSlotUv(extensions,m.flags,m.textureTransformIndex,TT_SLOT_BASE_COLOR,in.uv),level(0)).a));
+        alpha*=layerCoverage<CacheTexture,LayerAlphaLevel0>(m,materials,textures,in.uv,float2(0.0f),float2(0.0f),extensions); // F15.4 (ticket 23)
         if(alpha<m.alphaCutoff)discard_fragment();
     }
 }

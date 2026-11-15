@@ -10,6 +10,8 @@
 #include "renderer/visibility_math.h"
 #include "renderer/meshlet_layout.h"
 #include "texture_transform_core.h" // F15.1 (ticket 22): per-slot texture transforms at the alpha tests and the transmittance tint
+#include "renderer/layer_blend.h"   // F15.4 (ticket 23): the stack coverage of the alpha tests
+#include "layer_resolve.h"
 #include "shadow_receiver_own.h"
 
 static float4x4 shadowMatrix(constant float* m) {
@@ -204,6 +206,7 @@ fragment void shadow_depth_fragment(ShadowDepthOut in [[stage_in]],
     if(m.alphaCutoff>0) {
         float alpha=m.baseColor[3];
         if(m.baseColorTex!=INVALID_TEXTURE_INDEX) alpha*=float(half(textures[m.baseColorTex].tex.sample(kRtAlphaSampler,texXfSlotUv(extensions,m.flags,m.textureTransformIndex,TT_SLOT_BASE_COLOR,in.uv),level(0)).a));
+        alpha*=layerCoverage<RtTextureHandle,LayerAlphaLevel0>(m,materials,textures,in.uv,float2(0.0f),float2(0.0f),extensions); // F15.4 (ticket 23)
         if(alpha<m.alphaCutoff) discard_fragment();
     }
 }
