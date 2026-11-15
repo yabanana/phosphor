@@ -195,3 +195,31 @@ ReSTIR + resolve and DDGI + resolve exit 0 with 120 LIGHTING PASS each (the vali
 Still true / open: the probe lookup is not a denoised signal and not path traced at -N: its accuracy is the DDGI probe accuracy in every mode (the gate is indicative, no decision-11 GI
 threshold exists); a path-traced E(-N) with its own reservoir history for ReSTIR GI would need a second denoiser signal (not built, not required by the plan).  Cost of the extra dispatch
 (frame-size, 7.4 MB RGBA16F at 720p, thin scenes only) needs a quiet-machine A/B (`tools/f15_costs.py` item 5 compares `--thin-gi-back off|on`).
+
+### 2026-11-15 — dropped controls redesigned (agent `tex`, branch f15c-tex-2)
+
+Each dropped control now fails on a fixture the engine passes; thresholds untouched (sphere mean 5 % on the exact-environment keys). Binaries/captures:
+`build/f15-check/tex6` (thin + coat), `tex7` (irid + aniso, panels), `tex8` (panel sun).
+
+- `transmission-uncoated` on `combo-thin-coat-env`: the cause was NOT that the control was weak, the exact-environment reference did not implement it at all (worst
+  mean 0.0: the coat attenuated the transmitted lobe in the environment whatever the variant). `render_frame` now splits the exact environment of an `uncoated` thin
+  material (reflected part without the transmitted lobe under the coat, the transmitted term added outside it). The grid also gets a third row, thin weight 1 with a
+  white transmission colour (the transmitted lobe carries almost all the radiance). Engine capture: gate worst mean 0.95 %; control 6.5 % (fails); the other controls
+  (transmission-ignored 154 %, coat-ignored 26.7 %, additive-layering 219 %) and the declared twin keys stay green (`combo-thin-coat-{sun,env,env@resolve}` GREEN).
+- `additive-layering` on `combo-irid-aniso-env`: the diffuse-weighted-by-film effect was 4.0 % with a film of index 1.3 over dielectrics. The grid gets a third row, a
+  dielectric under a film of index 1.8 (400 nm; anisotropy 0.5 at pi/4 and pi/2, and the film alone). Reference model: the control moves the sphere mean 13.5 %. Engine
+  capture (`tex7`): gate worst mean 3.56 % (< 5 %), control 13.6 % (fails), `-sun` (p99 <= 0.04 %) and `-env@resolve` (worst mean 0.010 %) GREEN. A first attempt, anisotropy 1 under
+  an index 2.2 film, measured 11.8 % for the engine against the exact quadrature on two dielectric spheres (composite diffuse complement with a film and a strongly
+  stretched lobe): it is the declared-fit error family of ticket 11 and was NOT hidden, the cells were moved to strength 0.5 / film alone (recorded here).
+- `aniso-rotation-flipped` on the anisotropy + coat / + sheen exact-environment keys: PROVEN not to discriminate on those fixtures. A sphere seen along its axis with
+  mirror-symmetric combed tangents has a mirror-symmetric image, and flipping the lobe rotation IS the mirror image, so the sphere mean of a constant environment is identical:
+  `tools/test_f15_reference.py::test_rotation_flip_is_invisible_to_the_sphere_mean_of_a_constant_environment_but_not_on_a_yawed_panel` (sphere means equal to 1e-9, per pixel
+  difference > 0.02). Redesign: a YAWED (50 degrees), ROLLED (20 degrees) panel has a uniform tangent and an asymmetric view azimuth. New keys `combo-aniso-panel-{sun,env}`
+  (2 x 3 panels: anisotropy 1 at pi/4 under a coat, under a sheen, alone; dielectric and dark copper). `combo-aniso-panel-env` (engine, `tex7`): gate worst mean 1.18 %; controls
+  aniso-rotation-flipped 7.1 % (fails), aniso-ignored 94.8 % (fails). New testbench fields `carrierYawDegrees` / `carrierRollDegrees` for quad carriers.
+  Archive: +18 descriptors for the aniso + coat + sheen union (`.scratch/f15/harvest/tex-2.json`, `--constant 22 --skip-present`, from the two panel scenarios); the class manifest was re-exported.
+- Test mirrors updated (`tools/test_f15_check.py`: three-row grids, 34 combination keys); `phosphor_tests` and `ctest` 33/33 OK.
+- `combo-aniso-panel-sun` (`tex8`, sun on the lit side of the panels (0.6, 0.4, 0.7): the usual rig sun lights none of them): GREEN, p99 <= 0.01 %, max <= 0.01 %; controls aniso-ignored,
+  aniso-rotation-flipped, coat-ignored, sheen-ignored all FAIL; `-env` (`tex8`) GREEN again with aniso-rotation-flipped and aniso-ignored failing.
+- Featureless scenes: the five F13 exactness captures (`f15_exact.sh`, `build/tex-exact`) are byte-identical (`cmp`) to `build/litefix/exact-new` (sponza-d2, cornell-restir,
+  cornell-clustered-ssr, manylights-restir, grid-sky); nothing under src/renderer, src/platform or shaders changed except the additive archive descriptors.

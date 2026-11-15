@@ -1229,14 +1229,14 @@
         {
           "lobes": [],
           "mask": 0,
-          "materials": 3
+          "materials": 4
         },
         {
           "lobes": [
             "iridescence"
           ],
           "mask": 16,
-          "materials": 2
+          "materials": 4
         },
         {
           "lobes": [
@@ -1244,7 +1244,7 @@
             "iridescence"
           ],
           "mask": 24,
-          "materials": 6
+          "materials": 8
         }
       ],
       "family": "material",
@@ -1257,14 +1257,14 @@
         {
           "lobes": [],
           "mask": 0,
-          "materials": 3
+          "materials": 4
         },
         {
           "lobes": [
             "iridescence"
           ],
           "mask": 16,
-          "materials": 2
+          "materials": 4
         },
         {
           "lobes": [
@@ -1272,7 +1272,7 @@
             "iridescence"
           ],
           "mask": 24,
-          "materials": 6
+          "materials": 8
         }
       ],
       "family": "material",
@@ -1341,14 +1341,14 @@
         {
           "lobes": [],
           "mask": 0,
-          "materials": 3
+          "materials": 4
         },
         {
           "lobes": [
             "subsurface"
           ],
           "mask": 128,
-          "materials": 2
+          "materials": 3
         },
         {
           "lobes": [
@@ -1356,7 +1356,7 @@
             "subsurface"
           ],
           "mask": 130,
-          "materials": 6
+          "materials": 9
         }
       ],
       "family": "material",
@@ -1369,14 +1369,14 @@
         {
           "lobes": [],
           "mask": 0,
-          "materials": 3
+          "materials": 4
         },
         {
           "lobes": [
             "subsurface"
           ],
           "mask": 128,
-          "materials": 2
+          "materials": 3
         },
         {
           "lobes": [
@@ -1384,7 +1384,7 @@
             "subsurface"
           ],
           "mask": 130,
-          "materials": 6
+          "materials": 9
         }
       ],
       "family": "material",
@@ -1670,6 +1670,78 @@
       "family": "material",
       "name": "material:lobe-guide-coplanar",
       "union": 2,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "anisotropy"
+          ],
+          "mask": 8,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "clearcoat",
+            "anisotropy"
+          ],
+          "mask": 10,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "sheen",
+            "anisotropy"
+          ],
+          "mask": 12,
+          "materials": 2
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-aniso-panel-sun",
+      "union": 14,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "anisotropy"
+          ],
+          "mask": 8,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "clearcoat",
+            "anisotropy"
+          ],
+          "mask": 10,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "sheen",
+            "anisotropy"
+          ],
+          "mask": 12,
+          "materials": 2
+        }
+      ],
+      "family": "material",
+      "name": "material:combo-aniso-panel-env",
+      "union": 14,
       "volumetric": false
     }
   ],

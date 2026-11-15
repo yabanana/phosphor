@@ -19,7 +19,7 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 82> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+constexpr std::array<std::string_view, 84> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
                                                       "furnace-base",   "furnace-resolve",     "roughness-extremes",
                                                       "roughness-extremes-sun", "specular-grid-sun",
                                                       "specular-grid-env-resolve", "specular-grid-point", "specular-grid-env", "furnace-specular",
@@ -49,7 +49,7 @@ constexpr std::array<std::string_view, 82> kScenarios{"base-grid-sun",  "base-gr
                                                       "texture-coat-sun", "texture-coat-env-resolve", "texture-aniso-sun",
                                                       "texture-aniso-env-resolve", "texture-irid-sun", "texture-irid-env-resolve",
                                                       "texture-sheen-sun", "texture-sheen-env-resolve", "texture-thin-sun",
-                                                      "texture-thin-env-resolve"};
+                                                      "texture-thin-env-resolve", "combo-aniso-panel-sun", "combo-aniso-panel-env"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -92,6 +92,9 @@ struct ComboLook {
     std::vector<Cell>  cells;     // rows x columns, row-major
     bool               combed = false;
     glm::vec3          towardSun{-0.8f, 0.35f, -0.3f};
+    bool               quad = false;      // single-sided quad carriers instead of spheres (tangent +X of the mesh)
+    float              yawDegrees = 0.0f; // quad carriers: rotation about the vertical after facing the camera
+    float              rollDegrees = 0.0f; // quad carriers: rotation about the quad normal before the yaw
 };
 
 // One combination: `name`-sun (sun only: the direct gate) and `name`-env (environment 0.5 only: the exact quadrature through the
@@ -107,6 +110,9 @@ void addCombination(std::vector<MaterialScenarioSpec>& out, const std::string& n
     sun.towardSun      = glm::normalize(look.towardSun);
     sun.combo          = look.cells;
     sun.combedCarriers = look.combed;
+    sun.quadCarriers   = look.quad;
+    sun.carrierYawDegrees  = look.yawDegrees;
+    sun.carrierRollDegrees = look.rollDegrees;
     out.push_back(sun);
     MaterialScenarioSpec env = sun;
     env.name          = declaredName("combo-" + name + "-env");
@@ -299,6 +305,19 @@ void addCombinations(std::vector<MaterialScenarioSpec>& out) {
                             default: return withSheen(none, white, 0.4f);
                         }
                     }), true});
+    // Anisotropy on a YAWED, ROLLED panel (ticket 19, redesigned aniso-rotation-flipped control of the exact-environment keys): a panel yawed 50
+    // degrees and rolled 20 degrees has a uniform tangent and an asymmetric view azimuth, so flipping the lobe rotation moves the sphere mean of the
+    // constant environment (on a mirror-symmetric sphere it cannot: tools/test_f15_reference.py).  rows = dielectric, metal; columns = anisotropy 1
+    // at pi/4 under a coat (1 / 0.3), under a white sheen (0.4), and alone.
+    addCombination(out, "aniso-panel",
+                   {std::vector<float>(3, 0.3f), {0.0f, 1.0f}, darkCopper, grid(2, 3, [&](size_t, size_t c) {
+                        const Cell cell = withAniso(none, 1.0f, quarter);
+                        switch (c) {
+                            case 0: return withCoat(cell, 1.0f, 0.3f);
+                            case 1: return withSheen(cell, white, 0.4f);
+                            default: return cell;
+                        }
+                    }), false, glm::vec3(0.6f, 0.4f, 0.7f), true, 50.0f, 20.0f}); // the sun on the lit side of the yawed panels (the first run with the usual sun lit none)
     // Specular + sheen: rows = sheen (white 0.4, orange 0.75); columns = (sheen alone), (ior 2.4), (ior 1.33), (ior 1.5, weight 0.5, colour 2 1 .5).
     {
         const std::vector<std::pair<glm::vec3, float>> sheens{{white, 0.4f}, {orange, 0.75f}};
@@ -337,7 +356,16 @@ void addCombinations(std::vector<MaterialScenarioSpec>& out) {
     // Iridescence + anisotropy (carried from tickets 11/12): the exact environment integrates the film over V.H histograms of the
     // anisotropic half-vector quadrature (tools/f15_reference.py aniso_vh_histograms).
     addCombination(out, "irid-aniso",
-                   {std::vector<float>(4, 0.3f), {0.0f, 1.0f}, copper, grid(2, 4, [&](size_t, size_t c) {
+                   {std::vector<float>(4, 0.3f), {0.0f, 1.0f, 0.0f}, copper, grid(3, 4, [&](size_t r, size_t c) {
+                        if (r == 2) { // ticket 19 (redesigned control): a dielectric under a film of index 1.8 (400 nm), whose reflectance (1 - max F_irid
+                                      // on the diffuse) is the larger term the additive-layering control removes (13.5 % of the exact environment against
+                                      // 4.0 % without the row, reference model); anisotropy 0.5 only: strength 1 under an index 2.2 film measured 11.8 % in the engine
+                            switch (c) {
+                                case 0: return withAniso(withIrid(none, 1.0f, 1.8f, 400.0f), 0.5f, quarter);
+                                case 2: return withAniso(withIrid(none, 1.0f, 1.8f, 400.0f), 0.5f, half);
+                                default: return withIrid(none, 1.0f, 1.8f, 400.0f);
+                            }
+                        }
                         switch (c) {
                             case 0: return withAniso(withIrid(none, 1.0f, 1.3f, 400.0f), 0.5f, quarter);
                             case 1: return withAniso(withIrid(none, 1.0f, 1.3f, 800.0f), 1.0f, 0.0f);
@@ -365,8 +393,10 @@ void addCombinations(std::vector<MaterialScenarioSpec>& out) {
     // Thin subsurface + clearcoat: rows = thin weight 0.5 (warm), 1 (teal); columns = coat (none), (1 / 0.3), (0.5 / 0.35), (1 / 0.6);
     // sun behind the spheres (the thin-sun rig): the transmitted lobe under the coat.
     addCombination(out, "thin-coat",
-                   {std::vector<float>(4, 0.5f), {0.0f, 0.0f}, glm::vec3(0.3f, 0.5f, 0.8f), grid(2, 4, [&](size_t r, size_t c) {
-                        Cell cell = withThin(none, r == 0 ? 0.5f : 1.0f, r == 0 ? warm : teal);
+                   {std::vector<float>(4, 0.5f), {0.0f, 0.0f, 0.0f}, glm::vec3(0.3f, 0.5f, 0.8f), grid(3, 4, [&](size_t r, size_t c) {
+                        // row 2 (ticket 19, redesigned control): weight 1 with a white transmission colour, so that the transmitted lobe carries
+                        // almost all the radiance and the control that lets it escape the coat moves the sphere mean of the exact environment
+                        Cell cell = r == 2 ? withThin(none, 1.0f, white) : withThin(none, r == 0 ? 0.5f : 1.0f, r == 0 ? warm : teal);
                         switch (c) {
                             case 1: return withCoat(cell, 1.0f, 0.3f);
                             case 2: return withCoat(cell, 0.5f, 0.35f);
@@ -851,7 +881,12 @@ void MaterialValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textur
             spheres_.push_back(e);
             TransformComponent transform;
             transform.position = sphereCenter(s, column, row);
-            if (s.quadCarriers) transform.rotation = glm::angleAxis(0.5f * pi, glm::vec3(1.0f, 0.0f, 0.0f));
+            if (s.quadCarriers) {
+                transform.rotation = glm::angleAxis(0.5f * pi, glm::vec3(1.0f, 0.0f, 0.0f));
+                if (s.carrierRollDegrees != 0.0f || s.carrierYawDegrees != 0.0f) // roll about the mesh normal (+Y), then yaw about the vertical
+                    transform.rotation = glm::angleAxis(glm::radians(s.carrierYawDegrees), glm::vec3(0.0f, 1.0f, 0.0f)) * transform.rotation *
+                                         glm::angleAxis(glm::radians(s.carrierRollDegrees), glm::vec3(0.0f, 1.0f, 0.0f));
+            }
             if (!s.mirroredColumn.empty() && s.mirroredColumn[column]) transform.scale = glm::vec3(-1.0f, 1.0f, 1.0f);
             transform.updateMatrix();
             ecs.addComponent(e, std::move(transform));

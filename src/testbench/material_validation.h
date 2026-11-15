@@ -81,6 +81,8 @@ struct MaterialScenarioSpec {
     std::vector<float>     subsurfaceWeight;
     std::vector<glm::vec3> subsurfaceColor;
     bool                   quadCarriers = false;
+    float                  carrierYawDegrees  = 0.0f; // quadCarriers: yaw about the vertical (after facing the camera), ticket 19 panels
+    float                  carrierRollDegrees = 0.0f; // quadCarriers: roll about the quad normal before the yaw
     // F15.3 (ticket 17) volumetric subsurface grids (SubsurfaceMode::Volumetric, OpenPBR semantics of ADR-0005): the subsurface
     // weight and radius (metres) per COLUMN (weight 0 carries no extension, the neutral material), the multiple-scattering
     // colour, radiusScale (the per-channel mean free path is radius * radiusScale) and the Henyey-Greenstein anisotropy per ROW.  A

@@ -300,8 +300,9 @@ COMBO_IRID_ANISO_DECLARED = ["declared-iridescence-ignored", "declared-aniso-ign
 COMBO_IRID_SPECULAR_CONTROLS = ["iridescence-ignored", "specular-ignored", "additive-layering"]
 COMBO_IRID_SPECULAR_DECLARED = ["declared-iridescence-ignored", "declared-specular-ignored", "declared-additive-layering"]
 COMBO_THIN_COAT_CONTROLS = ["transmission-ignored", "coat-ignored", "transmission-uncoated", "additive-layering"]
-# `transmission-uncoated` does not move the sphere mean of the exact environment by 5 % (the attenuated transmitted share is small): direct keys only.
-COMBO_THIN_COAT_ENV_CONTROLS = ["transmission-ignored", "coat-ignored", "additive-layering"]
+# `transmission-uncoated` did not move the sphere mean of the exact environment by 5 % on the original two rows (the attenuated transmitted share is
+# small); the grid has a third row (weight 1, white transmission colour) where it must (ticket 19, F15.3 closure).
+COMBO_THIN_COAT_ENV_CONTROLS = ["transmission-ignored", "coat-ignored", "transmission-uncoated", "additive-layering"]
 COMBO_THIN_COAT_DECLARED = ["declared-transmission-ignored", "declared-coat-ignored", "declared-additive-layering"]
 # The exact-environment keys integrate over the whole sphere: a rotation of the lobe by the sign of the angle moves the sphere mean by less
 # than the 5 % bound there (measured: aniso-rotation-flipped passes the env gate of the anisotropy + coat / sheen grids), so those keys drop it.
@@ -310,7 +311,12 @@ COMBO_ANISO_SHEEN_ENV_CONTROLS = ["aniso-ignored", "sheen-ignored", "additive-la
 # Orchestrator decision (2026-11-14, measured on the integrated engine, build/f15-check/t19probe-1): on the iridescence + anisotropy grid
 # `additive-layering` (the diffuse not weighted by the film) moves the exact-environment sphere mean by 4.0 % < 5 %: it does not discriminate
 # there and is dropped from the env key only (it stays on -sun and -env@resolve, where the per-pixel and declared gates see it).
-COMBO_IRID_ANISO_ENV_CONTROLS = ["iridescence-ignored", "aniso-ignored"]
+# Redesign (F15.3 closure): a third row of dielectrics under a film of index 1.8 (400 nm) carries the control again (reference model: 13.5 %).
+COMBO_IRID_ANISO_ENV_CONTROLS = ["iridescence-ignored", "aniso-ignored", "additive-layering"]
+# The anisotropy + coat / sheen sphere grids cannot show the rotation flip in a constant environment (mirror symmetry, proven in
+# tools/test_f15_reference.py); the yawed, rolled panel grid does (ticket 19, F15.3 closure).
+COMBO_ANISO_PANEL_CONTROLS = ["aniso-ignored", "aniso-rotation-flipped", "coat-ignored", "sheen-ignored"]
+COMBO_ANISO_PANEL_ENV_CONTROLS = ["aniso-ignored", "aniso-rotation-flipped"]
 COMBO_IRID_SPECULAR_ENV_CONTROLS = ["iridescence-ignored", "specular-ignored", "additive-layering"]
 COMBO_ALL_LOBES_CONTROLS = ["coat-ignored", "sheen-ignored", "aniso-ignored", "specular-ignored", "additive-layering"]
 COMBO_ALL_LOBES_DECLARED = ["declared-coat-ignored", "declared-sheen-ignored", "declared-aniso-ignored", "declared-specular-ignored",
@@ -642,6 +648,10 @@ SCENARIOS = {
                                      "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport, on the anisotropy + clearcoat grid"},
     "combo-aniso-coat-env@resolve": {"kind": "declared", "reflections": "off", "controls": COMBO_ANISO_COAT_DECLARED,
                                              "terms": "constant environment only (radiance 0.5, no sun) on the anisotropy + clearcoat grid, deterministic resolve terms (--reflections off --lighting-denoise custom)"},
+    "combo-aniso-panel-sun": {"kind": "direct", "controls": COMBO_ANISO_PANEL_CONTROLS,
+                                      "terms": "sun disk only (environment 0, no shadows, no GI) on the anisotropy panels (yaw 50, roll 20 degrees) under a coat, a sheen and alone"},
+    "combo-aniso-panel-env": {"kind": "environment", "controls": COMBO_ANISO_PANEL_ENV_CONTROLS,
+                                      "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport, on the anisotropy panels (yaw 50, roll 20 degrees)"},
     "combo-aniso-sheen-sun": {"kind": "direct", "controls": COMBO_ANISO_SHEEN_CONTROLS,
                                       "terms": "sun disk only (environment 0, no shadows, no GI) on the anisotropy + sheen grid"},
     "combo-aniso-sheen-env": {"kind": "environment", "controls": COMBO_ANISO_SHEEN_ENV_CONTROLS,

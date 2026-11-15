@@ -2848,7 +2848,14 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
             aniso_env = None if aniso is None else aniso_environment_inputs(aniso, roughness, n, v)
             material = environment_radiance(base, metallic, roughness, dot(n, v), sky, model, sun_dielectric, aniso_env, irid,
                                             thin)
-            radiance += layered_environment(material, dot(n, v), coat, sheen, sky, model.get("order") == "swapped")
+            if thin is not None and coat is not None and thin["variant"] == "uncoated":
+                # ticket 19 control (F15.3 closure): the transmitted lobe escapes the coat.  Split the material radiance into the part
+                # without the transmitted lobe (colour 0: the reflected diffuse keeps its 1 - w) and the transmitted term itself.
+                reflected = environment_radiance(base, metallic, roughness, dot(n, v), sky, model, sun_dielectric, aniso_env, irid,
+                                                 {**thin, "color": np.zeros_like(thin["color"])})
+                radiance += layered_environment(reflected, dot(n, v), coat, sheen, sky, model.get("order") == "swapped") + (material - reflected)
+            else:
+                radiance += layered_environment(material, dot(n, v), coat, sheen, sky, model.get("order") == "swapped")
             terms.append("environment-quadrature")
         else:
             radiance += declared_environment_radiance(base, metallic, roughness, dot(n, v), sky, environment,

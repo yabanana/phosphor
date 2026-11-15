@@ -21,7 +21,7 @@
 using namespace phosphor;
 
 TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 82);
+    CHECK(MaterialValidation::scenarios().size() == 84);
     for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
                       "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve", "specular-grid-point",
                       "specular-grid-env", "furnace-specular", "clearcoat-grid-sun", "clearcoat-grid-env-resolve",
@@ -1242,8 +1242,9 @@ TEST_CASE("F15.3 (ticket 19) combination grids: one cell per sphere, the lobes i
     const Expected expected[] = {{"coat-sheen", 3, 4, Coat | Sheen},      {"aniso-coat", 2, 4, Aniso | Coat},
                                  {"aniso-sheen", 2, 4, Aniso | Sheen},    {"specular-sheen", 2, 4, Spec | Sheen},
                                  {"irid-coat", 2, 4, Irid | Coat},        {"irid-sheen", 2, 4, Irid | Sheen},
-                                 {"irid-aniso", 2, 4, Irid | Aniso},      {"irid-specular", 4, 4, Irid | Spec},
-                                 {"thin-coat", 2, 4, Thin | Coat},        {"all-lobes", 2, 4, Spec | Coat | Sheen | Aniso}};
+                                 {"irid-aniso", 3, 4, Irid | Aniso},      {"irid-specular", 4, 4, Irid | Spec},
+                                 {"thin-coat", 3, 4, Thin | Coat},        {"all-lobes", 2, 4, Spec | Coat | Sheen | Aniso},
+                                 {"aniso-panel", 2, 3, Aniso | Coat | Sheen}};
     for (const auto& e : expected) {
         for (const char* suffix : {"-sun", "-env"}) {
             const std::string name = std::string("combo-") + e.name + suffix;

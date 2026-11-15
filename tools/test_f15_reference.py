@@ -1793,6 +1793,42 @@ class AnisotropyModel(unittest.TestCase):
         self.assertGreaterEqual(mean_gap(at, ab, math.sqrt(0.5 * (at + ab))), 0.0)
         self.assertLess(mean_gap(at, ab, math.sqrt(float(ref.declared_aniso_alpha(at, ab)))), -0.002)  # the control: rms gains energy
 
+    def test_rotation_flip_is_invisible_to_the_sphere_mean_of_a_constant_environment_but_not_on_a_yawed_panel(self):
+        # Ticket 19 (dropped control aniso-rotation-flipped on the exact-environment keys): on a mirror-symmetric carrier (a sphere seen
+        # along its axis, combed tangents symmetric about the vertical plane) flipping the lobe rotation IS the mirror image of the carrier, so
+        # the sphere mean of the exact constant-environment radiance is identical (theorem, tested to 1e-9 here); it differs per pixel.  A
+        # panel yawed 50 deg about the vertical and rolled 20 deg about its normal has a uniform tangent and an asymmetric view azimuth:
+        # there the flip moves the mean (> 5 %).  The fixture redesign for the env keys is therefore a yawed, rolled panel, never a sphere.
+        def mean_albedo(n, tangent, rotation, strength, variant):
+            m = len(n)
+            v = np.tile([0.0, 0.0, 1.0], (m, 1))
+            aniso = {"strength": np.full(m, strength), "rotation": np.full(m, rotation), "tangent": tangent, "w": np.ones(m),
+                     "det": np.ones(m), "variant": variant}
+            env = ref.aniso_environment_inputs(aniso, np.full(m, 0.3), n, v)
+            mu = np.maximum(n[:, 2], ref.MIN_NDOTV)
+            a, b = ref.aniso_spec_albedo(mu, env)
+            return a + b
+        xs = np.linspace(-0.97, 0.97, 41)
+        px, py = np.meshgrid(xs, xs)
+        inside = px ** 2 + py ** 2 < 0.94
+        n = np.stack([px[inside], py[inside], np.sqrt(1.0 - px[inside] ** 2 - py[inside] ** 2)], axis=1)
+        comb = np.cross(np.array([0.0, 1.0, 0.0]), n)
+        comb = comb / np.maximum(np.linalg.norm(comb, axis=1, keepdims=True), 1e-9)
+        keep = np.linalg.norm(np.cross(np.array([0.0, 1.0, 0.0]), n), axis=1) > 0.05
+        n, comb = n[keep], comb[keep]
+        spec = mean_albedo(n, comb, math.pi / 4, 1.0, "spec")
+        flipped = mean_albedo(n, comb, math.pi / 4, 1.0, "rotation-flipped")
+        self.assertAlmostEqual(float(spec.mean()), float(flipped.mean()), delta=1e-9 * float(spec.mean()))
+        self.assertGreater(float(np.abs(spec - flipped).max()), 0.02)  # per pixel the flip is visible
+        yaw, roll = math.radians(50.0), math.radians(20.0)
+        normal = np.array([math.sin(yaw), 0.0, math.cos(yaw)])
+        e1, e2 = np.array([math.cos(yaw), 0.0, -math.sin(yaw)]), np.array([0.0, 1.0, 0.0])
+        axis = math.cos(roll) * e1 + math.sin(roll) * e2
+        panel_n, panel_t = np.tile(normal, (16, 1)), np.tile(axis, (16, 1))
+        spec = mean_albedo(panel_n, panel_t, math.pi / 4, 1.0, "spec").mean()
+        flipped = mean_albedo(panel_n, panel_t, math.pi / 4, 1.0, "rotation-flipped").mean()
+        self.assertGreater(abs(float(spec - flipped)) / float(spec), 0.05)
+
     def test_record_word_decoding_texture_refusal_and_combinations(self):
         f = lambda x: int.from_bytes(struct.pack("<f", x), "little")  # noqa: E731
 

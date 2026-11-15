@@ -169,14 +169,16 @@ COMBO_GRIDS = {
     "irid-sheen": dict(rough=[0.3] * 4, metallic=[0.0, 1.0], base=[0.3, 0.15, 0.08], cells=cells(2, 4, lambda r, c: [
         dict(irid=(1.0, 1.3, 400.0), sheen=(WHITE, 0.4)), dict(irid=(1.0, 1.3, 800.0), sheen=(ORANGE, 0.4)),
         dict(irid=(1.0, 1.8, 400.0), sheen=(WHITE, 0.75)), dict(irid=(1.0, 1.3, 600.0))][c])),
-    "irid-aniso": dict(rough=[0.3] * 4, metallic=[0.0, 1.0], base=COPPER, combed=True, cells=cells(2, 4, lambda r, c: [
+    "irid-aniso": dict(rough=[0.3] * 4, metallic=[0.0, 1.0, 0.0], base=COPPER, combed=True, cells=cells(3, 4, lambda r, c: [
         dict(irid=(1.0, 1.3, 400.0), aniso=(0.5, Q)), dict(irid=(1.0, 1.3, 800.0), aniso=(1.0, 0.0)),
-        dict(irid=(1.0, 1.3, 400.0), aniso=(1.0, H)), dict(irid=(1.0, 1.3, 600.0))][c])),
+        dict(irid=(1.0, 1.3, 400.0), aniso=(1.0, H)), dict(irid=(1.0, 1.3, 600.0))][c] if r < 2 else [
+        dict(irid=(1.0, 1.8, 400.0), aniso=(0.5, Q)), dict(irid=(1.0, 1.8, 400.0)),
+        dict(irid=(1.0, 1.8, 400.0), aniso=(0.5, H)), dict(irid=(1.0, 1.8, 400.0))][c])),
     "irid-specular": dict(rough=[0.3] * 4, metallic=[0.0, 0.0, 0.0, 1.0], base=COPPER, cells=cells(4, 4, lambda r, c: dict(
         irid=(1.0, [1.3, 1.3, 1.8, 1.3][r], [400.0, 800.0, 400.0, 400.0][r]),
         **[{}, {"spec": SPEC_B}, {"spec": (2.4, 1.0, WHITE)}, {"spec": SPEC_C}][c]))),
-    "thin-coat": dict(rough=[0.5] * 4, metallic=[0.0, 0.0], base=[0.3, 0.5, 0.8], toward=THIN_TOWARD, cells=cells(2, 4, lambda r, c: dict(
-        thin=([0.5, 1.0][r], [WARM, TEAL][r]), **({} if c == 0 else {"coat": [None, (1.0, 0.3), (0.5, 0.35), (1.0, 0.6)][c]})))),
+    "thin-coat": dict(rough=[0.5] * 4, metallic=[0.0, 0.0, 0.0], base=[0.3, 0.5, 0.8], toward=THIN_TOWARD, cells=cells(3, 4, lambda r, c: dict(
+        thin=([0.5, 1.0, 1.0][r], [WARM, TEAL, WHITE][r]), **({} if c == 0 else {"coat": [None, (1.0, 0.3), (0.5, 0.35), (1.0, 0.6)][c]})))),
     "all-lobes": dict(rough=[0.3] * 4, metallic=[0.0, 1.0], base=COPPER, combed=True, cells=cells(2, 4, lambda r, c: [
         dict(spec=SPEC_B, coat=(0.5, 0.35), sheen=(WHITE, 0.4), aniso=(0.5, Q)),
         dict(spec=SPEC_B, coat=(0.5, 0.35), sheen=(WHITE, 0.4), aniso=(1.0, 0.0)),
@@ -1663,7 +1665,7 @@ class BenchMirror(unittest.TestCase):
 
     def test_every_combination_key_is_planned_with_valid_controls_and_coherent_pending_fields(self):
         keys = [k for k in check.SCENARIOS if k.startswith("combo-") or k.startswith("furnace-combinations")]
-        self.assertEqual(len(keys), 32)
+        self.assertEqual(len(keys), 34)
         with tempfile.TemporaryDirectory() as tmp:
             with contextlib.redirect_stdout(io.StringIO()):
                 args = ["--out", tmp, "--binary", "build/release/phosphor"]
