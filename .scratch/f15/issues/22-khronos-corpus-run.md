@@ -229,3 +229,28 @@ Open: numeric texture fixtures (coat normal, anisotropy direction, iridescence t
   `filter_pipeline_harvest.py --constant 26 --function ... --skip-present` keeps 0 descriptors from their harvests): the secondary-site changes edit shader bodies, not descriptors.
 - For the orchestrator's quiet-machine timing: the guards add one flag test (`m.flags & TEXTURE_TRANSFORM`) at each of the sites above and a pointer field to four params structs.  Sponza D2 (RT alpha
   tests, RT shadows) A/B against 096675f is the number to take; output is bit-identical.
+
+2026-11-15 (third round) — the ninth site and numeric evidence for the remaining sites:
+
+- **Fog in-scatter of textured emitters** now transforms too: `GPUFogParams` gained the last field `materialExtensions` (448 -> 456 B, tests/test_atmosphere.cpp updated), filled in
+  `atmosphere_passes.cpp`, passed by `fogLocalSample` to `diSampleTexturedLight` (fog.metal).  It shares the emitter helper, so the emitter fixture below measures the same code; the fog
+  scattering itself has no fixture of its own.
+- **Region-mean fixtures** (`tools/f15_texture_transform_secondary.py`, cases `emitter`, `gi`, `probe`, `glass`; a halves texture whose per-slot transform `u' = u + 0.5` SWAPS the halves,
+  decoys on a second slot so the material is PerSlot).  The reference is a model difference left - right in [-1, 1] (a form-factor sum for the emitter, the R - G sign of the wall half for gi / probe, the
+  sun ray to the pane uv for glass); a candidate transform agrees when its model class equals the measured class.  The swap predicts one sign, the identity the opposite, every other slot's transform (the
+  uniform-bake candidates) predicts no difference, so a measured difference above the threshold can agree with the reference only; the CPU self-test asserts exactly that.  Thresholds on the measured
+  difference (display units of the captured image, fixed from the discrimination math and the scene's lighting before the comparison): emitter 0.08 (luminance, floor next to the emitter), gi 0.008 (R - G
+  of the floor next to the wall), probe 0.03 and glass 0.03 (R - G).
+    emitter: floor under each half of an emissive quad (texture half black / half white, strength 40, floor albedo 0.15).  before (096675f binary) -0.1158, after +0.1153 (reference model +0.556,
+      identity -0.556).  First design with a floor albedo of 0.9 saturated the display (measured 0.027 < 0.08): the SCENE was redesigned (dark floor, stronger emitter), the threshold was not changed.
+    gi (`--gi ddgi`): red | green wall, floor regions in front of each half.  before +0.0276, after -0.0287 (model -1 / +1).
+    probe (`--reflections probes --reflection-capture-probe`, metal floor roughness 0.05): before +1.4153, after -1.4153.  The first run without `--reflection-capture-probe` measured 0.0 in both builds: no probe
+      is captured then (the floor shows the analytic environment), the flag is part of the case now.
+    glass (`KHR_materials_transmission`, thin pane, base colour slot tint, sun shadow on a backdrop): before +0.2039, after -0.2039.
+  Every negative control fails on every case (identity, baseColor / emissive / occlusion / normal / alpha transforms: agreement 0.0), `controls_discriminate` true.  The same cases under API + shader
+  validation (archive off): identical numbers, no validation failure (known baseline notices only).  Glass tint: the RT any-hit tint path (`rtAccumulateTransmittance`) was exercised; the CSM transmittance map
+  tint (`shadow_transmit_fragment`) shares the same sampling line and was not measured separately (`--shadows csm` with glass was not run).
+- Gaps left, stated: the CSM glass tint above; the fog scattering (shares the emitter helper); the three decoy-free assumptions of the region models (a half-average of the wall stands for the weighting of the floor's
+  view of it: the gate is the sign and a measured threshold, not a magnitude).
+- Final checks of this round (build with the fog field): ctest 35 / 35 (phosphor_tests included), `f15_exact.sh` 5 PFMs byte-identical (cmp) to build/litefix/exact-new, `visual_check` with
+  `EXTRA_ARGS=--pipeline-sync` and BENCH8_ARGS 0 px on 8 benches, the five-slot primary fixture 1.0 with all controls failing, all eight secondary cases green under validation.

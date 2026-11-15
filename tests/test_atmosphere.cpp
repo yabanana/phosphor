@@ -9,7 +9,7 @@ namespace {
 AtmosphereSettings vacuum(){AtmosphereSettings a;a.rayleighScattering=a.mieScattering=a.ozoneAbsorption=glm::dvec3(0);a.mieAbsorption=0;a.groundAlbedo=glm::dvec3(0);return a;}
 }
 TEST_CASE("F14 atmosphere scalar ABI and SI Earth coefficients are explicit") {
-    CHECK(sizeof(GPUAtmosphereParams)==384);CHECK(sizeof(GPUFogParams)==448);CHECK(sizeof(GPUCloudParams)==272);
+    CHECK(sizeof(GPUAtmosphereParams)==384);CHECK(sizeof(GPUFogParams)==456);CHECK(sizeof(GPUCloudParams)==272);
     AtmosphereSettings a;CHECK_NOTHROW(validateAtmosphere(a));CHECK(a.bottomRadius==6360000);CHECK(a.rayleighScattering.z<1e-4);
     SUBCASE("negative scattering"){a.rayleighScattering.x=-1;}
     SUBCASE("nan scale"){a.mieScaleHeight=std::numeric_limits<double>::quiet_NaN();}

@@ -46,7 +46,7 @@ static DISample fogLocalSample(float3 point,const device GPUSampledLight* lights
     const GPUAliasEntry entry=alias[column];const uint selected=giRandom(seed)<entry.probability?column:entry.alias;
     if(selected>=p.lightCount)return invalid;const GPUAliasEntry selectedEntry=alias[selected];
     if(selectedEntry.lightIndex>=p.lightCount||!(selectedEntry.selectionPdf>0))return invalid;
-    DISample sample=diSampleTexturedLight(lights[selectedEntry.lightIndex],selectedEntry.lightIndex,float2(giRandom(seed),giRandom(seed)),point,emitters,materials,textures);
+    DISample sample=diSampleTexturedLight(lights[selectedEntry.lightIndex],selectedEntry.lightIndex,float2(giRandom(seed),giRandom(seed)),point,emitters,materials,textures,p.materialExtensions);
     proposal=selectedEntry.selectionPdf*(sample.delta?1.0f:sample.pdfArea);return sample;
 }
 static GPUFogCell fogCell(uint3 cell,constant GPUFogParams& p,thread float3& ray) {

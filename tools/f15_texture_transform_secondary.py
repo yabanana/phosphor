@@ -42,7 +42,17 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import f15_texture_transform_check as base  # noqa: E402
 
+# Region-mean cases (coarse, a wrong UV still flips them): `th` = the measured difference that counts as a difference, in display units (0..1) of
+# the captured image; `model_min` = the normalised model difference that counts as a prediction.  Thresholds follow from the discrimination math
+# of the swap transform (halves exchanged: model +1 against the identity's -1) and the scene's lighting, fixed before the first comparison: the
+# emitter's irradiance on the floor next to it is of the order of the sun's (th 0.08 of the display range), a bounce of the wall's colour on the
+# floor is a few percent (th 0.008 on R - G), a mirror-like floor shows the wall's colour at strength (th 0.03), a glass pane's sun shadow passes
+# the tint at a fraction of the floor's lit level (th 0.03).
 CASES = {
+    "emitter": {"shadows": ["--shadows", "rt"], "kind": "emitter", "pitch": 40.0, "th": 0.08, "model_min": 0.3},
+    "gi": {"shadows": ["--shadows", "rt"], "kind": "gi", "pitch": 40.0, "th": 0.008, "model_min": 0.3, "gi": ["--gi", "ddgi", "--gi-grid", "16x8x16", "--gi-rays", "64"]},
+    "probe": {"shadows": ["--shadows", "rt"], "kind": "probe", "pitch": 40.0, "th": 0.03, "model_min": 0.3, "reflections": "probes", "extra": ["--reflection-capture-probe"]},
+    "glass": {"shadows": ["--shadows", "rt"], "kind": "glass", "pitch": 0.0, "th": 0.03, "model_min": 0.3},
     "rt-shadow": {"shadows": ["--shadows", "rt"], "agreement": 0.99, "kind": "shadow"},
     "csm-shadow": {"shadows": ["--shadows", "csm"], "agreement": 0.97, "kind": "shadow"},
     "cache-shadow": {"shadows": ["--shadows", "csm", "--shadow-cache", "on"], "agreement": 0.97, "kind": "shadow"},
@@ -50,12 +60,22 @@ CASES = {
 }
 EDGE = 0.15
 SIZE = 1.2  # caster / object size
+RED, GREEN = (230, 40, 40), (40, 230, 40)
+# the transform that swaps the two halves of a halves texture (u' = u + 0.5): neither the identity nor any other slot's transform of the scene does
+HALVES_SWAP = {"offset": [0.5, 0.0], "rotation": 0.0, "scale": [1.0, 1.0]}
+GLASS_FLOOR_Z = -2.0
+GLASS_PANE_Y = 0.9
 FLOOR = (4.0, 3.0)  # shadow floor extent, centred, at z = FLOOR_Z
 FLOOR_Z = -1.0
 OBJECT_Z = -0.4
 MIRROR_Y = -0.5
 MIRROR_HALF = 1.5
 MARGIN_PX = 6
+
+
+def halves_png(left, right):
+    """64 x 8 texture, the left half `left`, the right half `right` (RGB)."""
+    return base.png_bytes(64, 8, lambda x, y: left if x < 32 else right)
 
 
 def decorated(slot_transforms):
@@ -67,7 +87,8 @@ def decorated(slot_transforms):
 def build_scene(path, case):
     kind = CASES[case]["kind"]
     images = {"alphatex": base.alpha_png(), "palette": base.palette_png("color"), "black": base.flat_png(0), "white": base.flat_png(255),
-              "flatnormal": base.png_bytes(8, 8, lambda x, y: (128, 128, 255))}
+              "flatnormal": base.png_bytes(8, 8, lambda x, y: (128, 128, 255)),
+              "bw": halves_png((0, 0, 0), (255, 255, 255)), "rg": halves_png(RED, GREEN)}
     names = list(images)
     index = {n: i for i, n in enumerate(names)}
 
@@ -88,7 +109,29 @@ def build_scene(path, case):
     floor = {"name": "floor", "pbrMetallicRoughness": {"baseColorFactor": [0.9, 0.9, 0.9, 1], "metallicFactor": 0.0, "roughnessFactor": 1.0}}
     mirror = {"name": "mirror", "pbrMetallicRoughness": {"baseColorFactor": [1, 1, 1, 1], "metallicFactor": 1.0, "roughnessFactor": 0.0}}
     h = SIZE / 2
-    if kind == "shadow":
+    SWAP = HALVES_SWAP
+    decoy_base = {"index": index["white"], "extensions": {"KHR_texture_transform": {"offset": T["baseColor"]["offset"], "rotation": T["baseColor"]["rotation"], "scale": T["baseColor"]["scale"]}}}
+    if kind in ("emitter", "gi", "probe", "glass"):
+        plain = {"metallicFactor": 0.0, "roughnessFactor": 1.0}
+        floor_h = {"name": "floor", "pbrMetallicRoughness": {"baseColorFactor": [0.9, 0.9, 0.9, 1], **plain}}
+        if kind == "emitter":
+            # a dark floor keeps the display unsaturated (first design: albedo 0.9 saturated the whole floor, measured 0.027 against th 0.08)
+            floor_h = {"name": "floor", "pbrMetallicRoughness": {"baseColorFactor": [0.15, 0.15, 0.15, 1], **plain}}
+            emitter = {"name": "emitter", "pbrMetallicRoughness": {"baseColorFactor": [0, 0, 0, 1], "baseColorTexture": decoy_base, **plain},
+                       "emissiveTexture": tex("bw", SWAP), "emissiveFactor": [1, 1, 1], "extensions": {"KHR_materials_emissive_strength": {"emissiveStrength": 40.0}}}
+            quads = [(floor_h, (-2.0, 0.0, 0.0), (4.0, 0, 0), (0, 0, 3.0)), (emitter, (-0.6, 1.2, 0.0), (1.2, 0, 0), (0, -1.2, 0))]
+        elif kind in ("gi", "probe"):
+            wall = {"name": "wall", "pbrMetallicRoughness": {"baseColorTexture": tex("rg", SWAP), **plain},
+                    "emissiveTexture": tex("black", T["emissive"]), "emissiveFactor": [1, 1, 1]}
+            if kind == "probe":
+                floor_h = {"name": "floor", "pbrMetallicRoughness": {"baseColorFactor": [1, 1, 1, 1], "metallicFactor": 1.0, "roughnessFactor": 0.05}}
+            quads = [(floor_h, (-2.0, 0.0, 0.0), (4.0, 0, 0), (0, 0, 3.0)), (wall, (-1.5, 2.0, 0.0), (3.0, 0, 0), (0, -2.0, 0))]
+        else:  # glass: a pane in front of a backdrop floor (vertical, behind), the sun's shadow tinted by the pane's base colour slot
+            pane = {"name": "pane", "pbrMetallicRoughness": {"baseColorTexture": tex("rg", SWAP), "metallicFactor": 0.0, "roughnessFactor": 0.0},
+                    "emissiveTexture": tex("black", T["emissive"]), "emissiveFactor": [1, 1, 1], "doubleSided": True,
+                    "extensions": {"KHR_materials_transmission": {"transmissionFactor": 1.0}}}
+            quads = [(floor_h, (-2.0, 1.5, GLASS_FLOOR_Z), (4.0, 0, 0), (0, -3.0, 0)), (pane, (-SIZE / 2, GLASS_PANE_Y + SIZE / 2, 0.0), (SIZE, 0, 0), (0, -SIZE, 0))]
+    elif kind == "shadow":
         # (material, origin = corner of (u, v) = (0, 0), U, V)
         quads = [(floor, (-FLOOR[0] / 2, FLOOR[1] / 2, FLOOR_Z), (FLOOR[0], 0, 0), (0, -FLOOR[1], 0)),
                  (caster_alpha, (-h, h, 0.0), (SIZE, 0, 0), (0, -SIZE, 0))]
@@ -131,7 +174,8 @@ def build_scene(path, case):
         meshes.append({"primitives": [{"attributes": {"POSITION": a_pos, "NORMAL": a_nor, "TEXCOORD_0": a_uv, "TANGENT": a_tan}, "indices": a_idx, "material": qi}]})
         nodes.append({"mesh": qi, "name": material["name"]})
     doc = {
-        "asset": {"version": "2.0", "generator": "tools/f15_texture_transform_secondary.py"}, "extensionsUsed": ["KHR_texture_transform"],
+        "asset": {"version": "2.0", "generator": "tools/f15_texture_transform_secondary.py"},
+        "extensionsUsed": ["KHR_texture_transform"] + sorted({e for m in materials for e in m.get("extensions", {})}),
         "scene": 0, "scenes": [{"nodes": list(range(len(nodes)))}], "nodes": nodes, "meshes": meshes, "materials": materials,
         "textures": [{"source": i, "sampler": 0} for i in range(len(names))], "images": [{"uri": base.data_uri(images[n])} for n in names],
         "samplers": [{"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497}],
@@ -295,8 +339,131 @@ def evaluate_reflection(img, cam, candidates):
     return {"valid_pixels": len(samples), "range": {"lo": lo, "hi": hi}, "agreement": {n: round(agree[n] / len(samples), 4) for n in candidates}}
 
 
+def half_class(transform, u, v):
+    """0 = the left half of a halves texture, 1 = the right half, at the quad uv (u, v) through the transform (repeat wrap)."""
+    tu, _ = base.transform_uv(transform, u, v)
+    return 1 if (tu - math.floor(tu)) >= 0.5 else 0
+
+
+def rg_sign(transform, u0, u1, v0, v1, n=24):
+    """Mean R - G sign of the red | green texture over the quad uv rectangle: +1 all red, -1 all green."""
+    total = 0.0
+    for i in range(n):
+        for j in range(n):
+            u, v = u0 + (u1 - u0) * (i + .5) / n, v0 + (v1 - v0) * (j + .5) / n
+            total += -1.0 if half_class(transform, u, v) else 1.0
+    return total / (n * n)
+
+
+WALL_REGIONS = {"left": (-1.2, -0.3, 0.15, 0.6), "right": (0.3, 1.2, 0.15, 0.6)}      # floor rectangles (x0, x1, z0, z1): gi
+PROBE_REGIONS = {"left": (-1.2, -0.3, 0.3, 0.9), "right": (0.3, 1.2, 0.3, 0.9)}       # probe
+EMITTER_REGIONS = {"left": (-0.55, -0.1, 0.15, 0.55), "right": (0.1, 0.55, 0.15, 0.55)}
+GLASS_REGIONS = {"left": (0.8, 1.2, -1.1, -0.4), "right": (1.4, 1.8, -1.1, -0.4)}      # backdrop rectangles (x0, x1, y0, y1)
+
+
+def emitter_irradiance(transform, region, n=40):
+    """Irradiance (arbitrary units) of the floor rectangle from the emitter quad whose emission is the white half of the texture: a form-factor
+    sum over the quad (z = 0, facing +Z, y in [0, 1.2]) at 5 x 5 floor points."""
+    x0, x1, z0, z1 = region
+    total = 0.0
+    for a in range(5):
+        for b in range(5):
+            P = (x0 + (x1 - x0) * (a + .5) / 5, 0.0, z0 + (z1 - z0) * (b + .5) / 5)
+            for i in range(n):
+                for j in range(n):
+                    u, v = (i + .5) / n, (j + .5) / n
+                    if not half_class(transform, u, v):
+                        continue  # the black half
+                    S = (-0.6 + 1.2 * u, 1.2 - 1.2 * v, 0.0)
+                    w = (P[0] - S[0], P[1] - S[1], P[2] - S[2])
+                    r2 = sum(c * c for c in w)
+                    r = math.sqrt(r2)
+                    total += (w[2] / r) * (S[1] / r) / r2
+    return total
+
+
+def model_difference(case, transform):
+    """Normalised model difference left - right in [-1, 1] for the region-mean cases."""
+    kind = CASES[case]["kind"]
+    if kind == "emitter":
+        l, r = emitter_irradiance(transform, EMITTER_REGIONS["left"]), emitter_irradiance(transform, EMITTER_REGIONS["right"])
+        return (l - r) / (l + r) if l + r > 0 else 0.0
+    if kind in ("gi", "probe"):
+        return (rg_sign(transform, 0.0, 0.5, 0.0, 1.0) - rg_sign(transform, 0.5, 1.0, 0.0, 1.0)) / 2.0
+    out = []  # glass: backdrop region -> the sun ray -> the pane uv
+    for name in ("left", "right"):
+        x0, x1, y0, y1 = GLASS_REGIONS[name]
+        s_ = (0.0 - GLASS_FLOOR_Z) / base.SUN[2]
+        qx0, qx1 = x0 + base.SUN[0] * s_, x1 + base.SUN[0] * s_
+        qy0, qy1 = y0 + base.SUN[1] * s_, y1 + base.SUN[1] * s_
+        u0, u1 = (qx0 + SIZE / 2) / SIZE, (qx1 + SIZE / 2) / SIZE
+        v0, v1 = (GLASS_PANE_Y + SIZE / 2 - qy1) / SIZE, (GLASS_PANE_Y + SIZE / 2 - qy0) / SIZE
+        out.append(rg_sign(transform, u0, u1, v0, v1))
+    return (out[0] - out[1]) / 2.0
+
+
+def klass(value, minimum):
+    return 1 if value >= minimum else -1 if value <= -minimum else 0
+
+
+def region_pixels(cam, img, case, name):
+    """Mean display RGB (0..1) of the pixels of one floor / backdrop rectangle and their count."""
+    kind = CASES[case]["kind"]
+    width, height = img.size
+    pix = img.load()
+    rect = {"emitter": EMITTER_REGIONS, "gi": WALL_REGIONS, "probe": PROBE_REGIONS, "glass": GLASS_REGIONS}[kind][name]
+    acc, n = [0.0, 0.0, 0.0], 0
+    for py in range(0, height, 2):
+        for px in range(0, width, 2):
+            d = cam.ray(px, py)
+            if kind == "glass":
+                t = (GLASS_FLOOR_Z - cam.position[2]) / d[2]
+                P = tuple(cam.position[i] + d[i] * t for i in range(3))
+                inside = t > 0 and rect[0] <= P[0] <= rect[1] and rect[2] <= P[1] <= rect[3]
+                if inside:  # the pane (z = 0) must not cover it
+                    tp = (0.0 - cam.position[2]) / d[2]
+                    H = tuple(cam.position[i] + d[i] * tp for i in range(3))
+                    if abs(H[0]) <= SIZE / 2 + 0.05 and GLASS_PANE_Y - SIZE / 2 - 0.05 <= H[1] <= GLASS_PANE_Y + SIZE / 2 + 0.05:
+                        inside = False
+            else:
+                t = (0.0 - cam.position[1]) / d[1] if d[1] < 0 else -1.0
+                P = tuple(cam.position[i] + d[i] * t for i in range(3))
+                inside = t > 0 and rect[0] <= P[0] <= rect[1] and rect[2] <= P[2] <= rect[3]
+            if inside:
+                rgb = pix[px, py]
+                for c in range(3):
+                    acc[c] += rgb[c] / 255.0
+                n += 1
+    if not n:
+        raise RuntimeError(f"{case}: no pixel in region {name}")
+    return [a / n for a in acc], n
+
+
+def evaluate_region(img, cam, case, candidates):
+    cfg = CASES[case]
+    means = {n: region_pixels(cam, img, case, n) for n in ("left", "right")}
+    (cl, nl), (cr, nr) = means["left"], means["right"]
+    if cfg["kind"] == "emitter":
+        measured = (sum(cl) - sum(cr)) / 3.0                      # luminance (mean of RGB) left - right
+    else:
+        measured = (cl[0] - cl[1]) - (cr[0] - cr[1])             # (R - G) left - (R - G) right
+    mclass = klass(measured, cfg["th"])
+    agree, model = {}, {}
+    for name, t in candidates.items():
+        model[name] = round(model_difference(case, t), 3)
+        agree[name] = 1.0 if klass(model[name], cfg["model_min"]) == mclass else 0.0
+    return {"valid_pixels": nl + nr, "region_means": {"left": [round(c, 4) for c in cl], "right": [round(c, 4) for c in cr]},
+            "measured_difference": round(measured, 4), "threshold": cfg["th"], "model_difference": model, "agreement": agree,
+            "measured_class": mclass}
+
+
 def candidates_for(case):
     T = base.TRANSFORMS
+    if CASES[case]["kind"] in ("emitter", "gi", "probe", "glass"):
+        out = {"reference": HALVES_SWAP, "identity": base.IDENTITY}
+        for k in ("baseColor", "emissive", "occlusion", "normal", "alpha"):
+            out[f"uniform-bake:{k}-transform"] = T[k]
+        return out
     if CASES[case]["kind"] == "shadow":
         ref = T["alpha"]
         others = {"uniform-bake:baseColor-transform": T["baseColor"], "uniform-bake:emissive-transform": T["emissive"], "uniform-bake:normal-transform": T["normal"]}
@@ -314,7 +481,14 @@ def evaluate(case, capture, log_text):
     lo, hi, distance = parse_rig(log_text)
     cam = Camera(lo, hi, distance, CASES[case].get("pitch", 0.0), *img.size)
     cands = candidates_for(case)
-    result = evaluate_shadow(img, cam, cands) if CASES[case]["kind"] == "shadow" else evaluate_reflection(img, cam, cands)
+    kind = CASES[case]["kind"]
+    if kind in ("emitter", "gi", "probe", "glass"):
+        result = evaluate_region(img, cam, case, cands)
+        result["case"] = case
+        result["gate_ok"] = result["agreement"]["reference"] == 1.0 and result["measured_class"] != 0
+        result["controls_discriminate"] = all(v == 0.0 for n, v in result["agreement"].items() if n != "reference")
+        return result
+    result = evaluate_shadow(img, cam, cands) if kind == "shadow" else evaluate_reflection(img, cam, cands)
     result["case"] = case
     result["threshold"] = CASES[case]["agreement"]
     result["gate_ok"] = result["agreement"]["reference"] >= CASES[case]["agreement"]
@@ -360,6 +534,17 @@ def selftest():
                     total += 1
                     moved += a != b
             assert moved / total > 0.6, (case, name, moved / total)
+    # region-mean cases: the swap predicts one sign, the identity the opposite, every other slot's transform no difference at all, so a measured
+    # difference above the threshold can agree with the reference only
+    for case in ("emitter", "gi", "probe", "glass"):
+        mm = CASES[case]["model_min"]
+        c = candidates_for(case)
+        ref = klass(model_difference(case, c["reference"]), mm)
+        assert ref != 0, case
+        assert klass(model_difference(case, c["identity"]), mm) == -ref, case
+        for name, t in c.items():
+            if name.startswith("uniform-bake"):
+                assert klass(model_difference(case, t), mm) == 0, (case, name)
     print("selftest ok")
 
 
@@ -367,10 +552,11 @@ def capture_command(binary, gltf, out, case, no_archive=False, harvest=None):
     cfg = CASES[case]
     cmd = [str(binary), "--bench", "4", "--scene", str(gltf), "--corpus-rig", f"0,{cfg.get('pitch', 0.0)}",
            "--render-path", "visibility", "--geometry-path", "mesh", "--rt", "on", *cfg["shadows"], "--lighting", "restir",
-           "--gi", "off", "--reflections", cfg.get("reflections", "rt"), "--ao", "off", "--lighting-denoise", "custom",
+           *cfg.get("gi", ["--gi", "off"]), "--reflections", cfg.get("reflections", "rt"), "--ao", "off", "--lighting-denoise", "custom",
            "--post", "--tonemap", "aces", "--upscaler", "native", "--resolution", f"{base.RESOLUTION[0]}x{base.RESOLUTION[1]}",
            "--warmup", "48", "--frames", "48", "--fixed-timestep", "--no-ui", "--no-vsync", "--no-gpu-timing", "--pipeline-sync",
            "--capture", str(out / "engine.png"), "--report", str(out / "report.json")]
+    cmd += cfg.get("extra", [])
     if no_archive:
         cmd.append("--no-pipeline-archive")
     if harvest:
@@ -418,7 +604,10 @@ def main(argv=None):
                 return 6
         result = evaluate(case, out / "engine.png", log.read_text(errors="replace"))
         (out / "result.json").write_text(json.dumps(result, indent=1))
-        print(f"{case}: valid {result['valid_pixels']} agreement {result['agreement']} threshold {result['threshold']}")
+        if "measured_difference" in result:
+            print(f"{case}: valid {result['valid_pixels']} measured {result['measured_difference']} (threshold {result['threshold']}) model {result['model_difference']} agreement {result['agreement']}")
+        else:
+            print(f"{case}: valid {result['valid_pixels']} agreement {result['agreement']} threshold {result['threshold']}")
         if not result["controls_discriminate"]:
             status = max(status, 3)
         elif not result["gate_ok"]:

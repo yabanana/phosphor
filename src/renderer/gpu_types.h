@@ -1272,8 +1272,14 @@ struct GPUFogParams {
     u32 lightRevision, previousViewID, corruption, maxHistoryAge;
     float moonDirection[3], pad0;
     float moonIrradiance[3], pad1;
+    // F15.1 (ticket 22): GPU address of the material extension buffer (per-slot texture transforms of textured emitters); 0 without one.
+#if defined(__METAL_VERSION__)
+    const device GPUMaterialExtRecord* materialExtensions;
+#else
+    u64 materialExtensions;
+#endif
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUFogParams) == 448, "GPUFogParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUFogParams) == 456, "GPUFogParams layout");
 struct GPUFogCell {
     float source[3], extinction; // source radiance per metre; scalar extinction m^-1
     float worldPosition[3], viewDepth;

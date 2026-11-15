@@ -258,7 +258,7 @@ struct AtmospherePasses::Impl {
             hadFogHistory=hadFogHistory&&!fogDecision.reset&&!(diagnostics&&diagnostics->homogeneousFog());
             fogParams={};std::memcpy(fogParams.inverseViewProjection,glm::value_ptr(inverse),64);std::memcpy(fogParams.view,f.constants.view,64);
             std::memcpy(fogParams.previousViewProjection,fogHistory.get(f.view).previousViewProjection.data(),64);std::memcpy(fogParams.previousView,views[f.view].fogPreviousView.data(),64);
-            fogParams.gridX=fog.gridX;fogParams.gridY=fog.gridY;fogParams.gridZ=fog.gridZ;fogParams.maxLocalLights=fog.maxLocalLights;
+            fogParams.materialExtensions=scene.materialExtensionsAddress();fogParams.gridX=fog.gridX;fogParams.gridY=fog.gridY;fogParams.gridZ=fog.gridZ;fogParams.maxLocalLights=fog.maxLocalLights;
             fogParams.outputWidth=f.width;fogParams.outputHeight=f.height;fogParams.frameIndex=u32(f.index);fogParams.viewID=f.view;
             fogParams.nearDistance=fogNear;fogParams.farDistance=fogFar;
             fogParams.densityAtBase=float(fog.densityAtBase);fogParams.heightBase=float(fog.heightBase);fogParams.heightFalloff=float(fog.heightFalloff);fogParams.maxDensity=float(fog.maxDensity);
