@@ -3374,6 +3374,33 @@ class CombinationModel(unittest.TestCase):
         mixed = {"strength": np.array([0.0, 1.0]), "ior": np.full(2, 1.3), "thickness": np.full(2, 400.0), "thickness_min": np.full(2, 100.0), "nv": np.array([0.5, 0.5]), "variant": "spec"}
         self.assertEqual(ref.thin_env_is_default(None, mixed).tolist(), [True, False])
 
+    @staticmethod
+    def shader_thin_env_constants(text):
+        """(nodes, polynomials) parsed from the bsdfThinEnvNode calls of bsdfThinEnvAlbedo in shaders/materials/bsdf.h."""
+        import re
+        body = text[text.index("inline float bsdfThinEnvAlbedo"):]
+        body = body[:body.index("return max(t")]
+        calls = re.findall(r"bsdfThinEnvNode\(s, irid, ([-0-9.]+)f, ([-0-9.]+)f, ([-0-9.]+)f, ([-0-9.]+)f, ([-0-9.]+)f, mu\)", body)
+        return tuple(float(c[0]) for c in calls), tuple(tuple(float(v) for v in c[1:]) for c in calls)
+
+    def test_thin_env_fit_constants_of_the_shader_equal_the_reference(self):
+        # The declared thin transmitted albedo (ticket 16 closure) lives twice: THIN_ENV_NODES / THIN_ENV_POLY here and as literals in bsdf.h.
+        text = (ref.REPO / "shaders" / "materials" / "bsdf.h").read_text()
+        nodes, poly = self.shader_thin_env_constants(text)
+        self.assertEqual(len(nodes), len(ref.THIN_ENV_NODES))
+        np.testing.assert_allclose(nodes, ref.THIN_ENV_NODES, rtol=0, atol=1e-6)
+        np.testing.assert_allclose(poly, ref.THIN_ENV_POLY, rtol=0, atol=1e-8)  # the shader keeps 9 decimals
+        # negative control: one perturbed literal must fail the comparison
+        bad = text.replace("-0.093795337f", "-0.093795437f", 1)
+        self.assertNotEqual(bad, text)
+        bad_nodes, bad_poly = self.shader_thin_env_constants(bad)
+        with self.assertRaises(AssertionError):
+            np.testing.assert_allclose(bad_poly, ref.THIN_ENV_POLY, rtol=0, atol=1e-8)
+        bad_node = text.replace("bsdfThinEnvNode(s, irid, 0.4f,", "bsdfThinEnvNode(s, irid, 0.41f,", 1)
+        self.assertNotEqual(bad_node, text)
+        with self.assertRaises(AssertionError):
+            np.testing.assert_allclose(self.shader_thin_env_constants(bad_node)[0], ref.THIN_ENV_NODES, rtol=0, atol=1e-6)
+
     def test_sheen_scales_the_transmitted_lobe_of_a_back_light_with_the_smallest_n_dot_l(self):
         # the glTF Sample Renderer scales the whole base by min(1 - m E(N.V), 1 - m E(N.L)) with N.L = 0 behind the surface: E at the table minimum
         base, metallic, rough = np.ones((1, 3)), np.zeros(1), np.full(1, 0.5)
