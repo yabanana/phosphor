@@ -3,12 +3,15 @@
 #include "rt_common.h"
 #include "restir_common.h"
 #include "texture_transform_core.h" // F15.1 (ticket 22)
+#include "renderer/layer_blend.h"
 
 // F12 irradiance atlas tiles: x = probe % countX; y = probe / countX.
 // Tile stride is texels + 2 (explicit seam-folded 1-texel border).
 // No uninitialised history is sampled: epoch/reset and active/age are checked.
 constexpr sampler kGiAtlasSampler(filter::linear, address::clamp_to_edge);
 constexpr sampler kGiMaterialSampler(filter::linear, mip_filter::linear, address::repeat);
+// F15.4 (ticket 23): the layer mask is clamped to its edge texels at every secondary hit too (the primary resolve does the same).
+constexpr sampler kGiMaskSampler(filter::linear, mip_filter::linear, address::clamp_to_edge);
 inline uint giHash(uint x) { x ^= x>>16; x *= 0x7feb352du; x ^= x>>15; x *= 0x846ca68bu; return x^(x>>16); }
 inline float giRandom(thread uint& seed) { seed=giHash(seed+0x9e3779b9u); return float(seed>>8)*(1.0f/16777216.0f); }
 inline float giSign(float x) { return x < 0.0f ? -1.0f : 1.0f; }
@@ -94,6 +97,30 @@ inline float3 giEscapeRadiance(constant GPUProbeGridParams& p) {
 // A reservoir sample that escaped the scene references no instance: giReusable and the independent state check accept this slot.
 constant uint GI_SLOT_ESCAPED=~0u;
 
+// F15.4 (ticket 23): the layer stack's blended base parameters at a secondary hit.  ONE helper (shaders/layer_resolve.h, the code of the primary
+// resolve) for GI, reflection and probe-capture hits: level-0 sampling of the mask (clamped) and of every layer texture at uv * uvScale.  A
+// stack's feature blocks are not evaluated at secondary hits (no material's are: declared reduction of ADR-0002), its emission is.
+struct LayerLod0Samples {
+    template <typename T>
+    static half4 sample(const device T* table,uint index,float2 uv,half4 fallback,float2 dx,float2 dy) {
+        return index==INVALID_TEXTURE_INDEX?fallback:half4(table[index].tex.sample(kGiMaterialSampler,uv,level(0.0f)));
+    }
+    template <typename T>
+    static half4 mask(const device T* table,uint index,float2 uv,half4 fallback,float2 dx,float2 dy) {
+        return index==INVALID_TEXTURE_INDEX?fallback:half4(table[index].tex.sample(kGiMaskSampler,uv,level(0.0f)));
+    }
+};
+#include "layer_resolve.h"
+// True (and `out` filled) when material `m` is a layer stack and the extension buffer is bound.
+template <typename T,typename Samples>
+inline bool layerStackSurface(const device GPUMaterial& m,GPUMaterialExtPtr extensions,const device GPUMaterial* materials,const device T* textures,
+                              float2 uv,float2 dx,float2 dy,thread LayerSurface& out) {
+    if((m.flags&(MATERIAL_FEATURE_LAYERS<<MATERIAL_FEATURE_SHIFT))==0u||extensions==nullptr||m.extensionIndex==MATERIAL_EXTENSION_INVALID) return false;
+    const GPUMaterialExt3 e3=*reinterpret_cast<const device GPUMaterialExt3*>(extensions+m.extensionIndex+3u);
+    out=resolveLayerBase<T,Samples>(e3,materials,textures,uv,dx,dy,true);
+    return true;
+}
+
 struct GiMaterial { float3 diffuse,emissive; bool doubleSided; };
 inline bool giMaterial(GPURtHit hit,constant GPUProbeGridParams& p,const device GPUInstance* instances,
                        const device GPURtMesh* meshes,const device GPUVertex* vertices,const device uint* indices,
@@ -116,6 +143,11 @@ inline bool giMaterial(GPURtHit hit,constant GPUProbeGridParams& p,const device 
     out.diffuse=max(base,0.0f)*(1.0f-saturate(metallic));
     out.emissive=float3(m.emissive[0],m.emissive[1],m.emissive[2]);
     if(m.emissiveTex!=INVALID_TEXTURE_INDEX) out.emissive*=float3(half3(textures[m.emissiveTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_EMISSIVE,uv),level(0.0f)).rgb));
+    LayerSurface layered;
+    if(layerStackSurface<DITextureHandle,LayerLod0Samples>(m,p.materialExtensions,materials,textures,uv,float2(0.0f),float2(0.0f),layered)) {
+        out.diffuse=max(layered.baseColor,0.0f)*(1.0f-saturate(layered.metallic));
+        out.emissive+=layered.emission;
+    }
     out.emissive=max(out.emissive,0.0f);
     if(m.flags&MATERIAL_FLAG_UNLIT)out.emissive=float3(0.0f);
     // F12.1 residue found in F15: the atlas ignores transmission (declared: secondary_gi_and_probe_hits_ignore_transmission), so a glass pane is a

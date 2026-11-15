@@ -24,15 +24,21 @@ inline bool reflectionMaterial(GPURtHit hit,float3 point,float3 geometric,float3
     float3 n=surfaceNormal(model,float3(a.nx,a.ny,a.nz)*bary.x+float3(b.nx,b.ny,b.nz)*bary.y+float3(c.nx,c.ny,c.nz)*bary.z);
     if(dot(n,outgoing)<0)n=-n;n=normalize(n);if(dot(geometric,outgoing)<0)geometric=-geometric;
     const float3 tangent=(float3x3(model[0].xyz,model[1].xyz,model[2].xyz))*(float3(a.tx,a.ty,a.tz)*bary.x+float3(b.tx,b.ty,b.tz)*bary.y+float3(c.tx,c.ty,c.tz)*bary.z);
+    // F15.4 (ticket 23): a layer stack's blended base parameters, normal and emission (the helper of gi_common.h, one source with GI and probes).
+    LayerSurface layered;const bool stack=layerStackSurface<DITextureHandle,LayerLod0Samples>(materials[instance.materialIndex],p.materialExtensions,materials,textures,uv,float2(0.0f),float2(0.0f),layered);
+    const float3 nShade=n;
     float3 t=tangent-n*dot(n,tangent);if(m.normalTex!=INVALID_TEXTURE_INDEX&&dot(t,t)>1e-8f){t=normalize(t);
         // F15.1 (ticket 22): the normal slot's KHR_texture_transform (the texel axes follow the transformed uv); unchanged without one.
         float3 tn=float3(half3(textures[m.normalTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_NORMAL,uv),level(0)).rgb))*2-1;tn.xy*=m.normalScale;
         float handed=(a.tw*bary.x+b.tw*bary.y+c.tw*bary.z)*((instance.flags&INSTANCE_FLAG_MIRRORED)?-1.0f:1.0f);
         if((m.flags&MATERIAL_FLAG_TEXTURE_TRANSFORM)!=0u){float3 tt=t,bb=cross(n,t)*handed;texXfFrameOn(texXfForOn(p.materialExtensions,m.flags,m.textureTransformIndex),TT_SLOT_NORMAL,tt,bb);n=normalize(tt*tn.x+bb*tn.y+n*tn.z);}
         else n=normalize(t*tn.x+cross(n,t)*handed*tn.y+n*tn.z);}
+    if(stack){const float3 ts=tangent-nShade*dot(nShade,tangent);if(dot(ts,ts)>1e-8f){const float3 tu=normalize(ts);
+        const float handedL=(a.tw*bary.x+b.tw*bary.y+c.tw*bary.z)*((instance.flags&INSTANCE_FLAG_MIRRORED)?-1.0f:1.0f);
+        n=normalize(tu*layered.tn.x+cross(nShade,tu)*handedL*layered.tn.y+nShade*layered.tn.z);}else n=nShade;}
     float3 albedo=float3(m.baseColor[0],m.baseColor[1],m.baseColor[2]);if(m.baseColorTex!=INVALID_TEXTURE_INDEX)albedo*=float3(half3(textures[m.baseColorTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_BASE_COLOR,uv),level(0)).rgb));
     float rough=m.roughness,metal=m.metallic;if(m.metallicRoughnessTex!=INVALID_TEXTURE_INDEX){half4 mr=half4(textures[m.metallicRoughnessTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_METAL_ROUGH,uv),level(0)));rough*=float(mr.g);metal*=float(mr.b);}
-    emission=float3(m.emissive[0],m.emissive[1],m.emissive[2]);if(m.emissiveTex!=INVALID_TEXTURE_INDEX)emission*=float3(half3(textures[m.emissiveTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_EMISSIVE,uv),level(0)).rgb));
+    emission=float3(m.emissive[0],m.emissive[1],m.emissive[2]);if(m.emissiveTex!=INVALID_TEXTURE_INDEX)emission*=float3(half3(textures[m.emissiveTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_EMISSIVE,uv),level(0)).rgb));if(stack){albedo=layered.baseColor;rough=layered.roughness;metal=layered.metallic;emission+=layered.emission;}
     surface={};for(uint i=0;i<3;++i){surface.position[i]=point[i];surface.geometricNormal[i]=geometric[i];surface.shadingNormal[i]=n[i];surface.albedo[i]=albedo[i];surface.viewDirection[i]=outgoing[i];}
     surface.roughness=clamp(rough,.04f,1.0f);surface.metallic=saturate(metal);surface.instanceSlot=hit.slot;surface.instanceGeneration=hit.generation;surface.valid=1;
     const bool finite=all(isfinite(n))&&all(isfinite(albedo))&&all(isfinite(emission));if(!finite)numericError=true;return finite;

@@ -28,6 +28,12 @@ static half4 probeSlotSample(const device DITextureHandle* textures,uint index,c
     if(m.flags&MATERIAL_FLAG_TEXTURE_TRANSFORM)texXfUvOn(texXfForOn(extensions,m.flags,m.textureTransformIndex),slot,uv,dx,dy);
     return half4(textures[index].tex.sample(kGiMaterialSampler,uv,gradient2d(dx,dy)));
 }
+struct LayerGradSamples {
+    template <typename T>
+    static half4 sample(const device T* table,uint index,float2 uv,half4 fallback,float2 dx,float2 dy){return index==INVALID_TEXTURE_INDEX?fallback:half4(table[index].tex.sample(kGiMaterialSampler,uv,gradient2d(dx,dy)));}
+    template <typename T>
+    static half4 mask(const device T* table,uint index,float2 uv,half4 fallback,float2 dx,float2 dy){return index==INVALID_TEXTURE_INDEX?fallback:half4(table[index].tex.sample(kGiMaskSampler,uv,gradient2d(dx,dy)));}
+};
 fragment float4 reflection_probe_capture_fs(ProbeVertexOut in [[stage_in]],bool frontFacing [[front_facing]],
     constant GPUProbeCaptureParams& p [[buffer(0)]],const device GPUInstance* instances [[buffer(2)]],
     const device GPUMaterial* materials [[buffer(3)]],const device GPULight* lights [[buffer(4)]],const device DITextureHandle* textures [[buffer(5)]],
@@ -37,13 +43,17 @@ fragment float4 reflection_probe_capture_fs(ProbeVertexOut in [[stage_in]],bool 
     if(m.baseColor[3]*float(baseTex.a)<m.alphaCutoff)discard_fragment();
     const bool front=frontFacing!=((instances[in.slot].flags&INSTANCE_FLAG_MIRRORED)!=0);float3 n=normalize(front?in.normal:-in.normal);
     const float3 geometric=normalize(cross(dfdx(in.world),dfdy(in.world)));float3 t=in.tangent-n*dot(n,in.tangent);
+    // F15.4 (ticket 23): a layer stack's blended base parameters, normal and emission (gradient sampling of the capture, clamped mask).
+    LayerSurface layered;const bool stack=layerStackSurface<DITextureHandle,LayerGradSamples>(materials[in.material],p.materialExtensions,materials,textures,in.uv,dx,dy,layered);
+    const float3 nShade=n;const float3 tShade=t;
     if(m.normalTex!=INVALID_TEXTURE_INDEX&&dot(t,t)>1e-8f){t=normalize(t);float3 tn=float3(probeSlotSample(textures,m.normalTex,p.materialExtensions,m,TT_SLOT_NORMAL,in.uv,dx,dy).rgb)*2-1;tn.xy*=m.normalScale;
         if(m.flags&MATERIAL_FLAG_TEXTURE_TRANSFORM){float3 tt=t,bb=cross(n,t)*in.handed;texXfFrameOn(texXfForOn(p.materialExtensions,m.flags,m.textureTransformIndex),TT_SLOT_NORMAL,tt,bb);n=normalize(tt*tn.x+bb*tn.y+n*tn.z);}
         else n=normalize(t*tn.x+cross(n,t)*in.handed*tn.y+n*tn.z);}
+    if(stack){if(dot(tShade,tShade)>1e-8f){const float3 tu=normalize(tShade);n=normalize(tu*layered.tn.x+cross(nShade,tu)*in.handed*layered.tn.y+nShade*layered.tn.z);}else n=nShade;}
     const half4 mr=m.metallicRoughnessTex==INVALID_TEXTURE_INDEX?half4(1):probeSlotSample(textures,m.metallicRoughnessTex,p.materialExtensions,m,TT_SLOT_METAL_ROUGH,in.uv,dx,dy);
-    GPUDISurface s{};const float3 base=float3(m.baseColor[0],m.baseColor[1],m.baseColor[2])*float3(baseTex.rgb),v=normalize(reflectionConstantVec(p.capturePosition)-in.world);
+    GPUDISurface s{};float3 base=float3(m.baseColor[0],m.baseColor[1],m.baseColor[2])*float3(baseTex.rgb);if(stack)base=layered.baseColor;const float3 v=normalize(reflectionConstantVec(p.capturePosition)-in.world);
     for(uint c=0;c<3;++c){s.position[c]=in.world[c];s.geometricNormal[c]=geometric[c];s.shadingNormal[c]=n[c];s.albedo[c]=base[c];s.viewDirection[c]=v[c];}
-    s.valid=1;s.roughness=clamp(m.roughness*float(mr.g),.04f,1.0f);s.metallic=saturate(m.metallic*float(mr.b));float3 result=0;
+    s.valid=1;s.roughness=clamp(m.roughness*float(mr.g),.04f,1.0f);s.metallic=saturate(m.metallic*float(mr.b));if(stack){s.roughness=layered.roughness;s.metallic=layered.metallic;}float3 result=0;
     for(uint i=0;i<p.lightCount;++i){GPULight light=lights[i];if(p.sampledLightCount&&light.type!=LIGHT_DIRECTIONAL)continue;DISample sample{};
         if(light.type==LIGHT_DIRECTIONAL){sample.valid=true;sample.delta=true;sample.geometry=1;sample.wi=-normalize(float3(light.direction[0],light.direction[1],light.direction[2]));sample.radiance=float3(light.color[0],light.color[1],light.color[2])*light.intensity;}
         else{GPUSampledLight local{};local.type=light.type;local.range=light.range;local.innerCone=light.innerCone;local.outerCone=light.outerCone;
@@ -54,7 +64,7 @@ fragment float4 reflection_probe_capture_fs(ProbeVertexOut in [[stage_in]],bool 
     // avoids depending on a noisy one-endpoint static cube map.
     for(uint i=0;i<p.sampledLightCount;++i)for(uint y=0;y<4;++y)for(uint x=0;x<4;++x){DISample sample=diSampleTexturedLight(sampled[i],i,(float2(x,y)+.5f)/4.0f,in.world,emitters,materials,textures,p.materialExtensions);
         if(sample.valid&&sample.pdfArea>0)result+=diBRDF(s,sample)/(16*sample.pdfArea);}
-    float3 emission=float3(m.emissive[0],m.emissive[1],m.emissive[2]);if(m.emissiveTex!=INVALID_TEXTURE_INDEX)emission*=float3(probeSlotSample(textures,m.emissiveTex,p.materialExtensions,m,TT_SLOT_EMISSIVE,in.uv,dx,dy).rgb);
+    float3 emission=float3(m.emissive[0],m.emissive[1],m.emissive[2]);if(m.emissiveTex!=INVALID_TEXTURE_INDEX)emission*=float3(probeSlotSample(textures,m.emissiveTex,p.materialExtensions,m,TT_SLOT_EMISSIVE,in.uv,dx,dy).rgb);if(stack)emission+=layered.emission;
     result+=emission+reflectionConstantVec(p.environment)*base*(1-s.metallic);
     // Validate the TOTAL physical sum before the attachment's narrowing store.
     // Negative alpha survives black repair and disables GPU probe publication.
