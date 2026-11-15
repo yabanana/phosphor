@@ -136,3 +136,32 @@ Open: numeric texture fixtures (coat normal, anisotropy direction, iridescence t
 - **The `Redundant call to setDepthStencilState / setViewport` baseline of this ticket (96 + 96 per capture, "known notices") is gone** (commit 65f2f10): the cause was the fused "Visibility opaque B" + "Visibility alpha B"
   encoder repeating the same two calls; the corpus runner's KNOWN_NOTICE family stays for older binaries.  DiffuseTransmissionTest is the first corpus capture with 0 notices; the other models need the next full corpus run
   (not repeated here: the orchestrator owns the final corpus run).
+
+## C22-A1 multi-bounce mirror reflections (2026-11-15, agent reflbounce, branch f15c-reflbounce-b)
+
+- **Change** (`shaders/reflections.metal`, `--reflection-bounces 0..3`): the RT reflection kernel follows up to 3 extra ideal-mirror bounces while the secondary
+  hit is a metal-like mirror (roughness <= 0.1, max F0 >= 0.5, Fresnel >= 0.1): throughput *= Schlick F, shading of every hit through the unchanged
+  `reflectionSecondary`, miss -> probes/environment. Counters: `--debug-lighting` prints extra traces / chains ended by the bound. Payload stays `RtPayloadLite`.
+  Shared files touched (additive): `src/renderer/gpu_types.h` (`REFLECTION_BOUNCE_SHIFT/MASK`), `src/core/launch_options.{h,cpp}`, `tests/CMakeLists.txt`
+  (python test), `tests/test_launch_options.cpp`. No pipeline descriptor changed (0 archive misses): no archive update, no KEPT file.
+- **Fixtures** (`tools/f15_reflection_bounce_model.py`, `tools/f15_reflection_bounce_check.py`, `tools/test_f15_reflection_bounce_check.py`, ctest
+  `f15_reflection_bounce_check_python`): corridor (two facing mirrors) and ball + mirror wall turned 65 degrees, 640x360, classes = number of mirror events
+  from an independent analytic model (Schlick F0 0.8, environment 0.5). Stable pixels per class (7x7 window class-constant, sun glint masked): corridor
+  29084 / 4788 / 2164 / 1848 (classes 1-4), ball 54562 / 12845 / 2219 (classes 1-3); gate >= 400. Gates fixed before comparing: mean relative error per class
+  <= 5 % (floor 5 % of the class mean), background within 5 % of 0.5. With `--reflection-bounces 3`: corridor 0.20 / 0.32 / 0.39 / 0.70 %, ball 0.63 / 2.43 /
+  4.7 % (class 3 is close to the gate: sphere tessellation, 96x48 smooth normals vs the analytic sphere), background 0.5000. Negative control
+  `--reflection-bounces 0`: classes >= 2 error 98-100 % (dark), class 1 unchanged (0.21 % / 0.63 %). Counters: corridor 208037 extra traces (2665 chains ended by the
+  bound), ball 227633 (3202). Re-run reproduces the numbers exactly.
+- **Featureless scenes**: the first criterion (no F0 condition) made Sponza D2 trigger ~70 extra traces and change 828 of 921600 linear pixels (max 0.0031, median
+  6e-9; PNG 0 px). With max F0 >= 0.5 (metal-like mirrors only; smooth dielectrics keep the single bounce) zero extra traces: the 5 `f15_exact.sh` cases are
+  byte-identical (cmp) to `build/litefix/exact-new`, visual_check 8/8 0 px (BENCH8_ARGS=--instances 100000), `--reflection-bounces 0` byte-identical as well.
+- **F13/F14 reflection subset** (20 cases, binary with bounces 3, `--references` re-bound to the subset manifest hash): control 11/11, functional 3/3,
+  independent-clip 4/6. Two independent clips flip against the t03 verdicts: `roughness-custom` and `metalfx-fallback` (spatial_p95 false, frame-0 linear RMSE
+  0.104 vs 0.071); with `--reflection-bounces 0` the same case passes again (0.0712 = t03). Cause: the roughness scene has five gold spheres at roughness 0.04-0.9;
+  the two smoothest now show the neighbour spheres through the ideal-mirror chain (431 extra traces, 15 bound-ended per frame), while the declared F13
+  reference (`tools/f13_reference.py`, `secondary_specular`) models no specular continuation (a secondary vertex only light-samples its specular lobe). The engine is
+  closer to the physics, the clip is stale. Not fixed here (re-rendering the roughness / metalfx-fallback clips with a continuation model is a reference change
+  with battery pacing; thresholds untouched).
+- **Default**: `--reflection-bounces` defaults to 0 (byte-identical to the F15 tip, all F13/F14 verdicts kept) until the reference models the continuation; ticking
+  A1 as resolved needs `--reflection-bounces 3` as the product default plus that clip update (owner decision). Quiet D2 A/B (bounces 3 vs 0): see the
+  agent report; Sponza D2 itself triggers no extra trace, so the expected cost is the unused-branch cost of the kernel only.

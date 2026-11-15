@@ -420,7 +420,7 @@ struct LaunchOptions {
     AoMode ao=AoMode::Off;
     LightingDenoiseMode lightingDenoise=LightingDenoiseMode::Off;
     bool lightingDenoiseEnergy=false; // F13.4 experiment: energy-preserving (sender-normalised, symmetric-weight) a-trous; default off = the row-normalised filter
-    float aoRadius=1.0f;u32 reflectionSamples=1,debugReflectionCorrupt=0;u32 reflectionBounces=3; // --reflection-bounces 0..3: extra specular bounces of a reflection ray through mirror-like secondary hits (0 = single bounce)
+    float aoRadius=1.0f;u32 reflectionSamples=1,debugReflectionCorrupt=0;u32 reflectionBounces=0; // --reflection-bounces 0..3: extra ideal-mirror bounces of a reflection ray through metal-like mirror hits (0 = F13 single bounce, the default: the declared F13 reference clips of the roughness scene model no specular continuation; 3 = ticket 22 C22-A1)
     bool reflectionCaptureProbe=false;
     std::string reflectionProbePath;
     ShadowMode shadows = ShadowMode::Off;
