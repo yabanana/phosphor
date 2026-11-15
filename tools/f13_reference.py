@@ -27,6 +27,11 @@ Declared reference model (every item is part of the report):
   continues along its ideal mirror direction, up to N further hits, weighted
   by the Schlick Fresnel of every hit (any f0, dielectric or metal); every hit
   of the chain is lit and continued with its diffuse lobe like the first hit.
+  Light accounting at a hit that continues: the environment reaches the camera
+  through the continuation (its regularised light connection skips the
+  environment sample), emitters (sun disk, panels) through that hit's
+  regularised light connection (D5), so an emitter the continuation ray hits
+  does not count a second time.
 - Secondary specular light connections use alpha' = max(alpha_secondary,
   k * alpha_camera), k = 8 by owner decision D5, the engine default
   (path regularisation), unless --secondary-specular raw|off is selected.
@@ -236,7 +241,7 @@ class Context:
         return dr.select(first2 + second2 > 0, first2 / (first2 + second2), 0)
 
     # -- transport ------------------------------------------------------
-    def tail(self, previous, direction, beta, pdf_previous, active, full_first, alpha_floor, skip_specular=None):
+    def tail(self, previous, direction, beta, pdf_previous, active, full_first, alpha_floor, skip_specular=None, mirror_continuation=False):
         """Follow one sampled direction from `previous`; diffuse continuation only."""
         mi, dr, scene, sampler = self.mi, self.dr, self.scene, self.sampler
         radiance = mi.Color3f(0)
@@ -247,7 +252,11 @@ class Context:
             sample = mi.DirectionSample3f(scene, si, previous)
             pdf_light = scene.pdf_emitter_direction(previous, sample, active)
             weight = self.mis(dr, mi.Float64(pdf_previous), mi.Float64(pdf_light))
-            radiance += dr.select(active, beta * emitter.eval(si, active) * mi.Float(weight), 0)
+            # mirror_continuation (F15 ticket 22): the ray is an ideal-mirror continuation; at its first hit only the environment (a miss) counts,
+            # an emitter it hits (the sun disk, a panel) is reached by the regularised light connection of the mirror hit (D5: light sampling is the
+            # only strategy for the specular lobe), counting both would count that light twice
+            counted = active & ~si.is_valid() if (mirror_continuation and depth == 0) else active
+            radiance += dr.select(counted, beta * emitter.eval(si, active) * mi.Float(weight), 0)
             outgoing = -ray.d
             active &= si.is_valid() & (dr.dot(si.n, outgoing) > 0)
             material = self.material(si)
@@ -268,8 +277,9 @@ class Context:
                 value = diffuse * light_weight
                 if self.secondary_specular != "off":
                     # light sampling is the only strategy for this lobe; skip_specular (F15 ticket 22): a hit that continues as an
-                    # ideal mirror gets that light through the continuation, counting it here too would count it twice
-                    value = value + (specular if skip_specular is None else dr.select(skip_specular, 0, specular))
+                    # ideal mirror gets the environment through the continuation, so that light sample is skipped (counted twice otherwise)
+                    value = value + (specular if skip_specular is None else
+                                     dr.select(skip_specular & light.emitter.is_environment(), 0, specular))
             else:
                 value = reduced * (dr.maximum(wi.z, 0) / math.pi) * light_weight
             radiance += dr.select(lit, beta * emitted * mi.Color3f(value), 0)
@@ -330,7 +340,7 @@ class Context:
             if bounce + 1 < self.mirror_bounces:
                 skip = dr.copy(self.mirror_hit(following, ray.d, smooth)[0])
             # tail narrows its masks in place (drjit &=): hand it copies
-            radiance += self.tail(hit, reflected, beta, mi.Float(1e30), dr.copy(smooth), True, alpha_floor, skip)
+            radiance += self.tail(hit, reflected, beta, mi.Float(1e30), dr.copy(smooth), True, alpha_floor, skip, True)
             hit, direction, active = following, ray.d, smooth
             dr.eval(radiance, beta, active, direction, hit)
             if not dr.any(active):
