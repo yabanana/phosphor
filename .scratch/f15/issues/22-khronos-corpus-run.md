@@ -289,3 +289,19 @@ Open: numeric texture fixtures (coat normal, anisotropy direction, iridescence t
 - **Archive**: `.scratch/f15/harvest/loader-misc-3.json` (constant 22 + the `_vc` function names + constant 27: 6 compute resolve / guide kernels); fixture runs on the rebuilt archive show 0 archive misses.
 - **Corpus**: none of the 24 models in build/khronos-corpus has COLOR_0 (VertexColorTest / BoxVertexColors are not in the corpus; no download); no corpus re-run needed for this feature.  DiffuseTransmissionTest note on the unlit vertex colour factor removed (applied now; the model has none).
 - **Declared gaps**: GI hit shading, probe capture and emitter alpha have no numeric fixture (sites written, compile, bit-identical without COLOR_0); the probe capture and CSM cache casters / `meshlet_mesh_direct_vc` / `meshlet_mesh_tricull_vc` twins have no archive entry (compiled on first use, `_vc` only for scenes with COLOR_0); DI / cluster / fog emitter call sites and `visibility_tile` ignore COLOR_0; the CPU RT reference (rt_check) is unaware of colours.
+
+### C22-A1: F0 floor removed, every smooth surface (2026-11-15, owner option (b), branch f15c-reflbounce-c)
+
+- `shaders/reflections.metal`: the chain runs on every hit with roughness <= 0.1 and Fresnel >= 0.1, weighted by the Fresnel of each hit (no F0 condition).
+- **Dielectric fixture** (`dielectric-corridor` in `tools/f15_reflection_bounce_check.py`, model with F0 0.04 and the declared Fresnel gate as a mask; the reference side is
+  `tools/test_f13_reference_mirror.py::test_smooth_dielectrics_continue_too`, Mitsuba against the analytic model, bounces 3 classes 1-2 within 5 %, bounces 0 class 2 > 0.5):
+  two facing black smooth dielectrics, classes 1-2 gated (29084 / 4112 stable pixels; class >= 3 carries < 1 % of the environment, under the declared 0.01 throughput cutoff).
+  Engine bounces 3: class 1 1.99 %, class 2 4.53 % (gate 5 %). Controls: `--reflection-bounces 0` class 2 99.2 %; a build WITH the F0 floor (`--floor-binary`) class 2 99.2 %:
+  both fail as required. Without masking the pixels the Fresnel gate drops (F < 0.1, 520 of 4788 class-2 pixels, 1.6 % of the class radiance) class 2 reads 14.3 %: the gate is declared,
+  its dropped share is stated here, not hidden by a looser threshold. Corridor / ball metal fixtures unchanged (0.20/0.32/0.39/0.70 %, 0.63/2.43/4.7 %, controls 98-100 %).
+- **Re-baseline evidence** (default bounces 3 against `--reflection-bounces 0`, which is byte-identical to the integrated tip behaviour):
+  `f15_exact.sh` linear PFM: sponza-d2 828 of 921600 px differ, max delta 0.003078, mean delta over the differing px 1.18e-05 (1.06e-08 over the frame), 8-bit PNG 0 px; cornell-restir,
+  cornell-clustered-ssr, manylights-restir, grid-sky 0 px (byte-identical). `visual_check` 8 benches (BENCH8_ARGS="--instances 100000"): 0 of 5760000 px, max delta 0 on every bench.
+  No reference image was touched; only Sponza D2 (the 828 smooth dielectric texels) changes.
+- **F13/F14 reflection subset** (20 cases, floor-removed binary): control 11/11, functional 3/3, independent-clip 6/6; independent-clip p95 identical to the F0-floor run to 4 decimals
+  (roughness-custom 0.0393, metalfx-fallback 0.0393, mirror-custom 0.0184, moving-light-custom 0.0515, disocclusion-custom 0.0568, rough-emitter-custom 0.0098).
