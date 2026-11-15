@@ -239,6 +239,12 @@ THRESHOLDS = {
     # F15.1 (ticket 17/18, RT tier): the back-lit bound of the ticket-18 plan: 2x the side-lit bound, fixed BEFORE the walk was compared.
     "subsurface_backlit": {"mean": 0.20, "p95": 0.50, "floor_fraction": 0.05,
                            "metric": "as `subsurface`; ticket 18: the back-lit fixture within 2x the side-lit bound; every piece is gated (the walk has no diffusion regime)"},
+    # F15.1 (ticket 17, RT tier): the ambient dome through the walk against the base model's ambient diffuse (sub-pixel medium, colour = base colour:
+    # the observed albedo of the semi-infinite medium IS the colour).  Bound from an independent criterion fixed BEFORE the comparison: the angle
+    # dependence of the observed albedo measured by Mitsuba (tools/f15_subsurface_albedo.json A_angle: diffuse vs 0 / 45 / 70 degrees within 6 %
+    # up to alpha 0.99): mean 6 %, p95 twice that.
+    "subsurface_ambient": {"mean": 0.06, "p95": 0.12, "floor_fraction": 0.05,
+                           "metric": "as `subsurface`, the reference is the engine capture of the pair scene (base model, no block)"},
     "radius_sweep": {"tolerance": 0.01,
                      "statistic": "terminator bleed = mean Y over the geometrically unlit ROI pixels of a piece / mean Y over its lit ROI pixels"},
     "equal": {"max_relative_luminance_error": 0.002, "min_mean_luminance": 1e-3},
@@ -917,14 +923,14 @@ SCENARIOS = {
     # ticket 18: the rt-walk albedo table over the boundary roughness.  Gated: the pieces of roughness <= 0.5 (declared before the measurement: at
     # 0.7 the plateau of the boundary is 0.503 and the fixture colours saturate; those pieces are reported).
     "subsurface-volumetric-rough@rt-walk": {"kind": "subsurface", "reference": "subsurface", "reflections": "off", "rt": True,
-                                            "engine_args": WALK_ARGS, "accumulate": WALK_FRAMES, "gate_max_roughness": 0.5,
+                                            "engine_args": WALK_ARGS, "accumulate": WALK_FRAMES, "gate_max_roughness": 0.5, "reference_args": ["--spp", "8192"],
                                             "noise_twin": "subsurface-volumetric-rough@rt-walk-lights-off",
                                             "controls": ["subsurface-off", "diffusion-off"],
                                             "terms": "sun only from the side on skin and jade spheres of boundary roughness 0.25 / 0.5 / 0.7, weight {1, 1, 1, 0.5, 0.5}, radius 0.08 m, "
                                                      "--subsurface-mode rt-walk; gated: roughness <= 0.5"},
     "subsurface-volumetric-rough@rt-walk-lights-off": {"kind": "subsurface", "reference": "subsurface", "reflections": "off", "rt": True,
                                                        "engine_args": WALK_ARGS + ["--debug-subsurface-walk-lights", "off"], "accumulate": 8,
-                                                       "gate_max_roughness": 0.5, "pending": "negative control", "controls": [],
+                                                       "gate_max_roughness": 0.5, "reference_args": ["--spp", "8192"], "pending": "negative control", "controls": [],
                                                        "terms": "negative control of the roughness key: the walk lights nothing (must FAIL; also the noise twin)"},
     # The fallback and Apple9 keys.  --rt off: the walk is requested but cannot run; the engine must say so (effective = diffusion, reason names --rt)
     # and render exactly the screen-space tier (equal to the capture of subsurface-volumetric-sun).  Apple9 (--force-family apple9, effective
@@ -938,6 +944,70 @@ SCENARIOS = {
                                                  "engine_args": WALK_ARGS + ["--force-family", "apple9"], "accumulate": WALK_FRAMES,
                                                  "noise_twin": "subsurface-volumetric-sun@rt-walk-lights-off", "controls": [],
                                                  "terms": "the side-lit rt-walk key under --force-family apple9: the walk runs and meets the same bound"},
+    # ticket 17: the ambient dome (environment / GI irradiance of the resolve) is walked: no light, sub-pixel medium, colour = base colour: the walk must
+    # give the ambient diffuse of the base model (the pair scene without a block).  Negative controls: the engine capture whose walk adds nothing.
+    # The resolve-owned ambient (reachable: no lighting stack, engine.cpp creates the reflection composite only with reflections / AO / the denoiser on): the
+    # legacy hemisphere ambient, captured without --debug-lighting (it needs the lighting stack).  Same furnace, pair and controls as the composite key.
+    "subsurface-volumetric-hemi@rt-walk": {"kind": "subsurface-ambient", "reference": "subsurface", "reflections": "off", "rt": True, "denoise": "off", "lighting_checks": False,
+                                           "engine_args": WALK_ARGS, "accumulate": WALK_FRAMES, "reference_args": ["--no-ground-truth"],
+                                           "pair": "subsurface-volumetric-hemi-off", "noise_twin": "subsurface-volumetric-hemi@rt-walk-lights-off", "controls": [],
+                                           "terms": "no light, the legacy hemisphere ambient owned by the resolve (no composite), sub-pixel medium of colour C != the base colour, weight 1: "
+                                                    "the walk must equal the base model's ambient diffuse of a surface of base colour C (the pair scene)"},
+    "subsurface-volumetric-hemi@rt-walk-lights-off": {"kind": "subsurface-ambient", "reference": "subsurface", "reflections": "off", "rt": True, "denoise": "off",
+                                                      "lighting_checks": False, "engine_args": WALK_ARGS + ["--debug-subsurface-walk-lights", "off"], "accumulate": 8,
+                                                      "reference_args": ["--no-ground-truth"], "pair": "subsurface-volumetric-hemi-off", "controls": [],
+                                                      "pending": "negative control", "terms": "the walk adds nothing (the stripped ambient is missing): must FAIL"},
+    "subsurface-volumetric-hemi-off": {"kind": "equal", "capture_only": True, "reflections": "off", "denoise": "off", "lighting_checks": False, "controls": [],
+                                       "terms": "the hemisphere scene of base colour C without any subsurface block (the pair of the key above; capture only)"},
+    # the same scene through the reflection composite (--lighting-denoise custom: RESOLVE_EXTERNAL_DIFFUSE, the product presets' path): the composite multiplies
+    # its ambient / GI diffuse term by the walk's gain target.  Negative control: the engine capture whose walk adds nothing (gain 0: the Lambert base colour).
+    "subsurface-volumetric-env@rt-walk-composite": {"kind": "subsurface-ambient", "reference": "subsurface", "reflections": "off",
+                                                    "rt": True, "engine_args": WALK_ARGS, "accumulate": WALK_FRAMES, "reference_args": ["--no-ground-truth"],
+                                                    "pair": "subsurface-volumetric-env-off@composite", "noise_twin": "subsurface-volumetric-env@rt-walk-composite-lights-off",
+                                                    "controls": [], "terms": "the ambient furnace pair through the composite path (--lighting-denoise custom)"},
+    "subsurface-volumetric-env@rt-walk-composite-lights-off": {"kind": "subsurface-ambient", "reference": "subsurface",
+                                                               "reflections": "off", "rt": True,
+                                                               "engine_args": WALK_ARGS + ["--debug-subsurface-walk-lights", "off"], "accumulate": 8,
+                                                               "reference_args": ["--no-ground-truth"], "pair": "subsurface-volumetric-env-off@composite", "controls": [],
+                                                               "pending": "negative control", "terms": "the walk's gain is zero: the composite keeps the Lambert base colour: must FAIL"},
+    "subsurface-volumetric-env-off@composite": {"kind": "equal", "capture_only": True, "reflections": "off", "controls": [],
+                                                "terms": "the pair of the composite key (base colour C, no block, composite path; capture only)"},
+    # ticket 17 (b): the analytic LOCAL light through the three lighting paths with the walk: the resolve's local lights (legacy), ReSTIR DI and clustered DI
+    # (DI shades the diffuse of walk pixels with 1 - weight for the delta lights, the walk's next-event estimation adds it).  Ground truth: Mitsuba with a point
+    # emitter (the engine's range window is 1 - 3e-5 at the fixture distance); the side-lit bound, every piece gated (weight 1, the walk has no diffusion regime).
+    "subsurface-volumetric-point@rt-walk": {"kind": "subsurface-point", "reference": "subsurface", "reflections": "off", "rt": True, "lighting": "legacy",
+                                            "engine_args": WALK_ARGS, "accumulate": WALK_FRAMES, "noise_twin": "subsurface-volumetric-point@rt-walk-lights-off",
+                                            "controls": ["subsurface-off", "diffusion-off"],
+                                            "terms": "one point light from the side (resolve local light, --lighting legacy), --subsurface-mode rt-walk vs the Mitsuba point-emitter random walk"},
+    "subsurface-volumetric-point@rt-walk-lights-off": {"kind": "subsurface-point", "reference": "subsurface", "reflections": "off", "rt": True, "lighting": "legacy",
+                                                       "engine_args": WALK_ARGS + ["--debug-subsurface-walk-lights", "off"], "accumulate": 8, "pending": "negative control",
+                                                       "controls": [], "terms": "negative control and noise twin: the walk adds nothing"},
+    "subsurface-volumetric-point@rt-walk-restir": {"kind": "subsurface-point", "reference": "subsurface", "reflections": "off", "rt": True, "lighting": "restir",
+                                                   "visibility": "rays", "denoise": "off", "engine_args": WALK_ARGS, "accumulate": WALK_FRAMES,
+                                                   "noise_twin": "subsurface-volumetric-point@rt-walk-restir-lights-off", "controls": ["subsurface-off"],
+                                                   "terms": "the same point light through ReSTIR DI (--lighting restir --rt on, unfiltered): DI leaves the diffuse of the weight share to the walk"},
+    "subsurface-volumetric-point@rt-walk-restir-lights-off": {"kind": "subsurface-point", "reference": "subsurface", "reflections": "off", "rt": True, "lighting": "restir",
+                                                              "visibility": "rays", "denoise": "off", "pending": "negative control", "controls": [],
+                                                              "engine_args": WALK_ARGS + ["--debug-subsurface-walk-lights", "off"], "accumulate": 8,
+                                                              "terms": "negative control and noise twin (ReSTIR): the walk adds nothing"},
+    "subsurface-volumetric-point@rt-walk-restir-double": {"kind": "subsurface-point", "reference": "subsurface", "reflections": "off", "rt": True, "lighting": "restir",
+                                                          "visibility": "rays", "denoise": "off", "pending": "negative control", "controls": [],
+                                                          "noise_twin": "subsurface-volumetric-point@rt-walk-restir-lights-off",
+                                                          "engine_args": WALK_ARGS + ["--debug-subsurface-di-diffuse", "keep"], "accumulate": WALK_FRAMES,
+                                                          "terms": "negative control: DI keeps its full diffuse ON TOP of the walk (double counted): must FAIL"},
+    "subsurface-volumetric-point@rt-walk-clustered": {"kind": "subsurface-point", "reference": "subsurface", "reflections": "off", "rt": True, "lighting": "clustered",
+                                                      "visibility": "rays", "denoise": "off", "engine_args": WALK_ARGS, "accumulate": WALK_FRAMES,
+                                                      "noise_twin": "subsurface-volumetric-point@rt-walk-clustered-lights-off", "controls": ["subsurface-off"],
+                                                      "terms": "the same point light through clustered DI (--lighting clustered --rt on, unfiltered)"},
+    "subsurface-volumetric-point@rt-walk-clustered-lights-off": {"kind": "subsurface-point", "reference": "subsurface", "reflections": "off", "rt": True,
+                                                                 "lighting": "clustered", "visibility": "rays", "denoise": "off", "pending": "negative control",
+                                                                 "controls": [], "engine_args": WALK_ARGS + ["--debug-subsurface-walk-lights", "off"], "accumulate": 8,
+                                                                 "terms": "negative control and noise twin (clustered): the walk adds nothing"},
+    "subsurface-volumetric-point@rt-walk-clustered-double": {"kind": "subsurface-point", "reference": "subsurface", "reflections": "off", "rt": True,
+                                                             "lighting": "clustered", "visibility": "rays", "denoise": "off", "pending": "negative control", "controls": [],
+                                                             "noise_twin": "subsurface-volumetric-point@rt-walk-clustered-lights-off",
+                                                             "engine_args": WALK_ARGS + ["--debug-subsurface-di-diffuse", "keep"], "accumulate": WALK_FRAMES,
+                                                             "terms": "negative control: clustered DI keeps its diffuse on top of the walk (double counted): must FAIL"},
     "subsurface-volumetric-radius@rt-walk": {"kind": "radius-monotonic", "reference": "subsurface", "reflections": "off", "rt": True,
                                              "engine_args": WALK_ARGS, "accumulate": WALK_FRAMES,
                                              "controls": VOLUMETRIC_SWEEP_CONTROLS,
@@ -1266,7 +1336,7 @@ def capture_command(binary, name, folder, seed=1):
             "--lighting-denoise", SCENARIOS[name].get("denoise", "custom"), "--reflection-samples", "8",
             "--lighting-seed", str(seed),
             "--post", "--upscaler", "native", "--resolution", RESOLUTION, "--frames", str(FRAMES),
-            "--warmup", "0", "--fixed-timestep", "--no-ui", "--no-vsync", "--no-gpu-timing", *([] if SCENARIOS[name].get("legacy_environment") else ["--debug-lighting", "1"]),
+            "--warmup", "0", "--fixed-timestep", "--no-ui", "--no-vsync", "--no-gpu-timing", *([] if (SCENARIOS[name].get("legacy_environment") or not SCENARIOS[name].get("lighting_checks", True)) else ["--debug-lighting", "1"]),
             # Synchronous pipelines: a cold compiler cache must never let a capture use a fallback variant (a fallback-served capture once
             # equalled the base model, ticket 17); fallback_draws() rejects any capture whose log still reports fallback draws.
             "--pipeline-sync", *(["--reflection-capture-probe"] if SCENARIOS[name].get("probe") else []),
@@ -1708,6 +1778,10 @@ def evaluate(np, kind, candidate, reference, masks, spheres, band=1, gate_max_ro
         return evaluate_subsurface(np, candidate, reference, masks, spheres, max_roughness=gate_max_roughness)
     if kind == "subsurface-report":
         return evaluate_subsurface(np, candidate, reference, masks, spheres, gated=False)
+    if kind == "subsurface-point":
+        return evaluate_subsurface(np, candidate, reference, masks, spheres, every_piece=True)
+    if kind == "subsurface-ambient":
+        return evaluate_subsurface(np, candidate, reference, masks, spheres, gate_key="subsurface_ambient", every_piece=True)
     if kind == "subsurface-backlit":
         return evaluate_subsurface(np, candidate, reference, masks, spheres, gate_key="subsurface_backlit", every_piece=True)
     if kind == "radius-monotonic":

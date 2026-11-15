@@ -216,6 +216,7 @@ namespace phosphor {
 //   --subsurface-steps N    hard bound of the events of one walk (default 512)
 //   --subsurface-walk-shadows on|off  occlude the lights at the exits of the walk by a shadow ray (default: on with --shadows other than off)
 //   --debug-subsurface-walk-lights off  negative control: the walk lights nothing
+//   --debug-subsurface-di-diffuse keep  negative control: DI keeps the diffuse of walk pixels (double counted)
 //   --rt-tlas-rebuild-every N  periodic TLAS rebuild, 0 = structural changes only
 //   --rt-proxy off|manifest    RT geometry source (default full geometry)
 //   --rt-proxy-manifest PATH   explicit measured manifest (needs manifest mode)
@@ -374,6 +375,7 @@ struct LaunchOptions {
     u32          subsurfaceSamples = 4;
     u32          subsurfaceSteps = 512;
     int          subsurfaceWalkShadows = -1;  // -1 = follows --shadows, 0 off, 1 on
+    bool         debugSubsurfaceDiDiffuse = false; // --debug-subsurface-di-diffuse keep: negative control, DI keeps its full diffuse on top of the walk
     bool         debugSubsurfaceWalkLights = true; // false = negative control: the walk lights nothing
     u32          rtTlasRebuildEvery = 0;        // 0 = structural changes only; cadence needs engine measurements
     bool         rtProxyManifest = false;      // --rt-proxy off|manifest

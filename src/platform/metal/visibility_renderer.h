@@ -78,6 +78,9 @@ class VisibilityRenderer {
     /// After AccelerationStructures::prepareFrame: binds the walk's intersection function table for this frame slot.
     void prepareSubsurfaceWalk(u32 slot);
     [[nodiscard]] bool subsurfaceWalkActive() const { return walk_; }
+    /// The walk's gain target (rgb = weight x exiting radiance per unit uniform dome radiance, a = weight): the reflection composite multiplies its
+    /// ambient / GI diffuse term by it for walk pixels.  Valid after addResolve in a graph with the walk pass.
+    [[nodiscard]] rg::TextureRef subsurfaceGain() const { return walk_ ? sssGain_ : rg::TextureRef{}; }
     /// Graph-key value of the subsurface path: 0 none, 1 screen-space diffusion, 2 RT walk.
     [[nodiscard]] u32 subsurfaceKey() const { return subsurface_ ? (walk_ ? 2u : 1u) : 0u; }
     void setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi, rg::TextureRef giBack = {});
@@ -171,7 +174,7 @@ class VisibilityRenderer {
     bool subsurfaceAllowed_ = false, subsurface_ = false;
     float sssNear_ = 0.1f, sssTanX_ = 1.0f, sssTanY_ = 1.0f;
     pipe::PipelineHandle sssClear_, sssDiffuse_, fallbackSss_;
-    rg::TextureRef sss_, sssResult_;
+    rg::TextureRef sss_, sssResult_, sssGain_;
     // Ticket 17/18: the RT walk tier (SSS_OUTPUT == 2): the kernel replaces the diffusion pass.
     AccelerationStructures* walkRt_ = nullptr;
     std::unique_ptr<RtConsumer> walkConsumer_;

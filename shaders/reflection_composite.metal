@@ -106,7 +106,7 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
     device atomic_uint* counts [[buffer(2)]]REFL_GUIDE_PARAM(3),texture2d<float,access::read> base [[texture(0)]],
     texture2d<float,access::read> diSelected [[texture(2)]],texture2d<float,access::read> giSelected [[texture(4)]],
     texture2d<float,access::read> specular [[texture(5)]],texture2d<float,access::read> ao [[texture(6)]],texture2d<float,access::write> output [[texture(7)]],
-    texture2d<half,access::read> giBack [[texture(8)]],uint tid [[thread_position_in_grid]]){
+    texture2d<half,access::read> giBack [[texture(8)]]REFL_SSS_PARAM(9),uint tid [[thread_position_in_grid]]){
     if(tid>=p.backingWidth*p.backingHeight)return;const uint2 pixel(tid%p.backingWidth,tid/p.backingWidth);float3 color=base.read(pixel).rgb;
     if(all(pixel<uint2(p.width,p.height))){const GPUDISurface s=surfaces[pixel.y*p.width+pixel.x];
         if(s.valid){if(p.flags&REFLECT_COMPOSE_EXCLUDE_EMISSION)color=max(color-unpackEmission3(s.pad[1]),0.0f);
@@ -138,7 +138,14 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
                 if(lobe.thin){thinTerm=(lobe.extended&&!bsdfThinEnvIsDefault(lobe.spec,lobe.irid))?bsdfThinEnvWeightFit(lobe.thinParams,lobe.spec,lobe.irid,saturate(s.metallic),envNV,envDiffuse/max(envDiffuseBase,1e-6f)):bsdfThinEnvWeight(lobe.thinParams,saturate(s.metallic),envDiffuse,envNV);envDiffuse*=bsdfThinReflectScale(lobe.thinParams);}}
 #endif
             if(p.flags&REFLECT_COMPOSE_DI)color+=diSelected.read(pixel).rgb;
+#ifdef PHOSPHOR_REFL_LOBE
+            // F15.1 (ticket 17, RT tier): the diffuse factor of a walk pixel (see REFLECT_COMPOSE_SSS); the base factor elsewhere.
+            float3 diffuseFactor=diVec(s.albedo)*(1-s.metallic)*envDiffuse;
+            if(p.flags&REFLECT_COMPOSE_SSS){const float4 g=sssGain.read(pixel);if(g.w>0.0f)diffuseFactor=diffuseFactor*(1.0f-g.w)+g.rgb;}
+            if(p.flags&REFLECT_COMPOSE_GI)color+=giSelected.read(pixel).rgb*diffuseFactor/M_PI_F;
+#else
             if(p.flags&REFLECT_COMPOSE_GI)color+=giSelected.read(pixel).rgb*diVec(s.albedo)*(1-s.metallic)*envDiffuse/M_PI_F;
+#endif
 #ifdef PHOSPHOR_REFL_LOBE
             if((p.flags&REFLECT_COMPOSE_GI)&&any(sheenTerm>0))color+=giSelected.read(pixel).rgb*sheenTerm/M_PI_F;
             // F15.1 (ticket 19): E(-N) is the probe-grid lookup of the back normal (REFLECT_COMPOSE_GI_BACK; every GI mode since the F15 closure: the probe atlas exists in all of them).
@@ -147,7 +154,12 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
             if(p.flags&REFLECT_COMPOSE_SPEC)color+=specular.read(pixel).rgb;
             if(!(p.flags&REFLECT_COMPOSE_GI)){const float3 n=normalize(diVec(s.shadingNormal));
                 // Declared isotropic environment (Lo = albedo * L), not the legacy gradient.
-                (void)n;const float3 ambient=float3(p.environment[0],p.environment[1],p.environment[2])*diVec(s.albedo)*(1-s.metallic)*envDiffuse*as_type<float>(s.pad[0]);
+                (void)n;
+#ifdef PHOSPHOR_REFL_LOBE
+                const float3 ambient=float3(p.environment[0],p.environment[1],p.environment[2])*diffuseFactor*as_type<float>(s.pad[0]);
+#else
+                const float3 ambient=float3(p.environment[0],p.environment[1],p.environment[2])*diVec(s.albedo)*(1-s.metallic)*envDiffuse*as_type<float>(s.pad[0]);
+#endif
                 const float aoFactor=(p.flags&REFLECT_COMPOSE_AO)?saturate(ao.read(pixel).x):1.0f;
                 color+=ambient*aoFactor;
 #ifdef PHOSPHOR_REFL_LOBE

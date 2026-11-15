@@ -12,6 +12,7 @@
 #define REFL_GUIDE_PARAM(index) , const device GPULobeGuide* guides [[buffer(index)]]
 // F15.1 (ticket 13): the material extension records (ior, transmission factor, volume thickness and medium of the glass the refracted rays cross).
 #define REFL_EXT_PARAM(index) , const device GPUMaterialExtRecord* extRecords [[buffer(index)]]
+#define REFL_SSS_PARAM(index) , texture2d<float, access::read> sssGain [[texture(index)]]
 #define REFL_LOBE(flags, flag, i, surface) reflectionLoadLobe(flags, flag, guides, i, surface)
 #define REFL_DIRECTION(s, u, lobe) reflectionDirectionLobe(s, u, lobe)
 // The sampled lobe's (id, axis) key into the sample flags read by the "_lobe" denoiser kernels (denoise.metal, lobe contract).
@@ -20,6 +21,7 @@
 #define REFL_KERNEL(name) name
 #define REFL_GUIDE_PARAM(index)
 #define REFL_EXT_PARAM(index)
+#define REFL_SSS_PARAM(index)
 #define REFL_TAG(sample, lobe)
 #endif
 #ifdef PHOSPHOR_REFL_LOBE

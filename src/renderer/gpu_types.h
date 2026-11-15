@@ -916,6 +916,9 @@ PHOSPHOR_GPU_CONSTANT u32 DI_LOBE_GUIDE_BOUND = 256u;
 // the write (up to 16384 dependent fma per fragment, the longest for the first layer of the coplanar fixture), so that overlapping fragments
 // finish out of order: the raster order group must still order the writes, its absence must not.
 PHOSPHOR_GPU_CONSTANT u32 DI_LOBE_GUIDE_DELAY = 4096u;
+// F15.1 (ticket 17, RT tier): the volumetric-subsurface walk is effective this frame: the walk lights the analytic (delta) lights through its own
+// next-event estimation, so DI shades the diffuse of a volumetric-subsurface pixel with 1 - weight only for the delta samples (area emitters keep it).
+PHOSPHOR_GPU_CONSTANT u32 DI_SSS_WALK = 512u;
 // F13.6: RT reflections also see geometry-backed emitters (DI_LIGHT_TRIANGLE).
 // Their specular lobe is then split by the reflection RT probability: DI keeps
 // smoothstep(low, high, roughness), the RT path (taken with the complementary
@@ -1436,6 +1439,9 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_GI_BACK = 128u;
 // F15.1 (ticket 10, decision 06): the probe kernel adds the sheen term S E L(N) with the PROBE radiance at N into the specular signal, so the composite
 // must not add its declared-environment sheen term (set with --reflections probes; the probe kernel skips the term itself when GI is on).
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_SHEEN_FROM_PROBE = 256u;
+// F15.1 (ticket 17, RT tier): the composite's diffuse ambient / GI factor of a walk pixel comes from the walk's gain target (rgb = w (1 - metallic)
+// x the exiting radiance per unit uniform dome radiance, a = w): factor = base (1 - a) + rgb.  Lobe variant only.
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_SSS = 512u; // 512: 256 is REFLECT_COMPOSE_SHEEN_FROM_PROBE (integration)
 struct GPUReflectionReduceParams {u32 width,height,samples,stridePixels;};
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionReduceParams)==16,"GPUReflectionReduceParams layout");
 struct GPUReflectionComposeParams {u32 width,height,backingWidth,backingHeight;u32 flags,pad[3];float environment[3];u32 pad2;};

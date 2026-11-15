@@ -481,6 +481,11 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if (!needCount(count)) return false;
             if (count == 0 || count > 4096) { error = std::string(arg) + ": expected 1..4096"; return false; }
             if (arg == "--subsurface-samples") out.subsurfaceSamples = count; else out.subsurfaceSteps = count;
+        } else if (arg == "--debug-subsurface-di-diffuse") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value != "keep" && *value != "drop") { error = "--debug-subsurface-di-diffuse: expected keep or drop"; return false; }
+            out.debugSubsurfaceDiDiffuse = *value == "keep";
         } else if (arg == "--subsurface-walk-shadows" || arg == "--debug-subsurface-walk-lights") {
             const auto value = needValue();
             if (!value) return false;

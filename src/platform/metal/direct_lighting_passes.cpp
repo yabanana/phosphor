@@ -37,7 +37,7 @@ struct DirectLightingPasses::Impl {
     // the producers (slots 202..206); the base
     // kernel serves while neither the specialised nor the all-lobes pipeline is available (base BRDF, as before).
     std::array<pipe::PipelineHandle,Count> diServed{};pipe::PipelineHandle clusterServed{};
-    u32 featureUnion=0;bool guideValid=false;u64 guideCapacity=0;
+    u32 featureUnion=0;bool guideValid=false;u64 guideCapacity=0;bool sssWalk=false;
     rg::BufferRef lobeGuideRef{},lobeReadbackRef{};
     std::unique_ptr<RtConsumer> restirConsumer,clusterConsumer;
     struct Slot {
@@ -174,6 +174,7 @@ struct DirectLightingPasses::Impl {
         params.flags=DI_ENABLE_TEMPORAL|DI_ENABLE_SPATIAL|(rt?DI_ENABLE_VISIBILITY:0u)|DI_USE_STBN|(decision.reset?DI_RESET_HISTORY:0u);
         if(slot.lobeGuide)params.flags|=DI_LOBE_GUIDE_BOUND;
         if(guideValid)params.flags|=DI_LOBE_GUIDE_VALID;
+        if(sssWalk&&guideValid)params.flags|=DI_SSS_WALK;
         if(options.debugLobeGuideCorrupt)params.flags|=DI_LOBE_GUIDE_CORRUPT;
         if(options.debugLobeGuideDelay)params.flags|=DI_LOBE_GUIDE_DELAY;
         params.stbnWidth=stbn.config.width;params.stbnHeight=stbn.config.height;params.stbnFrames=stbn.config.frames;params.stbnDimensions=stbn.config.dimensions;params.stbnSeed=options.lightingSeed;
@@ -303,6 +304,7 @@ u32 DirectLightingPasses::lightCount()const{return impl_->params.lightCount;}u32
 bool DirectLightingPasses::emptyLocalLighting() const { return impl_->emptyLocalLighting; }
 rg::BufferRef DirectLightingPasses::lobeGuideRef() const { return impl_->lobeGuideRef; }
 bool DirectLightingPasses::lobeGuideValid() const { return impl_->guideValid; }
+void DirectLightingPasses::setSubsurfaceWalk(bool active) { impl_->sssWalk = active; }
 bool DirectLightingPasses::checkLobeGuide(u32 slot, const SceneStore& store) const {
     // F15.1 (ticket 06): called after the frame completed (the engine waits for the GPU first).
     const auto& s = impl_->slots.at(slot);

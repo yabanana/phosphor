@@ -19,7 +19,7 @@
 namespace phosphor {
 namespace {
 // The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_material_validation.cpp compares both).
-constexpr std::array<std::string_view, 90> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
+constexpr std::array<std::string_view, 95> kScenarios{"base-grid-sun",  "base-grid-env",       "base-grid-env-resolve",
                                                       "furnace-base",   "furnace-resolve",     "roughness-extremes",
                                                       "roughness-extremes-sun", "specular-grid-sun",
                                                       "specular-grid-env-resolve", "specular-grid-point", "specular-grid-env", "furnace-specular",
@@ -37,6 +37,8 @@ constexpr std::array<std::string_view, 90> kScenarios{"base-grid-sun",  "base-gr
                                                       "subsurface-volumetric-sun", "subsurface-volumetric-radius",
                                                       "subsurface-volumetric-subpixel", "subsurface-volumetric-subpixel-off",
                                                       "subsurface-volumetric-backlit", "subsurface-volumetric-rough",
+                                                      "subsurface-volumetric-env", "subsurface-volumetric-env-off", "subsurface-volumetric-hemi",
+                                                      "subsurface-volumetric-hemi-off", "subsurface-volumetric-point",
                                                       "combo-coat-sheen-sun", "combo-coat-sheen-env", "combo-aniso-coat-sun",
                                                       "combo-aniso-coat-env", "combo-aniso-sheen-sun", "combo-aniso-sheen-env",
                                                       "combo-specular-sheen-sun", "combo-specular-sheen-env", "combo-irid-coat-sun",
@@ -604,7 +606,9 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const std::vector<glm::vec3> volScales{glm::vec3(1.0f, 0.5f, 0.25f), glm::vec3(0.5f, 1.0f, 0.7f)};
     static const std::vector<float> volAnisotropy{0.0f, 0.3f};
     static const glm::vec3 volBase(0.8f);
+    static const std::vector<float> pointRadii{0.04f, 0.08f, 0.16f, 0.04f, 0.08f};
     static const glm::vec3 volSun = glm::normalize(glm::vec3(-0.9f, 0.25f, 0.35f));
+    static const MaterialPointLight volPoint{6.0f * volSun, 108.0f, 100.0f};
     // Sub-pixel fixture: weight {1, 1, 0.5, 0.5} x radius {0.0005, 0.002, 0.0005, 0.002} m (the mean free path is at most 0.002 m =
     // 0.23 px at the 5.5 m camera), subsurface colour = the base colour (so the "diffusion skipped" image IS the base model), g = 0.
     // `-off` is the identical scene without any block: the runner compares the two engine captures.
@@ -615,6 +619,8 @@ const std::vector<MaterialScenarioSpec>& specs() {
     static const std::vector<glm::vec3> subColors{volBase};
     static const std::vector<glm::vec3> subScales{glm::vec3(1.0f, 0.5f, 0.25f)};
     static const std::vector<float> subAnisotropy{0.0f};
+    static const std::vector<float> envWeights(4, 1.0f);
+    static const std::vector<glm::vec3> envColors{glm::vec3(0.30f, 0.70f, 0.45f)};
     // Back-lit thick fixture: the sun BEHIND the spheres (V.L about -0.96), weight 1, radius {0.08, 0.16} m, both materials.  Measured
     // and reported, not gated: screen-space diffusion cannot carry light through a thick volume (a declared limit).
     // Boundary-roughness fixture (ticket 18, the rt-walk albedo table over the roughness): the side-lit scene at weight {1, 1, 1, 0.5, 0.5} and a
@@ -813,6 +819,26 @@ const std::vector<MaterialScenarioSpec>& specs() {
         // Boundary roughness 0.25 / 0.5 / 0.7 (the rt-walk albedo table over the roughness, ticket 18).
         {.name = "subsurface-volumetric-rough", .roughness = roughRoughness, .metallic = volMetallic2, .baseColor = volBase, .sun = true,
          .sunIrradiance = 3.0f, .towardSun = volSun, .environment = 0.0f, .volumetricWeight = roughWeights, .volumetricRadius = roughRadii,
+         .volumetricColor = volColors, .volumetricRadiusScale = volScales, .volumetricAnisotropy = volAnisotropy},
+        // Ambient (ticket 17, RT tier): no light at all, only the ambient dome; sub-pixel radius, weight 1 and a subsurface colour C different from the base
+        // colour.  The observed albedo of a semi-infinite medium IS C, so the walk must give the base model's ambient diffuse of a surface whose base colour is C
+        // (the `-off` scene: no block, base colour C).  An engine that ignores the walk shows the base colour 0.8 instead (negative control).
+        {.name = "subsurface-volumetric-env", .roughness = subRoughness, .metallic = subMetallic1, .baseColor = volBase, .sun = false,
+         .environment = 0.5f, .volumetricWeight = envWeights, .volumetricRadius = subRadii, .volumetricColor = envColors,
+         .volumetricRadiusScale = subScales, .volumetricAnisotropy = subAnisotropy},
+        {.name = "subsurface-volumetric-env-off", .roughness = subRoughness, .metallic = subMetallic1, .baseColor = envColors[0], .sun = false,
+         .environment = 0.5f},
+        // The same ambient furnace with the LEGACY hemisphere ambient (environment 0, no lighting stack: the resolve owns the ambient: the runner captures
+        // without --debug-lighting).  Reachability of that path: engine.cpp creates the reflection composite only with reflections / AO / the denoiser on.
+        {.name = "subsurface-volumetric-hemi", .roughness = subRoughness, .metallic = subMetallic1, .baseColor = volBase, .sun = false,
+         .environment = 0.0f, .volumetricWeight = envWeights, .volumetricRadius = subRadii, .volumetricColor = envColors,
+         .volumetricRadiusScale = subScales, .volumetricAnisotropy = subAnisotropy},
+        {.name = "subsurface-volumetric-hemi-off", .roughness = subRoughness, .metallic = subMetallic1, .baseColor = envColors[0], .sun = false,
+         .environment = 0.0f},
+        // One point light from the side (the sun's direction, 6 m away, 3 W/m2 at the centre) instead of the sun: the analytic LOCAL light of the resolve
+        // (--lighting legacy) and of DI (--lighting restir / clustered) with the walk (ticket 17, RT tier).  Weight 1 everywhere, radius {0.04, 0.08, 0.16, 0.04, 0.08}.
+        {.name = "subsurface-volumetric-point", .roughness = volRoughness, .metallic = volMetallic2, .baseColor = volBase, .sun = false,
+         .environment = 0.0f, .pointLights = {volPoint}, .volumetricWeight = volSweepWeights, .volumetricRadius = pointRadii,
          .volumetricColor = volColors, .volumetricRadiusScale = volScales, .volumetricAnisotropy = volAnisotropy},
         // Back-lit thick spheres: measured and reported, not gated.
         {.name = "subsurface-volumetric-backlit", .roughness = backRoughness, .metallic = volMetallic2, .baseColor = volBase,

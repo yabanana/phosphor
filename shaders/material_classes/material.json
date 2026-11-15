@@ -914,6 +914,95 @@
         {
           "lobes": [],
           "mask": 0,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "volume",
+            "subsurface"
+          ],
+          "mask": 192,
+          "materials": 4
+        }
+      ],
+      "family": "material",
+      "name": "material:subsurface-volumetric-env",
+      "union": 192,
+      "volumetric": true
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:subsurface-volumetric-env-off",
+      "union": 0,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "volume",
+            "subsurface"
+          ],
+          "mask": 192,
+          "materials": 4
+        }
+      ],
+      "family": "material",
+      "name": "material:subsurface-volumetric-hemi",
+      "union": 192,
+      "volumetric": true
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 6
+        }
+      ],
+      "family": "material",
+      "name": "material:subsurface-volumetric-hemi-off",
+      "union": 0,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "volume",
+            "subsurface"
+          ],
+          "mask": 192,
+          "materials": 10
+        }
+      ],
+      "family": "material",
+      "name": "material:subsurface-volumetric-point",
+      "union": 192,
+      "volumetric": true
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
           "materials": 4
         },
         {

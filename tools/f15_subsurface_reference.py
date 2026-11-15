@@ -392,16 +392,23 @@ def camera_dict(mi, data, crop, spp):
 
 
 def sun_emitters(data):
+    """The delta lights of the snapshot as Mitsuba emitters: the sun (type 0, directional) and, for the point-light fixtures, point lights (type 1:
+    radiant intensity colour x intensity in W/sr, so the irradiance at distance d is intensity / d^2; the engine's range window (1 - (d / range)^4)^2
+    is 1 - 3e-5 at the fixtures' 6 m and range 100: declared, not modelled).  A delta source reaches the medium through the boundary BTDF."""
     out, count = {}, 0
     for light in data["lights"]:
-        if light["type"] != 0:
-            raise ValueError("the volumetric reference models the sun only (a delta source reaches the medium through the boundary)")
-        irradiance = [float(c) * float(light["intensity"]) for c in light["color"]]
-        out[f"sun_{count}"] = {"type": "directional", "direction": [float(c) for c in light["direction"]],
-                               "irradiance": {"type": "rgb", "value": irradiance}}
+        value = [float(c) * float(light["intensity"]) for c in light["color"]]
+        if light["type"] == 0:
+            out[f"sun_{count}"] = {"type": "directional", "direction": [float(c) for c in light["direction"]],
+                                   "irradiance": {"type": "rgb", "value": value}}
+        elif light["type"] == 1:
+            out[f"point_{count}"] = {"type": "point", "position": [float(c) for c in light["position"]],
+                                     "intensity": {"type": "rgb", "value": value}}
+        else:
+            raise ValueError("the volumetric reference models the sun and point lights only (a delta source reaches the medium through the boundary)")
         count += 1
     if not count:
-        raise ValueError("the volumetric reference needs a sun")
+        raise ValueError("the volumetric reference needs a sun or a point light")
     return out
 
 
@@ -564,7 +571,7 @@ def command_render(args):
     root, data = snapshot(args.snapshot)
     out = pathlib.Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    if data["sky"][0] != 0 or data["sky"][1] != 0 or data["sky"][2] != 0:
+    if not args.no_ground_truth and (data["sky"][0] != 0 or data["sky"][1] != 0 or data["sky"][2] != 0):
         raise ValueError("the volumetric reference fixtures are sun-only (environment 0)")
     blocks = scene_blocks(data)
     plain = off_data(data)

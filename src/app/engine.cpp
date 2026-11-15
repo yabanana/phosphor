@@ -347,7 +347,6 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
             // shadows are on; the direct-lighting path owns the local lights then (the walk lights the directional ones only).
             u32 flags = 0;
             if (options_.subsurfaceWalkShadows == 1 || (options_.subsurfaceWalkShadows < 0 && options_.shadows != ShadowMode::Off)) flags |= SSS_WALK_SHADOW_RAYS;
-            if (options_.directLighting != DirectLightingMode::Legacy) flags |= SSS_WALK_NO_LOCAL;
             if (!options_.debugSubsurfaceWalkLights) flags |= SSS_WALK_NO_LIGHTS;
             visibility_->setSubsurfaceWalk(rt_.get(), options_.subsurfaceSamples, options_.subsurfaceSteps, flags);
             LOG_INFO("Subsurface: RT random walk tier (%u walks per pixel, <= %u events, %s shadow rays); the screen-space diffusion serves until the scene's acceleration structures exist",
@@ -1787,7 +1786,7 @@ bool Engine::frame(float dt) {
         sf.motionSinCos=motionSinCos_;sf.motionSinCosValid=true;
         sf.constants=constants;sf.nearPlane=camera_->getNear();std::memcpy(sf.unjitteredVP,&unjittered[0][0],64);
         shadows_->prepareFrame(*store_,lights_,sf);
-        if(directLighting_)directLighting_->prepareFrame(*gpuScene_,*store_,lights_,sf);
+        if(directLighting_){directLighting_->setSubsurfaceWalk(visibility_&&visibility_->subsurfaceWalkActive()&&!options_.debugSubsurfaceDiDiffuse);directLighting_->prepareFrame(*gpuScene_,*store_,lights_,sf);}
         // F15 (F13.1 residue found in F15): the GI passes receive the declared environment in EVERY scene (the atmosphere's is set in the scene sync
         // above; a corpus rig, material scenario or specular-environment fixture declares its own constant one).  Escaped probe / candidate rays
         // return it (ownership rule: shaders/gi_common.h giEscapeRadiance); before, GI saw black outside the geometry unless an atmosphere ran.
@@ -1808,7 +1807,7 @@ bool Engine::frame(float dt) {
             denoised_->prepareFrame(df);
         }
         const bool custom=options_.lightingDenoise==LightingDenoiseMode::Custom || (denoised_&&!denoised_->ready());
-        if(reflections_&&reflections_->ready()){reflections_->setEnvironment(environment.skyRadiance);reflections_->prepareFrame(*store_,sf,custom,surfaceSignalEpoch_);}
+        if(reflections_&&reflections_->ready()){reflections_->setEnvironment(environment.skyRadiance);reflections_->setSubsurfaceWalk(visibility_&&visibility_->subsurfaceWalkActive());reflections_->prepareFrame(*store_,sf,custom,surfaceSignalEpoch_);}
         if(atmosphere_)atmosphere_->prepareFrame(sf,surfaceGeometryEpoch_,surfaceMaterialEpoch_);
         const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u) | (gi_&&gi_->backAvailable()?RESOLVE_GI_BACK:0u) |
                         (options_.reflections!=ReflectionMode::Off && reflections_&&reflections_->ready()?8u:0u) | (reflections_&&reflections_->ready()?16u|RESOLVE_EXTERNAL_DIFFUSE:0u) |
@@ -2403,7 +2402,7 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
                 visibility_->setLightingTextures(shadows_->mask(),directLighting_?directLighting_->direct():shadows_->zeroLighting(),gi_?gi_->irradiance():shadows_->zeroLighting(),gi_?gi_->irradianceBack():rg::TextureRef{});
             }
             visibility_->addResolve(frameGraph_, color, shadows_?shadows_->depth():depth);
-            if(graphKey_.reflectionReady)visibility_->replaceColor(reflections_->addToGraph(frameGraph_,visibility_->color(),visibility_->depth()));
+            if(graphKey_.reflectionReady){reflections_->setSubsurfaceGain(visibility_->subsurfaceGain());visibility_->replaceColor(reflections_->addToGraph(frameGraph_,visibility_->color(),visibility_->depth()));}
             if(atmosphere_)visibility_->replaceColor(atmosphere_->addToGraph(frameGraph_,visibility_->color(),visibility_->depth()));
             rg::TextureRef reconstructed;
             // prepareFrame selected custom Float32 for unqualified radiometry

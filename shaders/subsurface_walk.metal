@@ -118,7 +118,7 @@ inline bool swLight(const device GPULight& light, float3 point, thread float3& t
 
 // One walk of channel c: returns the radiance estimate (before the factor 3 of the channel choice).
 template<typename Payload>
-inline float swWalk(float3 entryPoint, float3 entryNormalGeometric, float3 entryDirection, float entryWeight, float sigmaT, float albedo, float g, float alpha, uint channel,
+inline float swWalk(float3 entryPoint, float3 entryNormalGeometric, float3 entryDirection, float entryWeight, float sigmaT, float albedo, float g, float alpha, uint channel, thread float& transfer,
                     constant GPUSubsurfaceWalkParams& p, const device GPULight* lights, instance_acceleration_structure as,
                     intersection_function_table<triangle_data, instancing> ift, const device GPUInstance* instances, const device GPURtMesh* meshes,
                     const device GPUVertex* vertices, const device uint* indices, thread uint& seed) {
@@ -200,6 +200,17 @@ inline float swWalk(float3 entryPoint, float3 entryNormalGeometric, float3 entry
             const float cosVm = dot(vLocal, mLocal);
             if (cosVm <= 0.0f) break;
             const float reflectance = subsurfaceFresnel(cosVm, 1.0f / eta);
+            // ambient dome (the resolve-owned environment / GI irradiance as a locally uniform radiance): the transmitted sample of the same
+            // visible normal, weight (1 - F) G1 eta^2 (the entry's 1 / eta^2 cancels), no continuation
+            {   // unit dome: the walk's response to a uniform environment of radiance 1 (the caller scales it by the ambient radiance)
+                const float sin2 = eta * eta * (1.0f - cosVm * cosVm);
+                if (sin2 < 1.0f) {
+                    const float cosT = sqrt(1.0f - sin2);
+                    const float3 tLocal = -eta * vLocal + (eta * cosVm - cosT) * mLocal; // travels out of the medium: z < 0 in this frame
+                    if (tLocal.z < -1e-4f)
+                        transfer += weight * (1.0f - reflectance) * subsurfaceGgxG1(tLocal.z, dot(tLocal, mLocal), alpha) * eta * eta;
+                }
+            }
             const float3 wiLocal = 2.0f * cosVm * mLocal - vLocal;
             if (wiLocal.z <= 1e-4f) break;
             const float g1 = subsurfaceGgxG1(wiLocal.z, dot(wiLocal, mLocal), alpha);
@@ -225,11 +236,13 @@ kernel void subsurface_walk(constant GPUSubsurfaceWalkParams& p [[buffer(0)]], c
                             const device float* table [[buffer(10)]], const device RtTextureHandle* textures [[buffer(11)]],
                             texture2d<float, access::read> color [[texture(0)]], texture2d<float, access::read> sss [[texture(1)]],
                             texture2d<float, access::read> normalRoughness [[texture(2)]], texture2d<float, access::write> result [[texture(3)]],
+                            texture2d<float, access::write> gainTexture [[texture(4)]],
                             uint2 pixel [[thread_position_in_grid]]) {
     if (pixel.x >= p.outputWidth || pixel.y >= p.outputHeight) return;
     const float4 base = color.read(pixel);
     const float4 own = sss.read(pixel);
     const uint material = uint(own.w);
+    gainTexture.write(float4(0.0f), pixel);
     if (material == 0u || pixel.x >= p.width || pixel.y >= p.height || p.samples == 0u) {
         result.write(base, pixel);
         return;
@@ -263,20 +276,24 @@ kernel void subsurface_walk(constant GPUSubsurfaceWalkParams& p [[buffer(0)]], c
     const float roughness = clamp(nr.w, 0.04f, 1.0f);
     const float alpha = max(roughness * roughness, 0.002f);
     // the medium of the pixel (a locally homogeneous medium): per channel mean free path and single-scatter albedo
+    // subsurface colour: material colour x colour texture (the resolve's target carries the ambient dome radiance instead)
+    float3 colour(e2.color[0], e2.color[1], e2.color[2]);
+    if (e2.colorTex != INVALID_TEXTURE_INDEX) colour *= float3(textures[e2.colorTex].tex.sample(kWalkSampler, entry.uv, level(0.0f)).rgb);
+    const float3 ambientDome = (p.flags & SSS_WALK_NO_LIGHTS) != 0u ? float3(0.0f) : max(own.rgb, float3(0.0f));
     float3 radiusScale(e2.radiusScale[0], e2.radiusScale[1], e2.radiusScale[2]);
     if (e2.radiusScaleTex != INVALID_TEXTURE_INDEX)
         radiusScale *= float3(textures[e2.radiusScaleTex].tex.sample(kWalkSampler, entry.uv, level(0.0f)).rgb);
     float sigmaT[3], albedo[3];
     for (uint c = 0u; c < 3u; ++c) {
         sigmaT[c] = 1.0f / max(e2.radius * radiusScale[c], 1e-6f);
-        albedo[c] = subsurfaceSingleScatterAlbedo(table, roughness, e2.anisotropy, own.rgb[c]);
+        albedo[c] = subsurfaceSingleScatterAlbedo(table, roughness, e2.anisotropy, colour[c]);
     }
     const float3 wo = -direction;
     float3 tangent, bitangent;
     swBasis(shading, tangent, bitangent);
     const float3 voutLocal(dot(wo, tangent), dot(wo, bitangent), dot(wo, shading));
     uint seed = swHash(pixel.x + p.width * pixel.y + 0x1234567u) ^ swHash(p.frameIndex * 7919u + 17u);
-    float3 sum = float3(0.0f);
+    float3 sum = float3(0.0f), transferSum = float3(0.0f);
     const float eta = kSubsurfaceIor;
     for (uint s = 0u; s < p.samples; ++s) {
         const uint channel = min(uint(swRand(seed) * 3.0f), 2u);
@@ -291,9 +308,14 @@ kernel void subsurface_walk(constant GPUSubsurfaceWalkParams& p [[buffer(0)]], c
         const float entryWeight = (1.0f - fresnel) * subsurfaceGgxG1(refracted.z, dot(refracted, mLocal), alpha) / (eta * eta);
         const float3 d = normalize(tangent * refracted.x + bitangent * refracted.y + shading * refracted.z);
         if (dot(d, entry.ng) >= 0.0f) continue;
-        const float walk = swWalk<RtPayloadLite>(entry.point, entry.ng, d, entryWeight, sigmaT[channel], albedo[channel], e2.anisotropy, alpha, channel, p,
+        float transfer = 0.0f;
+        const float walk = swWalk<RtPayloadLite>(entry.point, entry.ng, d, entryWeight, sigmaT[channel], albedo[channel], e2.anisotropy, alpha, channel, transfer, p,
                                                  lights, as, ift, instances, meshes, vertices, indices, seed);
-        sum[channel] += 3.0f * walk;
+        sum[channel] += 3.0f * (walk + transfer * ambientDome[channel]);
+        transferSum[channel] += 3.0f * transfer;
     }
+    // the composite-owned ambient / GI diffuse: rgb = w (1 - metallic) x the transfer factor, a = w (the walk code carries w (1 - metallic): metallic cancels in the
+    // composite through its own (1 - metallic) base factor, so a = the weight of the diffuse substrate it replaces)
+    if ((p.flags & SSS_WALK_NO_LIGHTS) == 0u) gainTexture.write(float4(weight * transferSum / float(p.samples), weight), pixel);
     result.write(float4(base.rgb + weight * sum / float(p.samples), base.a), pixel);
 }

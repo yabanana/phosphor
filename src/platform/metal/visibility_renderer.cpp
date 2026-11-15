@@ -595,6 +595,8 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
                 TextureRef out = b.createTexture("Subsurface linear HDR",
                                                  {resolveFormat(0, lighting_), params_.outputWidth, params_.outputHeight});
                 sssResult_ = b.write(out, Usage::ShaderWrite, StageDispatch);
+                TextureRef gain = b.createTexture("Subsurface ambient gain", {Format::RGBA16Float, params_.outputWidth, params_.outputHeight});
+                sssGain_ = b.write(gain, Usage::ShaderWrite, StageDispatch);
                 b.setProfileShaders("subsurface_walk");
             },
             [this, resolved, sss, normal](PassContext &ctx) {
@@ -616,6 +618,7 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
                 table->setTexture(static_cast<MTL::Texture *>(ctx.texture(sss))->gpuResourceID(), 1);
                 table->setTexture(static_cast<MTL::Texture *>(ctx.texture(normal))->gpuResourceID(), 2);
                 table->setTexture(static_cast<MTL::Texture *>(ctx.texture(sssResult_))->gpuResourceID(), 3);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(sssGain_))->gpuResourceID(), 4);
                 enc->setComputePipelineState(pipelines_.compute(sssWalk_));
                 enc->setArgumentTable(table);
                 enc->dispatchThreadgroups(

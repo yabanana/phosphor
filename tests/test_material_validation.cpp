@@ -21,7 +21,7 @@
 using namespace phosphor;
 
 TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
-    CHECK(MaterialValidation::scenarios().size() == 90);
+    CHECK(MaterialValidation::scenarios().size() == 95);
     for (auto name : {"base-grid-sun", "base-grid-env", "base-grid-env-resolve", "furnace-base", "furnace-resolve",
                       "roughness-extremes", "roughness-extremes-sun", "specular-grid-sun", "specular-grid-env-resolve", "specular-grid-point",
                       "specular-grid-env", "furnace-specular", "clearcoat-grid-sun", "clearcoat-grid-env-resolve",
@@ -33,7 +33,7 @@ TEST_CASE("F15.3 material scenarios are exactly the nine declared names") {
                       "subsurface-thin-sun", "subsurface-thin-env-resolve", "subsurface-thin-env", "subsurface-thin-point",
                       "furnace-thin-subsurface", "subsurface-volumetric-sun", "subsurface-volumetric-radius",
                       "subsurface-volumetric-subpixel", "subsurface-volumetric-subpixel-off", "subsurface-volumetric-backlit",
-                      "subsurface-volumetric-rough", "combo-coat-sheen-sun", "combo-coat-sheen-env", "combo-aniso-coat-sun", "combo-aniso-coat-env",
+                      "subsurface-volumetric-rough", "subsurface-volumetric-env", "subsurface-volumetric-env-off", "subsurface-volumetric-hemi", "subsurface-volumetric-hemi-off", "subsurface-volumetric-point", "combo-coat-sheen-sun", "combo-coat-sheen-env", "combo-aniso-coat-sun", "combo-aniso-coat-env",
                       "combo-aniso-sheen-sun", "combo-aniso-sheen-env", "combo-specular-sheen-sun", "combo-specular-sheen-env",
                       "combo-irid-coat-sun", "combo-irid-coat-env", "combo-irid-sheen-sun", "combo-irid-sheen-env",
                       "combo-irid-aniso-sun", "combo-irid-aniso-env", "combo-irid-specular-sun", "combo-irid-specular-env",
@@ -1148,6 +1148,30 @@ TEST_CASE("F15.3 volumetric subsurface grids declare weight/radius columns over 
     CHECK(rough.volumetricColor == sun.volumetricColor);
     CHECK(rough.volumetricRadiusScale == sun.volumetricRadiusScale);
     CHECK(rough.towardSun == sun.towardSun);
+    // Ticket 17 (RT tier): the ambient pair: no light, the sub-pixel block grid against the same scene without a block.
+    const auto& env = MaterialValidation::spec("subsurface-volumetric-env");
+    const auto& envOff = MaterialValidation::spec("subsurface-volumetric-env-off");
+    CHECK_FALSE(env.sun);
+    CHECK_FALSE(envOff.hasVolumetricGrid());
+    CHECK(env.roughness == envOff.roughness);
+    CHECK(env.volumetricWeight == std::vector<float>(4, 1.0f));
+    CHECK(env.volumetricColor == std::vector<glm::vec3>{envOff.baseColor});  // the pair is the base model of the subsurface colour
+    CHECK(env.baseColor != envOff.baseColor);
+    CHECK(env.volumetricRadius == sub.volumetricRadius);
+    // the resolve-owned twin of the furnace: the legacy hemisphere ambient (environment 0, captured without a lighting stack)
+    const auto& hemi = MaterialValidation::spec("subsurface-volumetric-hemi");
+    CHECK(hemi.environment == 0.0f);
+    CHECK(hemi.volumetricColor == env.volumetricColor);
+    CHECK(MaterialValidation::spec("subsurface-volumetric-hemi-off").baseColor == envOff.baseColor);
+    // the point-light twin of the side-lit scene: one local light, no sun, weight 1 everywhere
+    const auto& point = MaterialValidation::spec("subsurface-volumetric-point");
+    CHECK_FALSE(point.sun);
+    REQUIRE(point.pointLights.size() == 1);
+    CHECK(point.pointLights[0].intensity / glm::dot(point.pointLights[0].position, point.pointLights[0].position) == doctest::Approx(3.0f).epsilon(1e-4));
+    CHECK(glm::length(glm::normalize(point.pointLights[0].position) - sun.towardSun) < 1e-5f);
+    CHECK(point.volumetricWeight == std::vector<float>(5, 1.0f));
+    CHECK(point.volumetricColor == sun.volumetricColor);
+    CHECK(env.environment > 0.0f);
     CHECK(MaterialValidation{"subsurface-volumetric-sun"}.getDefaultCamera().position == glm::vec3(0.0f, 0.5f, 5.5f));
 }
 

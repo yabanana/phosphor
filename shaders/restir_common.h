@@ -192,6 +192,8 @@ struct DILobe {
     bool trans;
     float transFactor;
     bool transThin;
+    // F15.1 (ticket 17, RT tier): the weight of a volumetric-subsurface pixel while the walk is effective (DI_SSS_WALK), 0 otherwise.
+    float sssWalk;
 };
 inline DILobe DI_FN(diLoadLobe)(constant GPUDIParams& p, const device GPULobeGuide* guides, uint index) {
     DILobe l{};
@@ -230,6 +232,9 @@ inline DILobe DI_FN(diLoadLobe)(constant GPUDIParams& p, const device GPULobeGui
                 l.thinParams.color = float3(u.subsurfaceColor[0], u.subsurfaceColor[1], u.subsurfaceColor[2]);
                 l.thin = bsdfThinActive(l.thinParams);
             }
+            if ((kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u && (g.features & MATERIAL_FEATURE_SUBSURFACE) != 0u &&
+                (g.features & LOBE_GUIDE_FLAG_SUBSURFACE_VOLUMETRIC) != 0u && (p.flags & DI_SSS_WALK) != 0u)
+                l.sssWalk = saturate(u.subsurfaceWeight); // F15.1 (ticket 17, RT tier)
             if ((kMaterialFeatures & MATERIAL_FEATURE_TRANSMISSION) != 0u && (g.features & MATERIAL_FEATURE_TRANSMISSION) != 0u && u.transmissionFactor > 0.0f) {
                 l.trans = true;
                 l.transFactor = u.transmissionFactor;
@@ -273,6 +278,8 @@ inline float3 DI_FN(diBRDFLobe)(GPUDISurface surface, DISample s, float specular
                                     albedo, metallic)
                 : bsdfSpecEval(spec, nl, nv, nh, vh, albedo, metallic, bsdfAlpha(surface.roughness));
             if ((kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u && lobe.thin) lobes.diffuse *= bsdfThinReflectScale(lobe.thinParams);
+            // F15.1 (ticket 17, RT tier): the walk's next-event estimation owns the diffuse of the weight share for the analytic (delta) lights.
+            if ((kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u && lobe.sssWalk > 0.0f && s.delta) lobes.diffuse *= 1.0f - lobe.sssWalk;
             if ((kMaterialFeatures & MATERIAL_FEATURE_TRANSMISSION) != 0u && lobe.trans) lobes.diffuse *= 1.0f - lobe.transFactor; // ticket 13
             result = (lobes.diffuse + specularWeight * lobes.specular) * incident * nl;
             // F15.1 (ticket 10): the sheen layer between the material and the coat.  The transport does not sample sheen: the

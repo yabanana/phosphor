@@ -1170,18 +1170,23 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
         // F15.1 (ticket 17): the diffuse of the pixel (the resolve's lights + ambient, base colour) is stripped from the colour; weight x colour x the same
         // unit-albedo irradiance goes to the target, where the diffusion profile spreads it (and the recombination adds it back).
         // The ambient diffuse joins only where the resolve owns it (an external composite adds its own, not diffused: declared).
-        const float3 sssLights = sssUnit; // the lights' share of the diffuse irradiance, before the ambient term joins (RT walk mode)
         uint weightBits = 0u;
-        if (!externalDiffuse)
+        float3 ambientRadiance = float3(0.0f); // RT walk tier: the radiance of the resolve-owned ambient dome (no Fresnel weight: the walk has its own boundary)
+        if (!externalDiffuse) {
             sssUnit += useGI ? indirectIrradiance * (1.0f - metallic) * envDiffuse / M_PI_F * (physicalGI ? 1.0f : occlusion)
                              : (physicalGI ? environment : hemisphere(N)) * (1.0f - metallic) * envDiffuse * occlusion;
+            if (kSssWalk)
+                ambientRadiance = useGI ? indirectIrradiance / M_PI_F * (physicalGI ? 1.0f : occlusion)
+                                        : (physicalGI ? environment : hemisphere(N)) * occlusion;
+        }
         if (kSssWalk) {
-            // RT walk tier: the lights' diffuse (sssLights) is replaced by the walk; the ambient stays in the colour (not diffused: declared).
-            // The target carries the subsurface colour and the weight (the walk reads the lights itself).
-            color = max(color - thin.weight * baseColor.rgb * sssLights, float3(0.0f));
-            out.sssIrradiance = thin.color;
-            // a metallic texel has no diffuse substrate (the stripped lights term carries the same factor); the weight rides in the upper bits of
-            // sssMaterial (ShadingResult keeps the layout of the screen-space tier): 10 bits, sssCodeOf unpacks it
+            // RT walk tier: the diffuse of the pixel (lights + the resolve-owned ambient / GI irradiance) is replaced by the walk.  The target carries the
+            // ambient dome radiance (the walk lights the exits with it as a locally uniform environment) and the weight x (1 - metallic); the walk
+            // recomputes the subsurface colour from the material and reads the lights itself.  An external composite's diffuse and the DI local lights
+            // (localDirect: diffuse and specular mixed) are not in sssUnit and stay Lambert.
+            color = max(color - thin.weight * baseColor.rgb * sssUnit, float3(0.0f));
+            out.sssIrradiance = ambientRadiance;
+            // the weight rides in the upper bits of sssMaterial (ShadingResult keeps the layout of the screen-space tier): 10 bits, sssCodeOf unpacks it
             weightBits = uint(saturate(thin.weight * (1.0f - metallic)) * 1023.0f + 0.5f);
         } else {
             color = max(color - thin.weight * baseColor.rgb * sssUnit, float3(0.0f));

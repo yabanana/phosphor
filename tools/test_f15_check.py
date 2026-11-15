@@ -2091,7 +2091,7 @@ class VolumetricSubsurfaceRunner(unittest.TestCase):
 
     def test_every_volumetric_key_and_its_declared_controls(self):
         keys = [k for k in check.SCENARIOS if k.startswith("subsurface-volumetric") and "@" not in k]  # the @rt-walk keys: RtWalkKeys below
-        self.assertEqual(sorted(keys), ["subsurface-volumetric-backlit", "subsurface-volumetric-radius", "subsurface-volumetric-subpixel",
+        self.assertEqual(sorted(keys), ["subsurface-volumetric-backlit", "subsurface-volumetric-hemi-off", "subsurface-volumetric-radius", "subsurface-volumetric-subpixel",
                                         "subsurface-volumetric-subpixel-off", "subsurface-volumetric-sun"])
         import f15_subsurface_reference as tool
         for key in keys:
