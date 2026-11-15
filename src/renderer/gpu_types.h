@@ -64,10 +64,15 @@ PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_TEXTURE_TRANSFORM = 1u << 1;
 /// F15.4 (ticket 22): the transform block is valid for sampling this material as a LAYER of a stack.  A material whose uniform transform was baked
 /// into the vertex uvs of its direct users carries only this bit (its direct shading must not apply the block again); a per-slot material that is also
 /// a layer carries both.
-PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_LAYER_TRANSFORM = 1u << 2;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_LAYER_TRANSFORM = 1u << 3; // bit 3: bit 2 is MATERIAL_FLAG_UNLIT
 // UNLIT: KHR_materials_unlit, lowered onto the emission path (renderer/material_description.h lowerUnlit).  The emission is the
 // displayed colour only: the surface is never a sampled emitter and GI rays hitting it read no emission.
 PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_UNLIT = 1u << 2;
+// F15 (ticket 24): the material flags were assigned by parallel branches and collided twice (TEXTURE_TRANSFORM / UNLIT, LAYER_TRANSFORM /
+// UNLIT); they must be distinct single bits below the feature bits.
+PHOSPHOR_STATIC_ASSERT((MATERIAL_FLAG_DOUBLE_SIDED | MATERIAL_FLAG_TEXTURE_TRANSFORM | MATERIAL_FLAG_LAYER_TRANSFORM | MATERIAL_FLAG_UNLIT) ==
+                           (MATERIAL_FLAG_DOUBLE_SIDED + MATERIAL_FLAG_TEXTURE_TRANSFORM + MATERIAL_FLAG_LAYER_TRANSFORM + MATERIAL_FLAG_UNLIT),
+                       "material flags overlap");
 
 // F15.1 (ticket 05): material FEATURE bits live in GPUMaterial::flags from bit
 // MATERIAL_FEATURE_SHIFT: bit (8 + MaterialFeature value) is set while the
@@ -1108,6 +1113,10 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECTION_BOUNCE_MASK = 3u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DEBUG_TINT_CAMERA_ONLY = 1u << 14; // bit 14: bits 12-13 are REFLECTION_BOUNCE_*
 // F13.5 negative control: probe lookups ignore the box projection.
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DEBUG_NO_PARALLAX = 256u;
+// F15 (ticket 24): the reflection flag bits were assigned by parallel branches (bounce bits 12-13 and the tint control collided); keep them disjoint.
+PHOSPHOR_STATIC_ASSERT((REFLECTION_ENABLE_RT | REFLECTION_ENABLE_SSR | REFLECTION_ENABLE_CACHE | REFLECTION_ENABLE_PROBES | REFLECTION_ENABLE_GI | REFLECTION_CAPTURE_HALF | REFLECTION_SINGLE_SAMPLE | REFLECTION_EXCLUDE_DI_EMISSION | REFLECTION_DEBUG_NO_PARALLAX | REFLECTION_DI_EMITTER_BAND | REFLECTION_LOBE_GUIDE_VALID | REFLECTION_DEBUG_BOTH_BRANCHES | (REFLECTION_BOUNCE_MASK << REFLECTION_BOUNCE_SHIFT) | REFLECTION_DEBUG_TINT_CAMERA_ONLY) ==
+                           (REFLECTION_ENABLE_RT + REFLECTION_ENABLE_SSR + REFLECTION_ENABLE_CACHE + REFLECTION_ENABLE_PROBES + REFLECTION_ENABLE_GI + REFLECTION_CAPTURE_HALF + REFLECTION_SINGLE_SAMPLE + REFLECTION_EXCLUDE_DI_EMISSION + REFLECTION_DEBUG_NO_PARALLAX + REFLECTION_DI_EMITTER_BAND + REFLECTION_LOBE_GUIDE_VALID + REFLECTION_DEBUG_BOTH_BRANCHES + (REFLECTION_BOUNCE_MASK << REFLECTION_BOUNCE_SHIFT) + REFLECTION_DEBUG_TINT_CAMERA_ONLY),
+                       "reflection flags overlap");
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_NONE = 0u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_RT = 1u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_SSR = 2u;
