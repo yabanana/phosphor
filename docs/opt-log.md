@@ -2324,7 +2324,7 @@ Routed signals: DI, GI, specular (base kernels; lobe-contract scenes keep the sh
 | DI cap fixture, 256x144 sequence, seed 1, frames 24-55 | 0.9895 | 1.0000 |
 | specular, bench-6 `roughness`, 320x180, 6 windows of 8 frames | 0.9941 +- 0.0007 | 1.0000 +- 0.0000 |
 | GI (DDGI denoised), same scene, spatial only (alpha 1) | 0.9992 +- 0.0001 | 1.0000 +- 0.0000 |
-| GI with temporal accumulation | 0.926 +- 0.016 | 0.927 +- 0.016 (history lag of the converging DDGI, same for both: not the spatial filter) |
+| GI with temporal accumulation, frames 16-64 | 0.926 +- 0.016 | 0.927 +- 0.016 (same for both: not the spatial filter; isolated below) |
 | AO (`roughness`, `ao-cavity`), not routed | 1.0004 / 1.0006 | = shipped |
 CPU reference (tests/test_denoise.cpp, same weights): energy ratio 1.0000 (1e-4) where the shipped normalisation gives 0.985; control: the row-normalised variant fails the >= 0.9999 check.
 Fireflies (pixels with L > 4 x median 5x5 and L > 0.05, frames 24/40/56; defined before measuring): DI raw 65.7, shipped 61.0, energy 61.0; specular raw 169.0, shipped 144.3, energy 138.3; GI and AO equal.
@@ -2336,6 +2336,12 @@ No timing taken (machine not quiet): the Sponza D2 A/B is the orchestrator's.
 
 **Verdict: candidate for adoption** on (a) bias within noise on every routed signal and (b) no gate or verdict worse; the ghost and flicker numbers drift upward in the mirror, rough-emitter and disocclusion clips (listed above)
 and the choice weighs that against the removed 1-3 % darkening; (c), the budget A/B, is the orchestrator's.  The default is NOT flipped.
+
+**GI temporal ratio isolated (orchestrator, 2026-11-15):** same scene and capture, 256 frames, shipped filter, a scratch build with a never-committed
+environment override of the temporal alpha and the a-trous count (raw = atrous 0 + alpha 1): the raw DDGI signal itself rises from 0.868 (frames 16-32)
+to 1.000 of its final level (frames 240-256) while the probes converge; filtered/raw is 0.9264 +- 0.0157 over frames 16-64 (the number above, reproduced),
+0.9979 +- 0.0019 over frames 192-256, and the spatial-only filter (alpha 1) reads 0.9996 +- 0.0001 there.  The 0.926 is the transient lag of the temporal
+history behind a converging signal; at convergence the temporal path conserves the GI energy within noise.
 
 **Orchestrator budget A/B (2026-11-15, quiet machine, `build/d2-ab-energy`):** Sponza D2, 1080p, every feature, 128 + 256 frames, `--gpu-timing-serial --no-vsync`,
 option off vs on on the same 94da95c binary, 3 interleaved pairs, 0 GPU allocations in every run:

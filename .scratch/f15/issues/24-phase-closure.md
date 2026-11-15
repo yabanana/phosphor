@@ -96,8 +96,9 @@ section "Defects found during F15"; integrated by fast-forward to 6b6bf04; orche
   D2 A/B (`build/d2-ab-energy`) costs +13.27 ms GPU p95 (median of 3 pairs; p50 15.3 -> 28.4 ms), all in the specular energy passes (14.73 ms vs
   1.64 ms). Shipped filter stays; residue declared with its bound in the closure row; A stays an open candidate (opt-log). Integration check:
   ctest 33/33, F13 exactness 0 px and PFM bit-identical against 4fc1c8a, visual_check 0 px. CLOSED.
-  Still to explain (energy agent's numbers): GI with temporal accumulation 0.926 +- 0.016 filtered/raw for BOTH filters (attributed to the history
-  lag of a converging DDGI, not isolated), and the negative-f14-lut exit -11 in its first corpus run (crash report 2026-11-14 17:07: SIGSEGV in
+  GI with temporal accumulation 0.926 +- 0.016 filtered/raw for BOTH filters: ISOLATED (opt-log): transient history lag behind the converging DDGI
+  (raw rises 0.868 -> 1.000 of its final level; filtered/raw 0.926 over frames 16-64, 0.9979 +- 0.0019 over frames 192-256, spatial-only 0.9996).
+  Still to explain: the negative-f14-lut exit -11 in its first corpus run (crash report 2026-11-14 17:07: SIGSEGV in
   the AGX compiler, `UserIntersectionProgram::VariantSetEntry::signalPending`, on a phosphor-compile worker inside
   `PipelineCache::compileFinal` of a compute pipeline with a linked intersection function, under the shader-validation compiler; a 2026-11-13
   report crashed in `RayPayloadSizeAlignImpl::merge` at `setComputePipelineState`). OPEN.
