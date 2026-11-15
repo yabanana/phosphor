@@ -126,6 +126,9 @@ Quiet-machine measurements for this ticket:
 - Sponza D2 A/B/A band;
 - cost of transmission RT, transmissive shadows (RT and the CSM map), the subsurface diffusion pass, the iridescence per light
   (ticket 12) and the GI-back lookup;
-- binning vs union on chess and terrain (ticket 23: `python3 -I tools/f15_layers_timing.py run --out build/f15-layers-timing --binning`,
-  never run end to end; resolve GPU time per active-layer count; >= 5 % rule of decision 05);
+- binning vs union on chess and terrain (ticket 23: `python3 -I tools/f15_layers_timing.py run --out build/f15-layers-timing --binning`;
+  resolve GPU time per active-layer count; >= 5 % rule of decision 05). TERRAIN DONE 2026-11-15 (quiet machine, load 2.0, 90 runs, A/B/A x 3
+  replicas, `build/f15-layers-timing/summary.md`): resolve mean ms union single 0.089, layers-1..4 0.136 / 0.162 / 0.183 / 0.208, full 0.204;
+  binning (resolve + classification) single 0.106, layers-1..4 0.143 / 0.160 / 0.182 / 0.216, full 0.206. Binning never lowers the resolve by
+  5 % (full +1 %, layers-4 +4 %, layers-2 -1 %): stays opt-in, union stays the default. Chess binning A/B/A still to run;
 - Sponza D2 interleaved A/B for the GI-mode environment fix and for the energy-preserving a-trous experiment.
