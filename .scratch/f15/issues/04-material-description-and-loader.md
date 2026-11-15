@@ -40,3 +40,26 @@ Roadmap: F15.1, F15.3
 - 5 description round-trip, name-keyed override: MET (e9b6423; engine application resolved in ticket 05, 8913c6f). Ticked.
 - 6 image URI containment: MET (c6d0ec5; symlink subcase returns silently if the filesystem refuses symlinks, execution not stated). Ticked.
 - 7 Sponza empty feature set: PARTIAL (visual_check 8/8 0 px procedural only; Sponza identity via F13 exact captures in 05-08). Open.
+
+2026-11-15 — per-slot KHR_texture_transform (closure agent texxform; owner decision: implement the non-uniform transform, ticket 24 carry item "per-slot texture transform"):
+
+- Analysis (`analyzeTextureTransforms`, material_description.cpp): status None / Uniform (every present texture shares one transform: baked into
+  UV0 exactly as before) / PerSlot (slots differ, or transformed and plain slots mix: evaluated on the GPU) / Unsupported (named `reason`).
+  `uvSet` = the glTF texCoord every present texture of the material samples.  Layer mask/height textures have no GPU transform slot
+  (`textureTransformSlot` returns ~0): a transform or UV set on them is Unsupported.
+- Loader: the UV set a material samples (usually 0) is copied into UV0 when it is another one (TEXCOORD_1 of TextureTransformMultiTest);
+  Uniform transforms are baked into that set; PerSlot leaves UV0 untouched.  One UV stream per mesh is the stated limit: a material whose
+  textures sample DIFFERENT sets is Unsupported ("different UV sets"), refused when KHR_texture_transform is required, reported in the
+  support report otherwise.  What two sets per material would take: GPUVertex 48 -> 56 B (uv1; +17 % vertex bytes for such meshes), the
+  meshlet cooker and vertex pulling of the visibility resolve / guide kernels / RT hit interpolation reading uv1, 2 bits per slot in the
+  transform block (spare words of record 0) and `sampleSlot` choosing the set; no change to the material record.
+- GPU layout (gpu_types.h): `MATERIAL_FLAG_TEXTURE_TRANSFORM` (flags bit 1), `GPUMaterial::pad1` -> `textureTransformIndex`, 20 slots
+  `TT_SLOT_*`, `GPUTextureTransform` (2x2 + offset, 24 B), `GPUTextureTransformRecord` (3 transforms + slot mask).  A transform block is two
+  adjacent extension groups (8 records) owned by the SceneStore (alloc on first need, kept zeroed when the transforms go away, reused through a
+  free list, `verifyAgainstEcs` checks flags, index, records, ownership and the free list).  Scenes without transforms allocate nothing.
+- `SceneStore::textureTransformInUse()` / `pipelineFeatureUnion()` carry the feature to the pipelines as the reserved function constant
+  TEXTURE_TRANSFORM (26); `featureUnion()` and every lobe-bit consumer are unchanged.
+- Support table: `textureTransformPerSlot` Implemented; the report line reads "KHR_texture_transform (per slot)".
+- Tests: test_texture_transform.cpp (pack against the README formula, 20-slot map, store allocate / flag / free / reuse / verify, marker, pipeline
+  constant), test_gltf_loader.cpp (UV-set copy, uniform bake on set 1, mixed sets), test_gltf_materials.cpp (required extension, per-slot rendered,
+  mixed sets refused), test_material_description.cpp (analysis).

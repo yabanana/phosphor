@@ -74,7 +74,13 @@ static half4 sampleSlot(const device TextureHandle *table, uint index, uint slot
     if (index == INVALID_TEXTURE_INDEX) {
         return fallback;
     }
-    texXfUv(xf, slot, uv, dx, dy);
+    // The transformed sample is a guarded alternative: the plain statement below stays exactly sampleOr's (the generated code of a
+    // pipeline without kTextureTransform must not move: a restructured expression changed the compiler's contraction by 1 LSB).
+    if (texXfHas(xf, slot)) {
+        float2 uv2 = uv, dx2 = dx, dy2 = dy;
+        texXfUvOn(xf, slot, uv2, dx2, dy2);
+        return half4(table[index].tex.sample(kMaterialSampler, uv2, gradient2d(dx2, dy2)));
+    }
     return half4(table[index].tex.sample(kMaterialSampler, uv, gradient2d(dx, dy)));
 }
 
@@ -612,23 +618,35 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
             const float dl = length(d);
             d = dl > 1e-6f ? d / dl : float2(1.0f, 0.0f);
             const float cs = cos(e1.anisotropyRotation), sn = sin(e1.anisotropyRotation);
-            float3 Ta = Tn, Ba = B; // the frame of the anisotropy texture slot (rotated with its KHR_texture_transform)
-            texXfFrame(xf, TT_SLOT_ANISOTROPY, Ta, Ba);
-            anisoDir = Ta * (cs * d.x - sn * d.y) + Ba * (sn * d.x + cs * d.y);
+            if (texXfHas(xf, TT_SLOT_ANISOTROPY)) { // the frame of the anisotropy slot follows its KHR_texture_transform
+                float3 Ta = Tn, Ba = B;
+                texXfFrame(xf, TT_SLOT_ANISOTROPY, Ta, Ba);
+                anisoDir = Ta * (cs * d.x - sn * d.y) + Ba * (sn * d.x + cs * d.y);
+            } else {
+                anisoDir = Tn * (cs * d.x - sn * d.y) + B * (sn * d.x + cs * d.y);
+            }
             anisoStrength = saturate(e1.anisotropyStrength * at.z);
         }
         float3 tn = float3(nTex.xyz) * 2.0 - 1.0;
         tn.xy *= m.normalScale;
         if (layersOn) tn = layerTn;
-        float3 Tm = Tn, Bm = B; // the frame of the normal texture slot (rotated with its KHR_texture_transform)
-        texXfFrame(xf, TT_SLOT_NORMAL, Tm, Bm);
-        N = normalize(Tm * tn.x + Bm * tn.y + N * tn.z);
+        if (texXfHas(xf, TT_SLOT_NORMAL)) { // the frame of the normal slot follows its KHR_texture_transform
+            float3 Tm = Tn, Bm = B;
+            texXfFrame(xf, TT_SLOT_NORMAL, Tm, Bm);
+            N = normalize(Tm * tn.x + Bm * tn.y + N * tn.z);
+        } else {
+            N = normalize(Tn * tn.x + B * tn.y + N * tn.z);
+        }
         if (coatOn && e0.clearcoatNormalTex != INVALID_TEXTURE_INDEX) {
             float3 cn = float3(sampleSlot(textures, e0.clearcoatNormalTex, TT_SLOT_COAT_NORMAL, xf, in.uv, half4(0.5h, 0.5h, 1.0h, 1.0h), in.uvDx, in.uvDy).xyz) * 2.0 - 1.0;
             cn.xy *= e0.clearcoatNormalScale;
-            float3 Tc = Tn, Bc = B;
-            texXfFrame(xf, TT_SLOT_COAT_NORMAL, Tc, Bc);
-            coat.normal = normalize(Tc * cn.x + Bc * cn.y + N0 * cn.z);
+            if (texXfHas(xf, TT_SLOT_COAT_NORMAL)) {
+                float3 Tc = Tn, Bc = B;
+                texXfFrame(xf, TT_SLOT_COAT_NORMAL, Tc, Bc);
+                coat.normal = normalize(Tc * cn.x + Bc * cn.y + N0 * cn.z);
+            } else {
+                coat.normal = normalize(Tn * cn.x + B * cn.y + N0 * cn.z);
+            }
         } else coat.normal = N0;
     } else coat.normal = N0;
 
