@@ -49,7 +49,6 @@ def cross(a, b):
     return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
 
 
-GATE_MIN_FRESNEL = 0.1  # the engine's declared Fresnel gate (kReflectionMirrorMinFresnel): a hit reflected at a lower Fresnel ends the chain
 DIELECTRIC_F0 = 0.04  # a black dielectric (baseColor 0, metallic 0): only its specular reflection remains
 
 
@@ -124,7 +123,6 @@ def radiance(scene, origin, direction, bounces=MAX_EXTRA_BOUNCES, f0=MIRROR_F0):
         events += 1
         fresnel = schlick(-dot(n, d), f0)
         throughput *= fresnel
-        masked = masked or (event >= 1 and fresnel < GATE_MIN_FRESNEL)  # outside the declared gate: not gated against the model
         r = normalize(add_scaled(d, n, -2.0 * dot(d, n)))
         masked = masked or dot(r, sun) > cos_mask
         if event == bounces + 1:

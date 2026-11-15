@@ -80,12 +80,11 @@ inline GPURtHit reflectionTraceVisible(GPURtRay ray,instance_acceleration_struct
 }
 // F15.1 (ticket 22, C22-A1): a secondary hit that is itself a near-delta specular reflector.  reflectionSecondary reports it so that the ray can go on:
 // a surface whose clamped roughness is at most kReflectionMirrorRoughness (alpha <= 0.01, the lobe of a polished surface: the ideal mirror direction
-// stands for it; every smooth surface, metal or dielectric: the owner removed the F0 floor) and whose
-// Fresnel reflectance at the incoming angle reaches kReflectionMirrorMinFresnel in some channel.  `weight` is that
+// stands for it; every smooth surface, metal or dielectric: no F0 floor, no per-hit Fresnel floor: the chain stops on the cumulative
+// throughput, the product of the Fresnel weights along it, below kReflectionMirrorMinThroughput).  `weight` is that
 // Fresnel term F(F0, n.v) of the base BSDF (F0 = mix(0.04, baseColor, metallic)), the directional albedo of a smooth specular lobe; the diffuse
 // and light terms of the hit are shaded as before (a hit that is not mirror-like keeps the single-bounce result bit for bit).
 constant float kReflectionMirrorRoughness=0.1f;
-constant float kReflectionMirrorMinFresnel=0.1f;
 constant float kReflectionMirrorMinThroughput=0.01f;
 struct ReflectionMirror {bool mirror;float3 point,normal,geometric,weight;float roughness;};
 template<typename Payload=RtPayload>
@@ -103,7 +102,7 @@ inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
     float3 result=max(emission,0.0f);const float3 n=diVec(surface.shadingNormal),geometric=diVec(surface.geometricNormal);
     if(mirror){mirror->mirror=false;
         if(surface.roughness<=kReflectionMirrorRoughness){const float3 F=bsdfFSchlick(bsdfBaseF0(max(diVec(surface.albedo),0.0f),surface.metallic),saturate(dot(n,-direction)));
-            if(all(isfinite(F))&&bsdfMax3(F)>=kReflectionMirrorMinFresnel){mirror->mirror=true;mirror->point=point;mirror->normal=n;mirror->geometric=geometric;mirror->weight=F;mirror->roughness=surface.roughness;}}}
+            if(all(isfinite(F))){mirror->mirror=true;mirror->point=point;mirror->normal=n;mirror->geometric=geometric;mirror->weight=F;mirror->roughness=surface.roughness;}}}
     if(emissionLuminance)*emissionLuminance=dot(result,float3(.2126f,.7152f,.0722f));
     // Path regularisation (declared in the F13 reference): the light connection
     // at the vertex after a sampled specular lobe uses at least that lobe's
