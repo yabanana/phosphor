@@ -76,7 +76,7 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(layers.compare_images(np, a, c)["eight_bit_differing"], 0)
 
 
-def ramp_scene(reverse=False, width=64, rows=6):
+def ramp_scene(reverse=False, width=256, rows=6):
     """Synthetic flat-quad captures: endpoints dark/light, the candidate blends them with the mask u (affine in albedo)."""
     u = np.tile((np.arange(width) + 0.5) / width, (rows, 1))
     base = np.linspace(0.8, 1.2, width)[None, :] * np.ones((rows, 1))  # shading factor varying with position
@@ -102,6 +102,21 @@ class RampTests(unittest.TestCase):
         result = layers.evaluate_ramp(np, cand, e0, e1, roi, u)
         self.assertFalse(result["pass"])
         self.assertGreater(result["rows_with_reversal"], 0)
+
+    def test_the_edge_band_is_gated_on_its_own(self):
+        # A repeat-sampler capture: the outermost texels blend the opposite edge in (t ~ 0.5 at the very edge, a clamped mask gives t ~ u).
+        width = 256
+        cand, e0, e1, roi, u = ramp_scene(width=width)
+        clamped = layers.evaluate_ramp(np, cand, e0, e1, roi, u)
+        self.assertTrue(clamped["pass"], clamped)
+        self.assertGreater(clamped["edge_pixels"], 0)
+        wrapped = cand.copy()
+        for x, t in ((0, 0.5), (width - 1, 0.5)):
+            wrapped[:, x, :] = (e0[:, x, :] + (e1[:, x, :] - e0[:, x, :]) * np.float32(t))
+        result = layers.evaluate_ramp(np, wrapped, e0, e1, roi, u)
+        self.assertFalse(result["pass"])
+        self.assertFalse(result["edge_gate_ok"])
+        self.assertGreater(result["edge_max_error"], layers.RAMP_MASK_ERROR)
 
     def test_witness_positions_and_uv(self):
         import json

@@ -35,7 +35,8 @@ FURNACE_ROUGHNESS = (0.1, 0.4, 0.7, 1.0)
 RAMP_DARK, RAMP_LIGHT, RAMP_ROUGHNESS = 0.05, 0.9, 0.8
 PATCH_SIZE = 8.0
 MASK_SIZE = 256            # flat mask width/height (ramp: 256 x 4)
-EDGE_MARGIN = 3.0 / MASK_SIZE  # uv margin excluded at the plane edges (the repeat sampler blends the opposite edge there)
+EDGE_MARGIN = 0.0          # uv margin excluded at the plane edges: none since the mask is sampled clamp-to-edge (it was 3 texels with the repeat sampler)
+EDGE_GATE_UV = 1.5 / MASK_SIZE  # the edge band gated on its own: the outermost 1.5 texels of the mask at each plane edge
 ENVELOPE = 1e-5            # ticket 21: declared relative envelope between a specialised and the all-lobes pipeline
 # The coat-weight-0 key: the clearcoat guide bit routes the pixel through other composite/denoise code, so its capture differs from the coat-free
 # twin by float noise (measured: median 1e-7, worst 3e-6 absolute at a pixel of 0.033, 1.0e-4 floored relative, 0 pixels in the 8-bit image).  The bound
@@ -125,7 +126,7 @@ def evaluate_ramp(np, candidate, endpoint0, endpoint1, roi, u):
     """Blend factor t = (L - L0) / (L1 - L0) per pixel against the single twins; it must rise with u (per image row), follow the mask u
     within RAMP_MASK_ERROR and be ~0 / ~1 at the ends of the ramp.  The pixel is affine in the layer albedo (dielectric, sun only), so t is
     the layers' weight of the blend."""
-    interior = roi & (u > EDGE_MARGIN * 2) & (u < 1.0 - EDGE_MARGIN * 2)
+    interior = roi & (u >= EDGE_MARGIN * 2) & (u <= 1.0 - EDGE_MARGIN * 2)
     l0, l1, l = luminance(np, endpoint0), luminance(np, endpoint1), luminance(np, candidate)
     span = l1 - l0
     usable = interior & (span > 0.02 * float(span[interior].mean())) if interior.any() else interior
@@ -147,10 +148,15 @@ def evaluate_ramp(np, candidate, endpoint0, endpoint1, roi, u):
     end_low = float(t[low].mean()) if low.any() else 1.0  # reported: the blend factor near the ends of the ramp (~0 and ~1)
     end_high = float(1.0 - t[high].mean()) if high.any() else 1.0
     slope = float(np.polyfit(u[usable], t[usable], 1)[0]) if usable.sum() > 2 else 0.0
-    ok = bool(rows > 0 and reversals == 0 and float(error.max()) <= RAMP_MASK_ERROR)
+    # The edge band: with a clamp-to-edge mask sampler the blend factor there is the mask's own edge texel (t ~ u); a repeat sampler blends the
+    # opposite edge texel in (t ~ 0.5 at the very edge).  Gated on its own so that the band can never be excluded again.
+    edge = usable & ((u < EDGE_GATE_UV) | (u > 1.0 - EDGE_GATE_UV))
+    edge_error = float(np.abs(t[edge] - u[edge]).max()) if edge.any() else 1.0
+    edge_ok = bool(edge.any() and edge_error <= RAMP_MASK_ERROR)
+    ok = bool(rows > 0 and reversals == 0 and float(error.max()) <= RAMP_MASK_ERROR and edge_ok)
     return {"kind": "layer-ramp", "rows": rows, "usable_pixels": int(usable.sum()), "rows_with_reversal": reversals, "worst_drop": worst_drop,
             "max_mask_error": float(error.max()), "mean_mask_error": float(error.mean()), "mean_t_near_low_end": end_low, "mean_one_minus_t_near_high_end": end_high,
-            "fitted_slope": slope, "tolerance": RAMP_TOLERANCE, "mask_error_limit": RAMP_MASK_ERROR, "pass": ok}
+            "fitted_slope": slope, "edge_pixels": int(edge.sum()), "edge_max_error": edge_error, "edge_gate_ok": edge_ok, "tolerance": RAMP_TOLERANCE, "mask_error_limit": RAMP_MASK_ERROR, "pass": ok}
 
 
 # --- the furnace ------------------------------------------------------------------------------------------------------

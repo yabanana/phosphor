@@ -59,6 +59,17 @@ struct ShadingResult {
 
 constexpr sampler kMaterialSampler(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
 
+// F15.4 (ticket 23): the layer mask is clamped to its edge texels (a repeat sampler blended the opposite edge texel into the outermost half
+// texel, a visible seam at the border of every stack: the transition gate of tools/f15_layers.py gates the edge band).  The layer textures keep
+// the repeat sampler (they tile).
+constexpr sampler kMaskSampler(filter::linear, mip_filter::linear, address::clamp_to_edge, max_anisotropy(8));
+static half4 sampleMaskOr(const device TextureHandle *table, uint index, float2 uv, half4 fallback, float2 dx, float2 dy) {
+    if (index == INVALID_TEXTURE_INDEX) {
+        return fallback;
+    }
+    return half4(table[index].tex.sample(kMaskSampler, uv, gradient2d(dx, dy)));
+}
+
 static half4 sampleOr(const device TextureHandle *table, uint index, float2 uv, half4 fallback, float2 dx, float2 dy) {
     if (index == INVALID_TEXTURE_INDEX) {
         return fallback;
@@ -389,7 +400,7 @@ struct LayerSurface {
 static LayerSurface resolveLayerStack(GPUMaterialExt3 e3, const device GPUMaterial *materials, const device TextureHandle *textures,
                                       float2 uv, float2 dx, float2 dy) {
     const uint count = min(e3.layerCount, LAYER_STACK_MAX);
-    const float4 mask = float4(sampleOr(textures, e3.maskTex, uv, half4(1.0h), dx, dy));
+    const float4 mask = float4(sampleMaskOr(textures, e3.maskTex, uv, half4(1.0h), dx, dy));
     LayerWeights raw{{0.0f, 0.0f, 0.0f, 0.0f}};
     bool heightOn = false;
     for (uint i = 0; i < LAYER_STACK_MAX; ++i) {
