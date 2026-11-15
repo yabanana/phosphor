@@ -47,11 +47,13 @@ ARMS = {
 COMPARED = ["layers-1", "layers-2", "layers-3", "layers-4", "full"]
 
 
-def command(binary, scene, out, resolution, binning):
+def command(binary, scene, out, resolution, binning, textures=None):
+    # `textures`: the owner-approved CC0 sets (--terrain-textures, decision 12 "four CC0 PBR materials"); None = procedural stand-ins.
     return [str(binary), "--scene", "procedural", "--bench", "2", "--material-scenario", scene, "--render-path", "visibility", "--geometry-path", "mesh",
             "--rt", "off", "--shadows", "off", "--lighting", "legacy", "--gi", "off", "--reflections", "ssr", "--ao", "off", "--lighting-denoise", "custom",
             "--post", "--upscaler", "native", "--resolution", resolution, "--frames", str(FRAMES), "--warmup", str(WARMUP), "--fixed-timestep", "--no-ui",
-            "--no-vsync", "--gpu-timing-serial", "--material-binning", "on" if binning else "off", "--report", str(out)]
+            "--no-vsync", "--gpu-timing-serial", "--material-binning", "on" if binning else "off", "--report", str(out)] + \
+           (["--terrain-textures", str(textures)] if textures else [])
 
 
 def schedule(replicas, binning_modes):
@@ -106,8 +108,9 @@ def summarize(out):
     return {"reports": reports, "effects": effects}
 
 
-def markdown(result, load):
-    lines = ["# F15.4 resolve GPU time per active-layer count (A/B/A, median of replicas)", "", f"load average at the start: {load}", "",
+def markdown(result, load, textures=None):
+    lines = ["# F15.4 resolve GPU time per active-layer count (A/B/A, median of replicas)", "", f"load average at the start: {load}",
+             f"terrain textures: {textures if textures else 'procedural stand-ins'}", "",
              "| mode | arm | single ms | arm ms | effect (median) | min..max | replicas |", "|---|---|---|---|---|---|---|"]
     for key, e in result["effects"].items():
         mode, arm = key.split("/")
@@ -124,6 +127,8 @@ def main(argv=None):
     parser.add_argument("--replicas", type=int, default=3)
     parser.add_argument("--resolution", default="1920x1080")
     parser.add_argument("--binning", action="store_true", help="also measure each arm with --material-binning on")
+    parser.add_argument("--terrain-textures", type=pathlib.Path, default=None,
+                        help="unpacked CC0 sets (tools/fetch_terrain_materials.py); default: the procedural stand-in textures")
     parser.add_argument("--gpu-lock", type=pathlib.Path, default=pathlib.Path("/tmp/phosphor-gpu-verification.lock"))
     args = parser.parse_args(argv)
     out = args.out.resolve()
@@ -132,7 +137,7 @@ def main(argv=None):
     if args.mode == "plan":
         for run in runs:
             print(" ".join(command(args.binary, ARMS[run["scene_arm"] if run["scene_arm"] == "single" else run["arm"]], out / run_name(run) / "report.json",
-                                    args.resolution, run["binning"])))
+                                    args.resolution, run["binning"], args.terrain_textures)))
         print(f"# {len(runs)} runs", file=sys.stderr)
         return 0
     if args.mode == "summarize":
@@ -164,7 +169,7 @@ def main(argv=None):
             folder = out / run_name(run)
             folder.mkdir(parents=True, exist_ok=True)
             scene = ARMS["single" if run["scene_arm"] == "single" else run["arm"]]
-            code = subprocess.run(command(args.binary, scene, folder / "report.json", args.resolution, run["binning"]),
+            code = subprocess.run(command(args.binary, scene, folder / "report.json", args.resolution, run["binning"], args.terrain_textures),
                                   stdout=(folder / "log.txt").open("w"), stderr=subprocess.STDOUT).returncode
             if code:
                 print(f"{run_name(run)}: exit {code}", file=sys.stderr)
@@ -172,8 +177,8 @@ def main(argv=None):
             time.sleep(3)  # quiet between GPU jobs
     result = summarize(out)
     (out / "results.json").write_text(json.dumps(result, indent=2) + "\n")
-    (out / "summary.md").write_text(markdown(result, ", ".join(f"{x:.2f}" for x in load)))
-    print(markdown(result, ", ".join(f"{x:.2f}" for x in load)))
+    (out / "summary.md").write_text(markdown(result, ", ".join(f"{x:.2f}" for x in load), args.terrain_textures))
+    print(markdown(result, ", ".join(f"{x:.2f}" for x in load), args.terrain_textures))
     return 0
 
 
