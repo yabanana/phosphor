@@ -937,6 +937,10 @@ PHOSPHOR_GPU_CONSTANT u32 DI_SSS_WALK = 512u;
 // probability) adds the emission it hits. Analytic and punctual lights keep
 // their full DI specular: no reflection ray can hit them.
 PHOSPHOR_GPU_CONSTANT u32 DI_REFLECTED_EMITTER_SPECULAR = 32u;
+// F15 (ticket 24): DI parameter flags assigned by parallel branches must stay disjoint.
+PHOSPHOR_STATIC_ASSERT((DI_RESET_HISTORY | DI_ENABLE_TEMPORAL | DI_ENABLE_SPATIAL | DI_ENABLE_VISIBILITY | DI_USE_STBN | DI_REFLECTED_EMITTER_SPECULAR | DI_LOBE_GUIDE_VALID | DI_LOBE_GUIDE_CORRUPT | DI_LOBE_GUIDE_BOUND | DI_SSS_WALK | DI_LOBE_GUIDE_DELAY) ==
+                           (DI_RESET_HISTORY + DI_ENABLE_TEMPORAL + DI_ENABLE_SPATIAL + DI_ENABLE_VISIBILITY + DI_USE_STBN + DI_REFLECTED_EMITTER_SPECULAR + DI_LOBE_GUIDE_VALID + DI_LOBE_GUIDE_CORRUPT + DI_LOBE_GUIDE_BOUND + DI_SSS_WALK + DI_LOBE_GUIDE_DELAY),
+                       "DI flags overlap");
 PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_WEIGHT = 1u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_ALIAS = 2u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_TARGET = 4u;
@@ -1454,6 +1458,10 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_SHEEN_FROM_PROBE = 256u;
 // F15.1 (ticket 17, RT tier): the composite's diffuse ambient / GI factor of a walk pixel comes from the walk's gain target (rgb = w (1 - metallic)
 // x the exiting radiance per unit uniform dome radiance, a = w): factor = base (1 - a) + rgb.  Lobe variant only.
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_SSS = 512u; // 512: 256 is REFLECT_COMPOSE_SHEEN_FROM_PROBE (integration)
+// F15 (ticket 24): reflection-composite flags assigned by parallel branches (SHEEN_FROM_PROBE, SSS, and the coming SPECULAR_MS) must stay disjoint.
+PHOSPHOR_STATIC_ASSERT((REFLECT_COMPOSE_GI | REFLECT_COMPOSE_CUSTOM | REFLECT_COMPOSE_DI | REFLECT_COMPOSE_SPEC | REFLECT_COMPOSE_AO | REFLECT_COMPOSE_EXCLUDE_EMISSION | REFLECT_COMPOSE_LOBE_GUIDE_VALID | REFLECT_COMPOSE_GI_BACK | REFLECT_COMPOSE_SHEEN_FROM_PROBE | REFLECT_COMPOSE_SSS) ==
+                           (REFLECT_COMPOSE_GI + REFLECT_COMPOSE_CUSTOM + REFLECT_COMPOSE_DI + REFLECT_COMPOSE_SPEC + REFLECT_COMPOSE_AO + REFLECT_COMPOSE_EXCLUDE_EMISSION + REFLECT_COMPOSE_LOBE_GUIDE_VALID + REFLECT_COMPOSE_GI_BACK + REFLECT_COMPOSE_SHEEN_FROM_PROBE + REFLECT_COMPOSE_SSS),
+                       "reflection composite flags overlap");
 struct GPUReflectionReduceParams {u32 width,height,samples,stridePixels;};
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionReduceParams)==16,"GPUReflectionReduceParams layout");
 struct GPUReflectionComposeParams {u32 width,height,backingWidth,backingHeight;u32 flags,pad[3];float environment[3];u32 pad2;};
