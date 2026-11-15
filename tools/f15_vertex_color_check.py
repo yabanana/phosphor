@@ -193,14 +193,16 @@ def capture(binary, folder, path, name, gltf, pitch=0, shadows="rt"):
     out = folder / f"{path}-{name}"
     if path in ("forward", "meshforward"):
         cmd = [str(binary), "--bench", "4", "--scene", str(gltf), "--corpus-rig", "0,0", "--render-path", "forward", "--geometry-path", "indexed" if path == "forward" else "mesh", "--rt", "off",
-               "--lighting", "legacy", "--gi", "off", "--reflections", "off", "--ao", "off", "--lighting-denoise", "off", "--tonemap", "aces",
+               "--lighting", "legacy", "--gi", "off", "--reflections", "off", "--ao", "off", "--lighting-denoise", "off",
                "--resolution", f"{RES[0]}x{RES[1]}", "--warmup", "16", "--frames", "2", "--fixed-timestep", "--offscreen", "--no-ui", "--no-vsync", "--no-gpu-timing",
-               "--pipeline-sync", "--capture", str(out) + ".png"]
+               "--pipeline-sync", "--report", str(out) + ".json", "--capture", str(out) + ".png"]
     else:
         cmd = [str(binary), "--bench", "4", "--scene", str(gltf), "--corpus-rig", f"0,{pitch}", "--rt", "on", "--shadows", shadows, "--lighting", "restir", "--gi", "off",
                "--reflections", "rt", "--ao", "off", "--lighting-denoise", "custom", "--tonemap", "aces", "--post", "--upscaler", "native",
                "--render-path", "visibility", "--geometry-path", "mesh", "--resolution", f"{RES[0]}x{RES[1]}", "--warmup", "48", "--frames", "1",
                "--fixed-timestep", "--offscreen", "--no-ui", "--no-vsync", "--no-gpu-timing", "--pipeline-sync", "--capture-linear", str(out) + ".pfm", *spec["extra"]]
+    if os.environ.get("F15_VC_HARVEST"):  # targeted archive update: record the pipelines of this capture (tools/filter_pipeline_harvest.py then keeps the new ones)
+        cmd += ["--harvest-pipelines", str(pathlib.Path(os.environ["F15_VC_HARVEST"]) / f"{path}-{name}.raw.json")]
     env = {k: v for k, v in os.environ.items() if not k.startswith("MTL_")}
     env["MTL_DEBUG_LAYER"] = "1"
     env["MTL_DEBUG_LAYER_WARNING_MODE"] = "nslog"
@@ -426,6 +428,11 @@ def verify(out):
         have = all((out / f"{path}-{n}.{'pfm' if PATHS[path]['linear'] else 'png'}").exists() for n in CASES if not n.startswith("mirror"))
         if not have:
             lines.append(f"{path}: captures missing"); ok = False; continue
+        if not PATHS[path]["linear"]:  # the forward captures must really run the forward path (--tonemap / --post silently select the visibility path)
+            want_path = "forward-indexed" if path == "forward" else "forward-mesh"
+            got = json.loads((out / f"{path}-unlit.json").read_text()).get("rendering", {}).get("path")
+            if got != want_path:
+                lines.append(f"{path}: rendering path {got!r}, expected {want_path!r} -> FAIL"); ok = False; continue
         e = unlit_error(out, path, "unlit"); c = unlit_error(out, path, "unlit-control")
         tol = 0.004 if PATHS[path]["linear"] else 3 / 255 + 0.002
         good = e <= tol and c > 0.05
