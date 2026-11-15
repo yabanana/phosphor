@@ -232,7 +232,7 @@ def set_flag(command, flag, value):
     return command
 
 
-def capture_scene(binary, scene, folder, flags=None):
+def capture_scene(binary, scene, folder, flags=None, extra=None, accumulate=True):
     """Corpus rig capture (ReSTIR DI, RT sun shadows by default) of a generated glTF; returns the linear PFM path."""
     folder = pathlib.Path(folder)
     corpus.MODELS["transport"] = {"tier": "A", "view": (0, 0), "shows": "generated fixture"}
@@ -240,8 +240,10 @@ def capture_scene(binary, scene, folder, flags=None):
     command = corpus.capture_command(binary, None, "transport", folder)
     set_flag(command, "--frames", str(FRAMES))
     set_flag(command, "--warmup", str(WARMUP))
-    command += ["--capture-linear", str(folder / "engine.pfm"), "--capture-linear-frame", str(FRAMES - 1), "--capture-linear-accumulate", str(ACCUMULATE),
-                "--capture-linear-signal", "hdr"]
+    command += ["--capture-linear", str(folder / "engine.pfm"), "--capture-linear-frame", str(FRAMES - 1)]
+    if accumulate:
+        command += ["--capture-linear-accumulate", str(ACCUMULATE), "--capture-linear-signal", "hdr"]
+    command += list(extra or [])
     for flag, value in (flags or {}).items():
         set_flag(command, flag, value)
     code = run_locked(command, folder)
@@ -535,6 +537,74 @@ def run_thin_backlit(args):
     return result
 
 
+# --- ticket 13: raw transport weights of a rough transmissive sphere -------------------------------------------------
+
+GLASS_ALPHA_ROUGHNESS = 0.2   # alpha 0.04: the refraction tail of the pre-closure estimator reaches weights near 32 (tools/f15_transport_weights.py)
+ENV = 0.5                     # CorpusRig::environmentRadiance: every transport sample of an isolated sphere ends in the environment
+WEIGHT_BOUND = 1.2            # analytic maximum of the radiance weight (r + t <= 1, 1.1 in the model) with 10 % head room
+
+
+def sphere(scene, radius, material, slices=96, stacks=48):
+    positions, normals, uvs, indices = [], [], [], []
+    for j in range(stacks + 1):
+        theta = math.pi * j / stacks
+        for i in range(slices + 1):
+            phi = 2.0 * math.pi * i / slices
+            n = (math.sin(theta) * math.cos(phi), math.cos(theta), math.sin(theta) * math.sin(phi))
+            positions.append(tuple(radius * c for c in n))
+            normals.append(n)
+            uvs.append((i / slices, j / stacks))
+    for j in range(stacks):
+        for i in range(slices):
+            a, b = j * (slices + 1) + i, (j + 1) * (slices + 1) + i
+            indices += [a, a + 1, b, a + 1, b + 1, b]  # counter-clockwise seen from outside
+    scene.primitives.append((positions, normals, uvs, indices, material))
+
+
+def glass_sphere_scene():
+    s = GltfScene()
+    glass = s.material("rough glass", color=(1, 1, 1), roughness=GLASS_ALPHA_ROUGHNESS,
+                       extensions={"KHR_materials_transmission": {"transmissionFactor": 1.0}, "KHR_materials_ior": {"ior": 2.0},
+                                   "KHR_materials_volume": {"thicknessFactor": 1.0}})
+    sphere(s, 0.5, glass)
+    return s
+
+
+def run_glass_weights(args):
+    """Raw 1-spp reflection transport (`--capture-linear-signal specular`, no denoiser): the pixels whose per-frame radiance exceeds ENV x WEIGHT_BOUND."""
+    out = pathlib.Path(args.out)
+    binary = args.control_binary if args.use_control else args.binary
+    base = out / ("control" if args.use_control else "fixed")
+    flags = {"--shadows": "off", "--reflections": "rt", "--lighting-denoise": "off", "--reflection-samples": "1"}
+    counts, signal = [], []
+    for seed in range(1, 5):
+        folder = base / f"seed{seed}"
+        path = glass_sphere_scene().write(folder / "scene")
+        if args.evaluate:
+            pfm = folder / "engine.pfm"
+        else:
+            pfm = capture_scene(binary, path, folder, dict(flags, **{"--lighting-seed": str(seed)}),
+                                extra=["--capture-linear-signal", "specular"], accumulate=False)
+        image = read_pfm(pfm)
+        over = lit = low = 0
+        peak = 0.0
+        for y in range(image.height):
+            for x in range(image.width):
+                p = image.pixel(x, y)
+                m = max(p)
+                peak = max(peak, m)
+                over += m > ENV * WEIGHT_BOUND
+                low += m > 0.5 * ENV
+                lit += m > 0.05
+        counts.append(over)
+        signal.append({"lit": lit, "peak": peak, "over_half_env": low})
+    result = {"pixels_over_bound": counts, "frames": signal, "bound": ENV * WEIGHT_BOUND}
+    result["gates"] = {"no-sample-above-the-analytic-bound": {"counts": counts, "pass": sum(counts) == 0 and min(f["lit"] for f in signal) > 1000}}
+    # negative control: the same counter at HALF the environment must see the sphere (the statistic counts), i.e. a bound that low fails
+    result["controls"] = {"bound-half-the-environment": {"counts": [f["over_half_env"] for f in signal], "fails": min(f["over_half_env"] for f in signal) > 1000}}
+    return result
+
+
 # --- main ------------------------------------------------------------------------------------------------------------
 
 def verdict(result, kind):
@@ -548,14 +618,14 @@ def verdict(result, kind):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("check", choices=["volume", "masked", "thin-backlit"])
+    parser.add_argument("check", choices=["volume", "masked", "thin-backlit", "glass-weights"])
     parser.add_argument("--binary", type=pathlib.Path, required=True)
     parser.add_argument("--control-binary", type=pathlib.Path, help="a build WITHOUT the fix: the gate must fail on it")
     parser.add_argument("--out", type=pathlib.Path, required=True)
     parser.add_argument("--evaluate", action="store_true", help="evaluate existing captures under --out")
     args = parser.parse_args(argv)
     args.use_control = False
-    run = {"volume": run_volume, "masked": run_masked, "thin-backlit": run_thin_backlit}[args.check]
+    run = {"volume": run_volume, "masked": run_masked, "thin-backlit": run_thin_backlit, "glass-weights": run_glass_weights}[args.check]
     try:
         if True:
             result = run(args)
