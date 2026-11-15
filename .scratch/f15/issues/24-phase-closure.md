@@ -102,6 +102,18 @@ section "Defects found during F15"; integrated by fast-forward to 6b6bf04; orche
   the AGX compiler, `UserIntersectionProgram::VariantSetEntry::signalPending`, on a phosphor-compile worker inside
   `PipelineCache::compileFinal` of a compute pipeline with a linked intersection function, under the shader-validation compiler; a 2026-11-13
   report crashed in `RayPayloadSizeAlignImpl::merge` at `setComputePipelineState`). OPEN.
+  AGX crash investigation (2026-11-15, base 1d64ba5, `bench/agx_link_stress` + `tools/agx_link_stress.py`): NOT REPRODUCED, cause unexplained.
+  Both reports are the same family (driver state of pipelines with a statically linked intersection function; the 11-13 one is the render
+  thread binding a pipeline at ~0.3 s after launch while 17 workers were still inside `newSpecializedFunction`; the 11-14 one is a worker
+  messaging a bad `_MTLFunction*` inside `createAirLinkedIntersectionVariantSets`, under `MTL4GPUDebugCompiler`). The driver keeps the
+  compiled variants by content: a fresh `MTL::Library` is served from memory (1.6 ms vs 3.4 s), so cold compiles need a salted metallib or
+  salted MSL source. Attempts, all with `MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1` unless noted, 0 crashes in every one: real case reruns
+  4 warm (+12 by the corpus agent); real case on an app copy with a salted `rt_alpha_generic` (cold) 28; the 15 real RT kernels, cold, 18
+  threads, plus a render-thread role (function handle + IFT) 45; synthetic salted linked kernels (+ unlinked ones) at T=1/18 (6 each, also
+  without validation), T=18 with consumer 8+8+8, T=36 and T=64 with consumer and encoder bind 40 each. API review of PipelineCache found
+  no misuse (library retained per job, descriptors owned per job, one thread-safe compiler, pool per job); no mitigation was added because
+  nothing failed before it. Startup note: with the archive, D2 startup is 14-20 ms ready with 12 compiler calls (570-630 ms summed CPU,
+  max 76 ms each), so the 573-606 ms figure is summed compile time, not wall time. OPEN.
 - OPEN, found 2026-11-15 (blocks the D2 criterion): Sponza D2 A/B/A against the pre-F15 baseline 75924b2 (`build/d2-ab-f15-closure`, quiet
   machine, 3 pairs): GPU p50 +0.73 / +0.67 / +0.64 ms, p95 15.57 / 16.40, 15.46 / 16.53, 15.31 / 16.39 ms (median delta +1.07 ms against the
   0.10 ms band; absolute 16.39-16.53 <= 16.67). Per-pass p50 medians: `F13 world-radius RTAO` +0.459 (1.046 -> 1.504, the kernel is unchanged),

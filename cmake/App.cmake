@@ -270,6 +270,13 @@ add_executable(timestamp_spike
 target_link_libraries(timestamp_spike PRIVATE metal_cpp)
 target_compile_features(timestamp_spike PRIVATE cxx_std_20)
 
+# --- F3.2/F15 AGX linked-intersection compile stress (measurement tool, not engine code) ---
+# Concurrent compiles of compute pipelines linking rt_alpha_generic; driven by
+# tools/agx_link_stress.py (each batch in a child process).
+add_executable(agx_link_stress bench/agx_link_stress/agx_link_stress.cpp)
+target_link_libraries(agx_link_stress PRIVATE metal_cpp)
+target_compile_features(agx_link_stress PRIVATE cxx_std_20)
+
 # --- OPT-0.1 SoC characterisation suite (measurement tool, not engine code) ---
 # bench/soc: one file per benchmark group, registered with SOC_BENCH; MSL in
 # bench/soc/shaders compiled at run time.  See bench/soc/README.md.
