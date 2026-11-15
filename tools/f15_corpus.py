@@ -17,7 +17,7 @@ Modes (exactly one):
   --validate        the same captures under API + shader validation (archive off, nothing else changes), summary-validation.json
   --harvest         one capture per model with archive misses (from <out>/summary.json) with --harvest-pipelines into <out>/harvest/
   --reclassify      CPU only: re-scan the logs of <out>/summary*.json (classification of validation notices, loader messages)
-  --archive-update  CPU only: filter (constant 22 [23], --skip-present) and merge the harvests into shaders/pipelines.mtl4-json
+  --archive-update  CPU only: filter (constants 22, 23, 26, --skip-present) and merge the harvests into shaders/pipelines.mtl4-json
 
 Exit codes: 0 ok, 1 a model failed unexpectedly (neither rendered nor refused for a stated reason), 2 usage / corpus missing, 4 GPU busy,
 5 internal error, 6 capture failed.
@@ -350,7 +350,7 @@ def sha256(path):
 # --- archive update (CPU only) ------------------------------------------------
 
 def archive_update(args):
-    """Filter every harvest (constants 22 and 23, pipelines the archive lacks) and merge them into shaders/pipelines.mtl4-json."""
+    """Filter every harvest (constants 22, 23 and 26, pipelines the archive lacks) and merge them into shaders/pipelines.mtl4-json."""
     out = args.out.resolve()
     archive = REPO / "shaders" / "pipelines.mtl4-json"
     raws = sorted((out / "harvest").glob("*.mtl4-json"))
@@ -411,7 +411,7 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.constant is None:
-        args.constant = [22, 23]
+        args.constant = [22, 23, 26]
     names = args.only or list(MODELS)
     try:
         if args.archive_update:

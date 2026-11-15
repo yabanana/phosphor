@@ -415,6 +415,18 @@ def selftest():
     px, py = project(-1.3, 0.25, 0.1, d, RESOLUTION[0] / RESOLUTION[1], *RESOLUTION)
     u, v = quad_pixel_to_uv(px - 0.5, py - 0.5, -1.3, 0.1, d, RESOLUTION[0] / RESOLUTION[1], *RESOLUTION)
     assert abs(u - 0.5) < 1e-9 and abs(v - 0.25) < 1e-9, (u, v)
+    # the fixture file: one material per quad, every material carries four different transformed slots plus the measured one
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "fixture.gltf"
+        build_gltf(path)
+        doc = json.loads(path.read_text())
+        assert len(doc["materials"]) == len(QUADS) == len(doc["meshes"]) == len(doc["nodes"])
+        for material in doc["materials"]:
+            assert material["emissiveTexture"]["extensions"]["KHR_texture_transform"]["rotation"] == TRANSFORMS["emissive"]["rotation"]
+            assert material["occlusionTexture"]["extensions"]["KHR_texture_transform"]["scale"] == TRANSFORMS["occlusion"]["scale"]
+            assert material["normalTexture"]["extensions"]["KHR_texture_transform"]["offset"] == TRANSFORMS["normal"]["offset"]
+        assert doc["materials"][-1]["alphaMode"] == "MASK"
     print("selftest ok")
 
 
