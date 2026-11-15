@@ -64,6 +64,15 @@ inline GPURtHit reflectionTraceVisible(GPURtRay ray,instance_acceleration_struct
     if(counts)atomic_fetch_add_explicit(counts+17,1u,memory_order_relaxed);
     hit.hit=0u;hit.t=-1.0f;hit.slot=~0u;return hit;
 }
+// F15.1 (ticket 22, C22-A1): a secondary hit that is itself a near-delta specular reflector.  reflectionSecondary reports it so that the ray can go on:
+// a surface whose clamped roughness is at most kReflectionMirrorRoughness (alpha <= 0.01, the lobe of a polished surface: the ideal mirror direction
+// stands for it) and whose Fresnel reflectance at the incoming angle reaches kReflectionMirrorMinFresnel in some channel.  `weight` is that
+// Fresnel term F(F0, n.v) of the base BSDF (F0 = mix(0.04, baseColor, metallic)), the directional albedo of a smooth specular lobe; the diffuse
+// and light terms of the hit are shaded as before (a hit that is not mirror-like keeps the single-bounce result bit for bit).
+constant float kReflectionMirrorRoughness=0.1f;
+constant float kReflectionMirrorMinFresnel=0.1f;
+constant float kReflectionMirrorMinThroughput=0.01f;
+struct ReflectionMirror {bool mirror;float3 point,normal,geometric,weight;float roughness;};
 template<typename Payload=RtPayload>
 inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
     instance_acceleration_structure as,intersection_function_table<triangle_data,instancing> ift,
@@ -72,11 +81,14 @@ inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
     const device DITextureHandle* textures,const device GPULight* lights,const device GPUSampledLight* sampled,
     const device GPUEmissiveSurface* emitters,constant GPUProbeGridParams& gi,const device GPUProbeState* states,
     constant GPUProbeTraceExtra& extra,texture2d<float> irradiance,texture2d<float> moments,thread uint& seed,thread bool& numericError,
-    float minRoughness=0.0f,thread float* emissionLuminance=nullptr){
+    float minRoughness=0.0f,thread float* emissionLuminance=nullptr,thread ReflectionMirror* mirror=nullptr){
     float3 point,normal,emission;GPUDISurface surface;
     if(!rtSurface(hit,instances,meshes,vertices,indices,p.slotCount,p.meshCount,point,normal)||
         !reflectionMaterial(hit,point,normal,-direction,p,instances,meshes,vertices,indices,materials,textures,surface,emission,numericError))return 0;
     float3 result=max(emission,0.0f);const float3 n=diVec(surface.shadingNormal),geometric=diVec(surface.geometricNormal);
+    if(mirror){mirror->mirror=false;
+        if(surface.roughness<=kReflectionMirrorRoughness){const float3 F=bsdfFSchlick(bsdfBaseF0(max(diVec(surface.albedo),0.0f),surface.metallic),saturate(dot(n,-direction)));
+            if(all(isfinite(F))&&bsdfMax3(F)>=kReflectionMirrorMinFresnel){mirror->mirror=true;mirror->point=point;mirror->normal=n;mirror->geometric=geometric;mirror->weight=F;mirror->roughness=surface.roughness;}}}
     if(emissionLuminance)*emissionLuminance=dot(result,float3(.2126f,.7152f,.0722f));
     // Path regularisation (declared in the F13 reference): the light connection
     // at the vertex after a sampled specular lobe uses at least that lobe's
@@ -111,6 +123,42 @@ inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
     if(!all(isfinite(result))||any(result<0)){numericError=true;return 0;}return result;
 }
 
+// F15.1 (ticket 22, C22-A1): the radiance of a reflection ray that met `hit`, following up to `maxBounces` further ideal specular reflections while the
+// surface it meets is mirror-like (ReflectionMirror).  Every bounce multiplies the throughput by the Fresnel weight of the mirror it left, shades
+// the next hit with the same secondary-hit model (reflectionSecondary) and ends in the probes/environment on a miss, like the first ray.  Hard
+// bounds: maxBounces <= 3 traces, the throughput below kReflectionMirrorMinThroughput ends the chain (negligible, not counted), a bound that ends a
+// chain at a still mirror-like hit drops that hit's own reflection (counter word 19).  Counter word 18 counts the extra traces.  A hit that is not
+// mirror-like, or maxBounces == 0, returns exactly what reflectionSecondary returns.
+template<typename Payload=RtPayload>
+inline float3 reflectionSecondaryChain(GPURtHit hit,float3 direction,uint maxBounces,
+    instance_acceleration_structure as,intersection_function_table<triangle_data,instancing> ift,
+    constant GPUReflectionParams& p,const device GPUInstance* instances,const device GPURtMesh* meshes,
+    const device GPUVertex* vertices,const device uint* indices,const device GPUMaterial* materials,
+    const device DITextureHandle* textures,const device GPULight* lights,const device GPUSampledLight* sampled,
+    const device GPUEmissiveSurface* emitters,constant GPUProbeGridParams& gi,const device GPUProbeState* states,
+    constant GPUProbeTraceExtra& extra,texture2d<float> irradiance,texture2d<float> moments,
+    const device GPUReflectionProbe* probes,texturecube_array<float> atlas,thread uint& seed,thread bool& numericError,
+    float minRoughness,device atomic_uint* counts){
+    ReflectionMirror m{};
+    float3 L=reflectionSecondary<Payload>(hit,direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,
+        seed,numericError,minRoughness,nullptr,maxBounces?&m:nullptr);
+    float3 throughput=1;
+    for(uint bounce=0;bounce<maxBounces&&m.mirror;++bounce){
+        throughput*=m.weight;if(!(bsdfMax3(throughput)>=kReflectionMirrorMinThroughput))break;
+        const float3 r=reflect(direction,m.normal);if(!all(isfinite(r))||dot(r,m.geometric)<=0)break;
+        GPURtRay ray{};const float3 origin=rtOffsetRay(m.point,m.geometric);
+        ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=r.x;ray.dy=r.y;ray.dz=r.z;ray.tmax=p.maxDistance;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_DIFFUSE;
+        Payload payload{};const GPURtHit next=reflectionTraceVisible<Payload>(ray,as,ift,p,instances,meshes,vertices,indices,materials,payload,counts);
+        if(counts)atomic_fetch_add_explicit(counts+18,1u,memory_order_relaxed);
+        const float roughness=m.roughness;direction=normalize(r);ReflectionMirror following{};
+        if(!next.hit){uint path;L+=throughput*reflectionProbeRadiance(m.point,direction,roughness,false,p,probes,atlas,path);break;}
+        L+=throughput*reflectionSecondary<Payload>(next,direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,
+            seed,numericError,minRoughness,nullptr,&following);
+        m=following;
+        if(bounce+1u==maxBounces&&m.mirror&&counts)atomic_fetch_add_explicit(counts+19,1u,memory_order_relaxed);
+    }
+    return L;
+}
 #ifdef PHOSPHOR_REFL_LOBE
 // ---------------------------------------------------------------------------------------------------------------------------------------
 // F15.1 (ticket 13): ray-traced KHR_materials_transmission + KHR_materials_volume (ADR-0004, decisions 06/09).
@@ -379,7 +427,8 @@ kernel void REFL_KERNEL(reflection_rt)(constant GPUReflectionParams& p [[buffer(
         bool numericError=dir.error;
         // Declared regularisation (F13 reference): alpha' >= k * alpha_camera.
         const float floorRoughness=sqrt(min(1.0f,max(p.regularizationScale,1.0f)*bsdfAlpha(sl.roughness)));
-        if(hit.hit){L=reflectionSecondary<ReflectionRtPayload>(hit,dir.direction,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,seed,numericError,floorRoughness);
+        if(hit.hit){L=reflectionSecondaryChain<ReflectionRtPayload>(hit,dir.direction,(p.flags>>REFLECTION_BOUNCE_SHIFT)&REFLECTION_BOUNCE_MASK,as,ift,p,instances,meshes,vertices,indices,materials,textures,lights,sampled,emitters,gi,states,extra,irradiance,moments,
+                probes,atlas,seed,numericError,floorRoughness,counts);
             sample.path=REFLECTION_PATH_RT;sample.hitDistance=length(origin+dir.direction*hit.t-diVec(s.position));sample.secondarySlot=hit.slot;sample.secondaryGeneration=hit.generation;}
         else L=reflectionProbeRadiance(diVec(s.position),dir.direction,sl.roughness,false,p,probes,atlas,sample.path);
         L*=dir.weight;if(!all(isfinite(L))||any(L<0)){numericError=true;L=0;}if(numericError)sample.flags|=SPECULAR_SAMPLE_ERROR;for(uint i=0;i<3;++i)sample.radiance[i]=L[i];

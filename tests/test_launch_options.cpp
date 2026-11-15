@@ -1589,3 +1589,20 @@ TEST_CASE("F15 launch option --corpus-rig parses YAW,PITCH and needs the scene v
     CHECK_FALSE(parse({"--bench", "4", "--scene", "m.gltf", "--corpus-rig", "x,y"}, bad, error));
     CHECK_FALSE(parse({"--bench", "4", "--scene", "m.gltf", "--corpus-rig", "0,0,1"}, bad, error));
 }
+
+TEST_CASE("F15.1 (ticket 22) --reflection-bounces bounds the mirror chain at 0..3 (default 3)") {
+    LaunchOptions o;
+    std::string error;
+    REQUIRE(parse({"--bench", "4"}, o, error));
+    CHECK(o.reflectionBounces == 3u);
+    for (u32 n = 0; n <= 3; ++n) {
+        const std::string value = std::to_string(n);
+        o = LaunchOptions{};
+        REQUIRE(parse({"--bench", "4", "--reflection-bounces", value.c_str()}, o, error));
+        CHECK(o.reflectionBounces == n);
+    }
+    LaunchOptions bad;
+    CHECK_FALSE(parse({"--bench", "4", "--reflection-bounces", "4"}, bad, error));
+    CHECK_FALSE(parse({"--bench", "4", "--reflection-bounces", "-1"}, bad, error));
+    CHECK_FALSE(parse({"--bench", "4", "--reflection-bounces"}, bad, error));
+}

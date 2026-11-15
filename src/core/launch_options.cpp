@@ -529,6 +529,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             else{error="--lighting-denoise-energy: expected on or off";return false;}
         } else if (arg == "--ao-radius") {
             if(!needFloat(out.aoRadius)||out.aoRadius<=0||out.aoRadius>100){error="--ao-radius: expected world metres in (0,100]";return false;}
+        } else if (arg == "--reflection-bounces") {
+            if(!needCount(out.reflectionBounces)||out.reflectionBounces>3){error="--reflection-bounces: expected 0..3";return false;}
         } else if (arg == "--reflection-samples") {
             if(!needCount(out.reflectionSamples)||out.reflectionSamples<1||out.reflectionSamples>8){error="--reflection-samples: expected1..8";return false;}
         } else if (arg == "--reflection-probe") {
