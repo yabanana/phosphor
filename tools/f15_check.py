@@ -923,7 +923,7 @@ SCENARIOS = {
     # ticket 18: the rt-walk albedo table over the boundary roughness.  Gated: the pieces of roughness <= 0.5 (declared before the measurement: at
     # 0.7 the plateau of the boundary is 0.503 and the fixture colours saturate; those pieces are reported).
     "subsurface-volumetric-rough@rt-walk": {"kind": "subsurface", "reference": "subsurface", "reflections": "off", "rt": True,
-                                            "engine_args": WALK_ARGS, "accumulate": WALK_FRAMES, "gate_max_roughness": 0.5, "reference_args": ["--spp", "8192"],
+                                            "engine_args": WALK_ARGS + ["--subsurface-samples", "256"], "accumulate": WALK_FRAMES, "gate_max_roughness": 0.5, "reference_args": ["--spp", "8192"],
                                             "noise_twin": "subsurface-volumetric-rough@rt-walk-lights-off",
                                             "controls": ["subsurface-off", "diffusion-off"],
                                             "terms": "sun only from the side on skin and jade spheres of boundary roughness 0.25 / 0.5 / 0.7, weight {1, 1, 1, 0.5, 0.5}, radius 0.08 m, "
