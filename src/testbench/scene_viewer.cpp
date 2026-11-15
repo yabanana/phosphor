@@ -35,8 +35,11 @@ void SceneViewer::setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) 
     const auto load = [&](const std::string &path) {
         LOG_INFO("SceneViewer: loading '%s'...", path.c_str());
         GltfLoader loader(gpuScene, textures, ecs);
+        // A declared rig (--corpus-rig) lights every model with the same sun: the file's own punctual lights are not imported.
+        loader.setImportPunctualLights(!rig_.enabled);
         if (!loader.loadFromFile(path))
             return false;
+        importedLights_ = loader.importedLightCount();
         entities_.assign(loader.createdEntities().begin(), loader.createdEntities().end());
         loadedGltf_ = true;
         loadedPath_ = path;
@@ -110,6 +113,8 @@ void SceneViewer::setup(ECS& ecs, GpuScene& gpuScene, TextureManager& textures) 
     }
 
     // --- Directional light ---
+    // A file that brought its own KHR_lights_punctual lights is lit by them, not by the default sun.
+    if (importedLights_ > 0) return;
     EntityID lightEntity = ecs.createEntity();
     entities_.push_back(lightEntity);
 

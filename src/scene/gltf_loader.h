@@ -35,6 +35,13 @@ public:
     /// @return true on success
     bool loadFromFile(const std::string& path);
     [[nodiscard]] std::span<const EntityID> createdEntities() const { return createdEntities_; }
+    /// KHR_lights_punctual: create LightComponent entities for the file's lights (default on).  A declared
+    /// lighting rig (the corpus rig) turns it off so every model of a corpus is lit by the same lights.
+    void setImportPunctualLights(bool on) { importLights_ = on; }
+    /// Number of punctual lights imported by the last load.
+    [[nodiscard]] u32 importedLightCount() const { return importedLights_; }
+    /// Engine light intensity = glTF intensity * this (lux -> W/m^2 and candela -> W/sr; default 1, see gltf_lights.h).
+    void setPhotometricToEngine(float scale) { photometricToEngine_ = scale; }
     /// Why the last loadFromFile() failed (empty after a success).
     [[nodiscard]] const std::string& lastError() const { return lastError_; }
     /// How many glTF materials were parsed in the last load: each material is
@@ -63,6 +70,9 @@ private:
     std::unordered_map<int, GltfMaterialParse> parsedMaterials_;
     size_t                              materialParseCount_ = 0;
     std::unordered_map<u64, u32>        textureCache_;
+    bool                                importLights_ = true;
+    u32                                 importedLights_ = 0;
+    float                               photometricToEngine_ = 1.0f;
 };
 
 } // namespace phosphor

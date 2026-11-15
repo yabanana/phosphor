@@ -37,6 +37,11 @@ const MaterialSupportTable& currentSupportTable() {
         t.emissiveStrength.level        = SupportLevel::Implemented;
         t.textureTransformUniform.level = SupportLevel::Implemented;
         t.textureTransformPerSlot.level = SupportLevel::Implemented;
+        // F15 closure: KHR_materials_unlit is lowered onto the emission path (emission = base colour, no reflection, features
+        // dropped) and excluded from the sampled emitters and the GI hit emission, so it lights nothing.  The vertex colour
+        // factor of the specification is not applied: the engine has no COLOR_0 stream for any material.
+        t.unlit.level         = SupportLevel::Approximated;
+        t.unlit.approximation = "no_vertex_color_stream";
         // F15.1: ior + specular shade every primary light path: the resolve and forward paths (direct sun and
         // analytic lights, environment, GI diffuse weight), ReSTIR and clustered DI (ticket 07: lobe guide), and
         // (ticket 08) the specular transport (SSR, RT reflections, probes/environment split-sum) and the composite
@@ -227,7 +232,8 @@ MaterialSupportReport buildSupportReport(const MaterialDescription& desc, const 
 
     r.base = entry("base", table.base, "glTF 2.0 core", InputLabel::Ratified);
 
-    const u32 mask = featureMask(desc);
+    // An unlit material carries only the lowering's internal specular block: it reports the encoding, not features.
+    const u32 mask = desc.base.unlit ? 0u : featureMask(desc);
     for (u32 i = 0; i < MATERIAL_FEATURE_COUNT; ++i) {
         const auto f = static_cast<MaterialFeature>(i);
         if (!(mask & featureBit(f))) continue;
@@ -241,6 +247,8 @@ MaterialSupportReport buildSupportReport(const MaterialDescription& desc, const 
     if (info.emissiveStrengthUsed)
         r.encodings.push_back(entry("emissive_strength", table.emissiveStrength, "KHR_materials_emissive_strength",
                                     InputLabel::Ratified));
+    if (desc.base.unlit)
+        r.encodings.push_back(entry("unlit", table.unlit, "KHR_materials_unlit", InputLabel::Ratified));
     switch (info.transformStatus) {
         case TextureTransformStatus::None: break;
         case TextureTransformStatus::Uniform:

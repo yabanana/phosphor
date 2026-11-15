@@ -30,6 +30,7 @@ private:
 
     std::vector<EntityID> entities_;
     bool loadedGltf_ = false;
+    u32  importedLights_ = 0;
     std::string scenePath_;
     std::string materialOverridesPath_; // F15.1 --material-overrides (empty = none)
     std::string loadedPath_;

@@ -425,9 +425,9 @@ TEST_CASE("glTF materials: draft KHR_materials_scatter (PR 2579 at a6cd5b4)") {
 
 TEST_CASE("glTF materials: unknown extensions are listed per material") {
     const auto p = parseOne(R"({"extensions":{"KHR_materials_dispersion":{"dispersion":0.5},
-        "KHR_materials_unlit":{},"EXT_vendor_thing":{"x":1},"KHR_materials_clearcoat":{"clearcoatFactor":1}}})");
+        "KHR_materials_variants":{},"EXT_vendor_thing":{"x":1},"KHR_materials_clearcoat":{"clearcoatFactor":1}}})");
     CHECK(contains(p.info.unknownExtensions, "KHR_materials_dispersion"));
-    CHECK(contains(p.info.unknownExtensions, "KHR_materials_unlit"));
+    CHECK(contains(p.info.unknownExtensions, "KHR_materials_variants"));
     CHECK(contains(p.info.unknownExtensions, "EXT_vendor_thing"));
     CHECK_FALSE(contains(p.info.unknownExtensions, "KHR_materials_clearcoat"));
     const auto report = buildSupportReport(p.description, p.info);
@@ -599,7 +599,7 @@ TEST_CASE("glTF extensions: required extensions must be rendered, not merely par
         CHECK(bad[0].reason.find("twosets") != std::string::npos);
     }
     SUBCASE("unsupported required extensions are named") {
-        for (const char* name : {"KHR_materials_unlit", "KHR_lights_punctual", "KHR_draco_mesh_compression",
+        for (const char* name : {"KHR_draco_mesh_compression",
                                  "KHR_texture_basisu", "EXT_meshopt_compression", "KHR_materials_dispersion"}) {
             const auto m = loadModel(std::string(R"({"asset":{"version":"2.0"},"extensionsUsed":[")") + name +
                                      R"("],"extensionsRequired":[")" + name + R"("]})");
@@ -610,11 +610,11 @@ TEST_CASE("glTF extensions: required extensions must be rendered, not merely par
     }
     SUBCASE("optional unknown extensions are listed, not refused") {
         const auto m = loadModel(R"({"asset":{"version":"2.0"},
-            "extensionsUsed":["KHR_lights_punctual","KHR_materials_sheen","KHR_materials_dispersion"]})");
+            "extensionsUsed":["KHR_materials_variants","KHR_materials_sheen","KHR_materials_dispersion"]})");
         CHECK(unsupportedRequiredExtensions(m).empty());
         const auto unknown = unknownOptionalExtensions(m);
         REQUIRE(unknown.size() == 2);
-        CHECK(unknown[0] == "KHR_lights_punctual");
+        CHECK(unknown[0] == "KHR_materials_variants");
         CHECK(unknown[1] == "KHR_materials_dispersion");
     }
 }
@@ -630,14 +630,14 @@ TEST_CASE("support report: summary line, detail and JSON") {
         const auto p = parseOne(R"({"name":"plain"})");
         reports.push_back(buildSupportReport(p.description, p.info));
     }
-    const std::vector<std::string> assetUnknown = {"KHR_lights_punctual"};
+    const std::vector<std::string> assetUnknown = {"KHR_materials_variants"};
     const std::string line = formatSupportSummary(reports, assetUnknown);
     CHECK(line.rfind("MATERIALS count=2 base=[implemented(2)] ", 0) == 0);
     CHECK(line.find("implemented=0 approximated=3 unsupported=0") != std::string::npos); // clearcoat (ticket 09), thin subsurface (ticket 16) and transmission (ticket 13) are approximated
     CHECK(line.find("encodings=[]") != std::string::npos);
     CHECK(line.find("clearcoat:approximated(1)") != std::string::npos);
     CHECK(line.find("subsurface:approximated(1)") != std::string::npos);
-    CHECK(line.find("KHR_lights_punctual") != std::string::npos);
+    CHECK(line.find("KHR_materials_variants") != std::string::npos);
     CHECK(line.find("KHR_materials_dispersion") != std::string::npos);
 
     const std::string detail = formatSupportDetail(reports[0]);
@@ -664,7 +664,7 @@ TEST_CASE("support report: summary line, detail and JSON") {
             sawDraft = true;
         }
     CHECK(sawDraft);
-    CHECK(json.at("asset_unknown_extensions").at(0) == "KHR_lights_punctual");
+    CHECK(json.at("asset_unknown_extensions").at(0) == "KHR_materials_variants");
 }
 
 TEST_CASE("support report: both subsurface modes are approximated, the volumetric one with its own named approximations") {

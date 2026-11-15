@@ -268,20 +268,20 @@ TEST_CASE("glTF loader (F15): extension materials are described and emissive str
     auto model = nlohmann::json::parse(quadWithoutNormalsOrTangents(
         R"({"name":"coat","emissiveFactor":[1,0.5,0],"extensions":{"KHR_materials_clearcoat":{"clearcoatFactor":1},
             "KHR_materials_emissive_strength":{"emissiveStrength":4}}})"));
-    model["extensionsUsed"] = {"KHR_materials_clearcoat", "KHR_materials_emissive_strength", "KHR_lights_punctual"};
+    model["extensionsUsed"] = {"KHR_materials_clearcoat", "KHR_materials_emissive_strength", "KHR_materials_variants"};
     GpuScene scene;
     REQUIRE(loadModelJson(model, scene, "phosphor_f15_ext.gltf"));
     CHECK(featureMask(scene.materialDescriptions()[0]) == featureBit(MaterialFeature::Clearcoat));
     CHECK(scene.materials()[0].emissive[0] == doctest::Approx(4.0f));
     CHECK(scene.materials()[0].emissive[1] == doctest::Approx(2.0f));
     REQUIRE(scene.assetUnknownExtensions().size() == 1);
-    CHECK(scene.assetUnknownExtensions()[0] == "KHR_lights_punctual");
+    CHECK(scene.assetUnknownExtensions()[0] == "KHR_materials_variants");
 }
 
 TEST_CASE("glTF loader (F15): extensionsRequired with an unsupported extension is refused") {
     auto model = nlohmann::json::parse(quadWithoutNormalsOrTangents(R"({"name":"m"})"));
-    model["extensionsUsed"]     = {"KHR_materials_unlit"};
-    model["extensionsRequired"] = {"KHR_materials_unlit"};
+    model["extensionsUsed"]     = {"KHR_draco_mesh_compression"};
+    model["extensionsRequired"] = {"KHR_draco_mesh_compression"};
     GpuScene scene;
     CHECK_FALSE(loadModelJson(model, scene, "phosphor_f15_required.gltf"));
     CHECK(scene.getMeshCount() == 0);

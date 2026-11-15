@@ -48,6 +48,36 @@ bool featureActive(const MaterialDescription& d, MaterialFeature f) {
     return false;
 }
 
+void lowerUnlit(MaterialDescription& d) {
+    if (!d.base.unlit) return;
+    BaseMaterial& b = d.base;
+    const bool colourZero = b.baseColor[0] == 0.0f && b.baseColor[1] == 0.0f && b.baseColor[2] == 0.0f;
+    const bool emits = b.emissive[0] != 0.0f || b.emissive[1] != 0.0f || b.emissive[2] != 0.0f || b.emissiveTexture.present();
+    const bool lowered = colourZero && emits;
+    if (!lowered) {
+        for (size_t i = 0; i < 3; ++i) {
+            b.emissive[i]  = b.baseColor[i];
+            b.baseColor[i] = 0.0f;
+        }
+        b.emissiveTexture = b.baseColorTexture;
+        b.emissiveTexture.channel = TextureChannel::Rgb;
+        b.emissiveTexture.colorSpace = TextureColorSpace::SRGB;
+    }
+    b.metallic = 0.0f;
+    d.specular.reset();
+    SpecularBlock none{};
+    none.specularFactor = 0.0f;
+    d.specular = none;
+    d.clearcoat.reset();
+    d.sheen.reset();
+    d.anisotropy.reset();
+    d.iridescence.reset();
+    d.transmission.reset();
+    d.volume.reset();
+    d.subsurface.reset();
+    d.layers.reset();
+}
+
 u32 featureMask(const MaterialDescription& d) {
     u32 mask = 0;
     for (u32 i = 0; i < MATERIAL_FEATURE_COUNT; ++i) {

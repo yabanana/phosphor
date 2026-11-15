@@ -61,6 +61,9 @@ PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_DOUBLE_SIDED = 1u << 0;
 /// F15.1 (ticket 22): the material carries per-slot KHR_texture_transform data: GPUMaterial::textureTransformIndex is the first of
 /// the MATERIAL_TT_RECORDS records of its transform block in the extension buffer (GPUTextureTransformRecord).
 PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_TEXTURE_TRANSFORM = 1u << 1;
+// UNLIT: KHR_materials_unlit, lowered onto the emission path (renderer/material_description.h lowerUnlit).  The emission is the
+// displayed colour only: the surface is never a sampled emitter and GI rays hitting it read no emission.
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_UNLIT = 1u << 2;
 
 // F15.1 (ticket 05): material FEATURE bits live in GPUMaterial::flags from bit
 // MATERIAL_FEATURE_SHIFT: bit (8 + MaterialFeature value) is set while the

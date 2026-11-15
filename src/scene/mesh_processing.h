@@ -30,4 +30,12 @@ struct GeometryStreams {
 /// a new flat normal or tangent splits them.  No-op when nothing is missing.
 void completeGeometry(GeometryStreams& geometry, bool hasNormals, bool hasTangents, bool hasUVs);
 
+/// A tangent frame is usable when the tangent projected on the plane of the normal is finite and not (nearly) zero.
+[[nodiscard]] bool tangentFrameUsable(const glm::vec3& normal, const glm::vec4& tangent);
+
+/// Replace every unusable tangent (zero length, parallel to the normal, non-finite) by a perpendicular of the normal
+/// with handedness +1 (or the supplied +-1).  Returns the number of vertices repaired.  Used for primitives whose
+/// material needs a tangent frame (KHR_materials_anisotropy): MikkTSpace itself returns zero tangents on degenerate UVs.
+u32 repairTangentFrames(GeometryStreams& geometry);
+
 } // namespace phosphor

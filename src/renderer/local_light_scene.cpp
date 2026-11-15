@@ -14,6 +14,7 @@ void LocalLightScene::rebuild(const GpuScene& scene,const SceneStore& store,std:
         const auto& i=instances[slot];
         if(!(i.flags&INSTANCE_FLAG_VALID) || !(i.flags&1u) || i.meshIndex>=scene.meshInfos().size() || i.materialIndex>=materials.size())continue;
         const auto& material=materials[i.materialIndex];
+        if(material.flags&MATERIAL_FLAG_UNLIT)continue;
         if(material.emissive[0]<=0 && material.emissive[1]<=0 && material.emissive[2]<=0)continue;
         const auto& mesh=scene.meshInfos()[i.meshIndex];
         for(u32 triangle=0;triangle<mesh.indexCount/3;++triangle) {

@@ -26,10 +26,12 @@ constexpr const char* EXT_EMISSIVE     = "KHR_materials_emissive_strength";
 constexpr const char* EXT_DIFFUSE_TRANSMISSION = "KHR_materials_diffuse_transmission";
 constexpr const char* EXT_SCATTER      = "KHR_materials_scatter"; // draft, PR #2579 head a6cd5b4
 constexpr const char* EXT_TEXTURE_TRANSFORM = "KHR_texture_transform";
+constexpr const char* EXT_UNLIT        = "KHR_materials_unlit";
+constexpr const char* EXT_LIGHTS_PUNCTUAL = "KHR_lights_punctual"; // asset level, handled by the loader's light import
 
 constexpr const char* kMaterialExtensions[] = {
     EXT_CLEARCOAT, EXT_SHEEN, EXT_ANISOTROPY, EXT_TRANSMISSION, EXT_VOLUME, EXT_IOR,
-    EXT_SPECULAR, EXT_IRIDESCENCE, EXT_EMISSIVE, EXT_DIFFUSE_TRANSMISSION, EXT_SCATTER,
+    EXT_SPECULAR, EXT_IRIDESCENCE, EXT_EMISSIVE, EXT_DIFFUSE_TRANSMISSION, EXT_SCATTER, EXT_UNLIT,
 };
 
 // Radius reported for a medium that does not attenuate (attenuationDistance
@@ -349,6 +351,15 @@ GltfMaterialParse parseGltfMaterial(const tinygltf::Material& material, const Gl
         d.subsurface = s;
     }
 
+    // KHR_materials_unlit: the surface shows base colour x texture; emission and every other lighting
+    // property are ignored (the extension's README), then the description is lowered onto the emission path.
+    if (find(EXT_UNLIT) != nullptr) {
+        b.unlit            = true;
+        b.emissive         = {0.0f, 0.0f, 0.0f};
+        b.emissiveTexture  = textureSlot(TextureColorSpace::SRGB, TextureChannel::Rgb);
+        lowerUnlit(d);
+    }
+
     {
         const auto analysis = analyzeTextureTransforms(d);
         info.transformStatus = analysis.status;
@@ -361,7 +372,7 @@ GltfMaterialParse parseGltfMaterial(const tinygltf::Material& material, const Gl
 }
 
 bool isSupportedGltfExtension(const std::string& name) {
-    if (name == EXT_TEXTURE_TRANSFORM) return true;
+    if (name == EXT_TEXTURE_TRANSFORM || name == EXT_LIGHTS_PUNCTUAL) return true;
     return std::find_if(std::begin(kMaterialExtensions), std::end(kMaterialExtensions),
                         [&](const char* k) { return name == k; }) != std::end(kMaterialExtensions);
 }
@@ -379,6 +390,8 @@ bool isExtensionRendered(const std::string& name, const MaterialSupportTable& ta
     if (name == EXT_DIFFUSE_TRANSMISSION || name == EXT_SCATTER) return feature(MaterialFeature::Subsurface);
     if (name == EXT_EMISSIVE) return rendered(table.emissiveStrength);
     if (name == EXT_TEXTURE_TRANSFORM) return rendered(table.textureTransformUniform);
+    if (name == EXT_UNLIT) return rendered(table.unlit);
+    if (name == EXT_LIGHTS_PUNCTUAL) return true; // imported by GltfLoader as ECS LightComponents
     return false;
 }
 

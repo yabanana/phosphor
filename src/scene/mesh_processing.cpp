@@ -126,4 +126,26 @@ void completeGeometry(GeometryStreams& g, bool hasNormals, bool hasTangents, boo
     g.indices.assign(remap.begin(), remap.end());
 }
 
+bool tangentFrameUsable(const glm::vec3& n, const glm::vec4& t) {
+    if (!std::isfinite(t.x) || !std::isfinite(t.y) || !std::isfinite(t.z) || !std::isfinite(t.w)) return false;
+    if (!std::isfinite(n.x) || !std::isfinite(n.y) || !std::isfinite(n.z)) return false;
+    const glm::vec3 tv(t);
+    const glm::vec3 projected = tv - n * glm::dot(n, tv);
+    return glm::dot(projected, projected) > 1e-8f;
+}
+
+u32 repairTangentFrames(GeometryStreams& g) {
+    if (g.tangents.size() != g.normals.size()) return 0;
+    u32 repaired = 0;
+    for (size_t i = 0; i < g.tangents.size(); ++i) {
+        if (tangentFrameUsable(g.normals[i], g.tangents[i])) continue;
+        const glm::vec3 n = g.normals[i];
+        const bool normalOk = std::isfinite(n.x) && std::isfinite(n.y) && std::isfinite(n.z) && glm::dot(n, n) > 1e-12f;
+        const float w = std::isfinite(g.tangents[i].w) && g.tangents[i].w < 0.0f ? -1.0f : 1.0f;
+        g.tangents[i] = glm::vec4(anyPerpendicular(normalOk ? glm::normalize(n) : glm::vec3(0, 0, 1)), w);
+        ++repaired;
+    }
+    return repaired;
+}
+
 } // namespace phosphor

@@ -42,6 +42,7 @@ struct Writer {
         out[key] = std::move(a);
     }
     void b(const char* key, bool& v) { out[key] = v; }
+    void bIfTrue(const char* key, bool& v) { if (v) out[key] = v; }
     void e(const char* key, u8& v, const char* const* names, size_t n) {
         if (v >= n) fail(path + "." + key + ": invalid enum value");
         out[key] = names[v];
@@ -100,6 +101,7 @@ struct Reader {
             v[i] = (*j)[i].get<float>();
         }
     }
+    void bIfTrue(const char* key, bool& v) { b(key, v); }
     void b(const char* key, bool& v) {
         const Json* j = get(key);
         if (!j) return;
@@ -188,6 +190,7 @@ template <class V> void visitBase(V& v, BaseMaterial& b) {
     v.arr("emissive", b.emissive);
     v.f("alphaCutoff", b.alphaCutoff);
     v.b("doubleSided", b.doubleSided);
+    v.bIfTrue("unlit", b.unlit);
     v.tex("baseColorTexture", b.baseColorTexture);
     v.tex("metallicRoughnessTexture", b.metallicRoughnessTexture);
     v.tex("normalTexture", b.normalTexture);

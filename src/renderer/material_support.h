@@ -41,6 +41,7 @@ struct MaterialSupportTable {
     FeatureSupportEntry emissiveStrength;   // KHR_materials_emissive_strength (folded)
     FeatureSupportEntry textureTransformUniform; // baked into UV0 when uniform per material
     FeatureSupportEntry textureTransformPerSlot; // F15.1 (ticket 22): per-slot transforms evaluated on the GPU
+    FeatureSupportEntry unlit;              // KHR_materials_unlit (lowered onto the emission path, F15 closure)
 };
 
 /// The table of this build.

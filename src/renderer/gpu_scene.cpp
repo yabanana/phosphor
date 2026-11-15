@@ -161,8 +161,10 @@ void GpuScene::setBaseTextureDefaults(u32 white, u32 metallicRoughness, u32 norm
     baseTextureDefaults_ = {white, metallicRoughness, normal};
 }
 
-bool GpuScene::setMaterialDescription(u32 index, const MaterialDescription& d) {
+bool GpuScene::setMaterialDescription(u32 index, const MaterialDescription& authored) {
     if (index >= materials_.size()) return false;
+    MaterialDescription d = authored;
+    lowerUnlit(d);
     GPUMaterial& g = materials_[index];
     const BaseMaterial& b = d.base;
     for (size_t i = 0; i < 4; ++i) g.baseColor[i] = b.baseColor[i];
@@ -174,6 +176,7 @@ bool GpuScene::setMaterialDescription(u32 index, const MaterialDescription& d) {
     for (size_t i = 0; i < 3; ++i) g.emissive[i] = std::max(0.0f, b.emissive[i]);
     g.alphaCutoff = b.alphaCutoff;
     g.flags = b.doubleSided ? (g.flags | MATERIAL_FLAG_DOUBLE_SIDED) : (g.flags & ~MATERIAL_FLAG_DOUBLE_SIDED);
+    g.flags = b.unlit ? (g.flags | MATERIAL_FLAG_UNLIT) : (g.flags & ~MATERIAL_FLAG_UNLIT);
     // A slot with a texture binds it; one without binds the documented default
     // (an override that removes a texture must not leave the old one bound); a
     // path that is not resolved yet keeps what is bound.

@@ -115,7 +115,8 @@ inline bool giMaterial(GPURtHit hit,constant GPUProbeGridParams& p,const device 
     out.diffuse=max(base,0.0f)*(1.0f-saturate(metallic));
     out.emissive=float3(m.emissive[0],m.emissive[1],m.emissive[2]);
     if(m.emissiveTex!=INVALID_TEXTURE_INDEX) out.emissive*=float3(half3(textures[m.emissiveTex].tex.sample(kGiMaterialSampler,uv,level(0.0f)).rgb));
-    out.emissive=max(out.emissive,0.0f); 
+    out.emissive=max(out.emissive,0.0f);
+    if(m.flags&MATERIAL_FLAG_UNLIT)out.emissive=float3(0.0f);
     // F12.1 residue found in F15: the atlas ignores transmission (declared: secondary_gi_and_probe_hits_ignore_transmission), so a glass pane is a
     // white diffuse surface seen from either side.  Its BACK face must not read as the inside of a solid: a probe in the gap between a single-sided
     // pane and the wall behind it counted > 25 % back faces, went INACTIVE, and the lookups of everything behind the glass found no probe (0).

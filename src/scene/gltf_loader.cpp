@@ -9,6 +9,7 @@
 #include "scene/gltf_loader.h"
 #include "scene/gltf_contained_fs.h"
 #include "scene/gltf_material_extensions.h"
+#include "scene/gltf_lights.h"
 #include "scene/mesh_processing.h"
 #include "scene/texture_manager.h"
 #include "scene/ecs.h"
@@ -167,6 +168,7 @@ bool GltfLoader::loadFromFile(const std::string& path) {
     // Clear per-file caches
     meshCache_.clear();
     createdEntities_.clear();
+    importedLights_ = 0;
     materialCache_.clear();
     parsedMaterials_.clear();
     materialParseCount_ = 0;
@@ -250,6 +252,26 @@ void GltfLoader::processNode(const tinygltf::Model& model,
             instance.setVisible(true);
             instance.setCastsShadows(true);
             ecs_.addComponent(entity, std::move(instance));
+        }
+    }
+
+    // KHR_lights_punctual: the light sits at the node origin and shines along its local -Z (extractLights).
+    if (importLights_ && node.light >= 0) {
+        if (node.light >= static_cast<int>(model.lights.size())) {
+            LOG_WARN("glTF node '%s' references light %d which does not exist", node.name.c_str(), node.light);
+        } else {
+            const auto converted = convertPunctualLight(model.lights[static_cast<size_t>(node.light)], photometricToEngine_);
+            for (const std::string& w : converted.warnings) LOG_WARN("glTF node '%s': %s", node.name.c_str(), w.c_str());
+            if (converted.valid) {
+                const EntityID entity = ecs_.createEntity();
+                createdEntities_.push_back(entity);
+                TransformComponent transform{};
+                transform.worldMatrix = worldTransform;
+                transform.position = glm::vec3(worldTransform[3]);
+                ecs_.addComponent(entity, std::move(transform));
+                ecs_.addComponent(entity, LightComponent(converted.light));
+                ++importedLights_;
+            }
         }
     }
 
@@ -375,6 +397,15 @@ MeshHandle GltfLoader::processPrimitive(const tinygltf::Model& model,
                  geom.positions.size());
     }
 
+    // KHR_materials_anisotropy needs a tangent frame at every vertex: supplied tangents that are degenerate (zero,
+    // parallel to the normal, non-finite) and MikkTSpace results on degenerate UVs would shade it as strength 0.
+    if (!geom.positions.empty() && prim.material >= 0 && prim.material < static_cast<int>(model.materials.size()) &&
+        parsedMaterial(model, prim.material).description.anisotropy) {
+        if (const u32 repaired = repairTangentFrames(geom); repaired > 0)
+            LOG_WARN("Mesh '%s': %u vertices had no usable tangent frame, a perpendicular of the normal was substituted "
+                     "(KHR_materials_anisotropy)", mesh.name.c_str(), repaired);
+    }
+
     if (geom.positions.empty()) {
         meshCache_[key] = INVALID_MESH_HANDLE;
         return INVALID_MESH_HANDLE;
@@ -464,7 +495,7 @@ u32 GltfLoader::processMaterial(const tinygltf::Model& model,
     gpu.emissive[1]  = mc.emissiveFactor.g;
     gpu.emissive[2]  = mc.emissiveFactor.b;
     gpu.alphaCutoff  = mc.alphaCutoff;
-    gpu.flags        = mc.doubleSided ? MATERIAL_FLAG_DOUBLE_SIDED : 0u;
+    gpu.flags        = (mc.doubleSided ? MATERIAL_FLAG_DOUBLE_SIDED : 0u) | (base.unlit ? MATERIAL_FLAG_UNLIT : 0u);
 
     MaterialSupportReport support = buildSupportReport(parsed.description, parsed.info);
     const u32 materialIndex = gpuScene_.addMaterial(gpu, parsed.description, material.name, std::move(support));

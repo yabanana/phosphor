@@ -84,6 +84,10 @@ struct BaseMaterial {
     std::array<float, 3> emissive{0.0f, 0.0f, 0.0f};
     float                alphaCutoff = 0.0f; // 0 = no alpha test
     bool                 doubleSided = false;
+    /// KHR_materials_unlit (F15 closure): the surface displays base colour x base colour texture
+    /// and ignores every light and every other feature.  lowerUnlit() maps it onto the engine's
+    /// emission path; `unlit` stays true on the lowered form.
+    bool                 unlit = false;
 
     MaterialTextureRef baseColorTexture         = textureSlot(TextureColorSpace::SRGB, TextureChannel::Rgba);
     MaterialTextureRef metallicRoughnessTexture = textureSlot(TextureColorSpace::Linear, TextureChannel::Gb);
@@ -230,6 +234,14 @@ struct MaterialDescription {
     std::optional<SubsurfaceBlock>   subsurface;
     std::optional<LayerStack>        layers;
 };
+
+/// KHR_materials_unlit lowering (idempotent).  An unlit description becomes: emissive = base colour rgb
+/// (emissive texture = base colour texture, rgb), base colour rgb 0 (alpha kept: alpha test and alpha
+/// come from the base colour), metallic 0, a specular block with specularFactor 0 (F0 and F90 vanish,
+/// so no light is reflected), and every other feature block dropped.  A description that already has
+/// base colour rgb 0 together with an emission is taken as lowered and left alone; an unlit
+/// description whose colour and emission are both black stays black.  No-op when `base.unlit` is false.
+void lowerUnlit(MaterialDescription& desc);
 
 /// Material features.  The numeric values are stable: bit n of featureMask()
 /// is 1 << MaterialFeature value.
