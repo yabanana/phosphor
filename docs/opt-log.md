@@ -2424,3 +2424,16 @@ The continuation is part of the corrected image: with the bound at 0 the D2 exac
 **no specialisation can remove it with bit-identical images**: Sponza does contain single-sided surfaces whose back faces rays hit.  A scene-union function constant would not help (single-sidedness is not a feature bit),
 and lowering the bound or skipping the loop changes the image.  Not attempted, because it changes the images: a cheaper continuation (bound below 4, or tmax-limited re-trace) with its own gate.
 No code change from this follow-up (all variants reverted).
+
+## 2026-11-15 — F15 ticket 24 follow-up 2: hardware back-face culling instead of the continuation loop (`RT_PROBE_DIFFUSE_CULLED`), DISCARDED
+
+**Variant:** `reflectionTraceVisible` traces with a new ray type `RT_PROBE_DIFFUSE_CULLED` (rtTrace sets `triangle_cull_mode::back`, like RT_PROBE_PRIMARY; double-sided instances disable culling per instance), one traversal, no bound of 4;
+the old loop kept only as the fallback for a hit the rule still culls; the refraction walk untouched.
+**Image proof at ray level** (a compare build ran both the culled trace and the old loop for every `reflection_rt` ray of Sponza D2 and counted differences, `--debug-lighting 4`, ~3700 continuations per frame):
+- old loop returned a miss (bound exhausted) where the culled trace finds the surface: ~160-210 rays / frame (the expected, allowed change);
+- DIFFERENT first surface (hit/miss or slot/primitive) outside the exhausted rays: **24-35 rays / frame** (not allowed by the acceptance rule);
+- same surface but different t/u/v (the old loop re-traces from an offset origin, the culled ray from the true one): ~2700-2800 rays / frame.
+So the images would change at more than the bound-exhausted pixels (numerically at ~2800 rays, and surface choice at ~30 rays per frame): the semantics are not identical in ONE traversal.
+**Cost** (3 alternating runs, sentinel 0.81 throughout; reflection sample 0 p50 / p95 median, frame p95): 2e1057a 2.735 / 3.501, 15.46; current 2.767 / 3.719, 15.65; culled variant 2.756 / 3.645, 15.63.
+It recovers about a third of the p95 growth (0.07 of 0.22 ms), not "near 2e1057a" (0.14 above).  Both adoption conditions fail: variant discarded, nothing committed but this record.
+The F13 exact / visual_check / residue fixtures were not run (the ray-level result already fails the acceptance rule).  Remaining tail = the extra traversals of the continuation itself (see the previous entry).
