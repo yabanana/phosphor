@@ -240,3 +240,12 @@ Quiet-machine measurements for this ticket:
   - binning vs union on chess (resolve + classification): side-light -1.8 %, shadow rig +6.7 %, back-light +9.8 % (A-A noise 2.6 / 0.9 / 4.3 %): the >= 5 % rule of decision 05 is not met (opt-log), with the
     terrain result union stays default, binning opt-in. CHESS DONE.
 - Sponza D2 interleaved A/B for the GI-mode environment fix and for the energy-preserving a-trous experiment.
+
+2026-11-15 13:10 — final-tree corpus: `tools/f13_f14_check.py --run` on 720ee63 (`build/f15-corpus-final`, frozen manifest and references
+of the closure run) exit 0, 89 / 89 executed, gating control 30/30, cross-check 2/2, full-rate-pair 17/17, functional 13/13, independent-clip
+12/12, numerical 14/14, repeatability-pair 1/1; `corpus_compare.py` against the 29814ac run: every case identical in state. hitch_check on
+720ee63: 0 hitches, 21/21 archive hits, 0 render-thread compiles.
+2026-11-15 ~12:20 — owner (via the parent session): before the F15 PR, finish every partial of this carry list and of the handoff "Open and
+partial" section, plus earlier-phase fixes, in parallel; owner decisions of the same day: implement multiple-scattering compensation,
+multi-bounce reflections, non-uniform texture transforms and back-lit thick subsurface; RT random walk as an optional subsurface tier; class
+pipelines bit-identical within the D2 budget; optimise the transmission cost in F15. Work in progress on branches `f15c-*` (round 2).
