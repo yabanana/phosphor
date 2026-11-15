@@ -70,7 +70,7 @@ struct MaterialComponent {
     glm::vec3 emissiveFactor{0.0f};
     float alphaCutoff = 0.0f;              // opaque by default; MASK materials opt in
     bool  doubleSided             = false; // glTF doubleSided: no back-face culling, two-sided lighting
-    // F15.1: extension data (specular/ior now, every other feature later) as a
+    // F15.1: extension data (every F15 feature block) as a
     // reference to a material description; only its feature blocks are read, the
     // fields above stay the base model.  Null = no features.  An edit swaps the
     // pointer through ECS modify access and reaches the GPU through SceneStore

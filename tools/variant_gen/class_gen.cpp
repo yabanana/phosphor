@@ -3,7 +3,7 @@
 //   variant_gen classes <material_classes.def> <output-dir>
 //
 // Reads the declared list `material_classes.def` and the feature-class manifests it names (renderer/
-// material_class_manifest.h, exported by tools/class_manifest and by the app from the fixtures, later the chess
+// material_class_manifest.h, exported by tools/class_manifest and by the app from the fixtures, the chess
 // scene and the corpus) and writes, only when the content changed, into <output-dir>/pipeline/:
 //   material_classes.generated.h        C++ class table, scene table and budgets
 //   material_classes.generated.metal.h  MSL constants of the table

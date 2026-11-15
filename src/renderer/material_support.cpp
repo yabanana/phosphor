@@ -97,7 +97,7 @@ const MaterialSupportTable& currentSupportTable() {
         // anisotropic scatter split and the weight/colour textures are not validated against an independent reference.  Ticket 19 composes the
         // thin lobe with a clearcoat on every primary path (the coat attenuates the reflected and transmitted lobes by 1 - c F_c and adds its
         // own lobe, validated against the independent reference); thin + sheen, anisotropy, iridescence or ior/specular are not composed in the
-        // resolve branch and the reference refuses them.  The volumetric mode is ticket 17 (unsupported).
+        // resolve branch and the reference refuses them.  The volumetric mode (ticket 17) is declared Approximated below.
         FeatureSupportEntry& subsurface = t.features[static_cast<u32>(MaterialFeature::Subsurface)];
         subsurface.level                = SupportLevel::Approximated;
         subsurface.approximation        = "thin_mode_only;gi_at_minus_n_ddgi_probe_lookup_other_gi_modes_use_irradiance_at_n;secondary_rt_hits_ignore_transmission;thin_composed_with_clearcoat_only";

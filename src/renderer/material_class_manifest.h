@@ -5,7 +5,7 @@
 // A manifest records, per scene, which material feature classes the scene uses: a class is the feature mask of one
 // material (bit n = MaterialFeature n, the value of the reserved function constant MATERIAL_FEATURES), `materials` how
 // many live materials carry it, and `union` the OR of the scene's masks (SceneStore::featureUnion).  The app and the
-// `class_manifest` tool export them from the F15 fixtures (and, later, the chess scene and the Khronos corpus);
+// `class_manifest` tool export them from the F15 fixtures (and the chess scene and the Khronos corpus);
 // tools/variant_gen reads them together with the declared list shaders/material_classes.def and writes the class
 // table, the MSL constants and the archive plan.
 //
