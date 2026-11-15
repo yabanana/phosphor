@@ -109,6 +109,20 @@ section "Defects found during F15"; integrated by fast-forward to 6b6bf04; orche
   +0.009. Sponza uses no F15 feature, so the cost is paid by scenes that do not need it. Leading hypothesis to test with a measured spike: the
   shared RtPayload grew from 16 to ~124 bytes in c59c5af (ticket 14 transmittance list, counters, direction), so every RT query pays it; the RGB
   sun mask (same commit) for the temporal moments pass.
+  2026-11-15 record (spike in `docs/opt-log.md`, entry "F15 ticket 24: Sponza D2 regression ... attribution and fix"; commit ec63efc; the formal
+  quiet-machine A/B/A band is the orchestrator's, NOT claimed here; the sky sentinel read 0.81-0.82 in every run of this session, 75924b2 included):
+  attributed and fixed by measurement with negative controls: RTAO +0.45 = the 124-byte RtPayload alone (lite kernel 1.047-1.058 vs 75924b2 1.046-1.058; the
+  same lite kernel with the payload padded back to 124 bytes 1.494), Solar RT visibility +0.06 = the same payload (0.429-0.433 vs 0.432-0.435), froxel RT source
+  +0.011 = the same payload (0.118), Solar temporal moments +0.065 = the 80-byte RGB history record (scalar 64-byte kernel 0.390 vs 0.389-0.390; shipped 0.454-0.457).
+  Scenes without MATERIAL_FEATURE_TRANSMISSION use `ao_rtao` / `fog_inject_rt` (always) and `shadow_sun_rt_lite` / `shadow_temporal_scalar`; glass scenes keep the
+  ticket-14/15 kernels (transmissive-shadow keys: 8/8 GREEN, every negative control fails; F13 exactness 5 cases 0 px and PFM bit-identical; visual_check 0 px;
+  archive +4 compute descriptors, archive_check pass, 0 misses and 0 GPU allocations on D2; ctest 31 + 1 skipped, 926 doctest cases; API + shader validation
+  clean on pane-sun@rt, pane-sun@csm and D2 with only the notices 1d64ba5 prints too).  Frame p50 after the fix +0.04..+0.11 ms against 75924b2 (before: +0.63..+0.75).
+  STILL OPEN and NOT attributed: `F13 reflection sample 0` (p95 +0.14..+0.17 ms, p50 +0.02..+0.06 within a +-0.1 run-to-run spread on this machine; a lite-payload
+  variant of `reflection_rt` and a `kReflectionBackfaceSkips`=0 variant did not separate from the noise) and three small passes whose p95 (not p50) is +0.04 (positive RAW
+  pre-reflection lighting, DDGI indirect irradiance, denoise 3 atrous 1).  Whether the median p95 delta now meets 0.10 ms needs the orchestrator's quiet-machine A/B/A.
+  Carried: the archive keeps the earlier `ao_rtao` / `fog_inject_rt` entries linking `rt_alpha_generic` (unrequested); lobe kernels (scenes with any feature, no glass) still trace
+  with the full payload.
 - Declared (owner noted, no objection): single-sided planes cast sun shadows from both sides in CSM (two-sided by contract) and RT.
 - CLOSED, not a defect (eac5233, ticket 13 "C22-D3 follow-up"): the 67 IORTestGrid "dark ring" pixels are a metric artefact. With
   reflections off a white transmissive sphere reads albedo 1 x environment 0.5 = the clear colour, so the ring set of the off image

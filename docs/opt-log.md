@@ -2356,3 +2356,47 @@ is within 0.05 ms.  The sky sentinel read 0.81 ms in this window (clean 0.674-0.
 weight recomputed in both passes and the per-tap specular metadata loads is about 9x the shipped tiled filter.  **Verdict: rejected for cost; owner option B**
 (the shipped filter stays the default, the residue is declared with its bound in docs/implementation/F13-F14-CLOSURE-2026-11-12.md).  The flag, the kernels
 (not archived) and the CPU reference stay as an opt-in experiment; option A remains an open candidate that needs a cost-bounded implementation first.
+
+## 2026-11-15 — F15 ticket 24: Sponza D2 regression against 75924b2, attribution and fix (RT payload, RGB shadow history)
+
+**Problem (orchestrator, quiet machine, `build/d2-ab-f15-closure`):** D2 GPU p50 +0.64..+0.73 ms, p95 +0.83..+1.08 ms against the 0.10 ms band; per pass (p50) `F13 world-radius RTAO` +0.459
+(kernel unchanged since 75924b2), `Solar RT visibility` +0.066, `Solar temporal moments` +0.065, `F13 reflection sample 0` +0.064, froxel RT source +0.012, Material resolve +0.009.
+Sponza uses no F15 material feature.  Reproduced here on 1d64ba5 (same D2 command, `--gpu-timing-serial`, per-pass p50 from one run is stable to +-0.003 ms except the reflection pass, see below):
+RTAO 1.058 (75924b2) -> 1.49-1.53, Solar RT visibility 0.441 -> 0.50, Solar temporal moments 0.391 -> 0.455, froxel 0.118 -> 0.129.
+
+**Hypotheses, controls and results** (variant builds in one worktree, interleaved runs, 0 GPU allocations in every run):
+1. *RTAO: the 124-byte `RtPayload` of c59c5af (ticket 14), not the intersection-function code.*  Variant A: `ao_rtao` traces with a 16-byte `RtPayloadLite` and links `rt_alpha_lite` (same alpha test):
+   RTAO **1.054 / 1.048 / 1.047 / 1.058** (75924b2: 1.058, 1.053; 1.046).  Negative control B: the same lite kernel and the same lite alpha function with the payload struct padded back to
+   124 bytes (`uint spikePad[27]`): RTAO **1.494** (= the regressed 1.49-1.50), so the payload size alone is the cost, 0.43 ms for 2 M pixels x 64 samples.  Current code stayed at 1.50-1.51 in every window.
+2. *Solar RT visibility: the same payload.*  `shadow_sun_rt_lite` (RtPayloadLite, no spike counters): 0.428-0.444 (75924b2 0.435-0.442; regressed 0.502-0.504).  Froxel RT source (`fog_inject_rt`, a plain shadow ray: it never
+   needs a transmittance): 0.117-0.119 (75924b2 0.117-0.118; regressed 0.129-0.130).
+3. *Solar temporal moments: the 80-byte `GPUShadowHistory` (the RGB transmittance record of ticket 14: 64 -> 80 bytes per pixel, read once and written once, and no longer a divisor of the cache line).*
+   `shadow_temporal_scalar` with the 64-byte `GPUShadowHistoryScalar` prefix in the same buffers: **0.390 / 0.391 / 0.390 / 0.389** (75924b2 0.389-0.391; regressed 0.454-0.457).  The negative control is the shipped kernel
+   (80 bytes) in the same windows: 0.454-0.457.
+4. *`F13 reflection sample 0`: NOT attributed.*  Its p50 is noisy on this machine (75924b2 2.676-2.814 in nine runs, 1d64ba5 2.71-2.83, median +0.05) and its p95 is +0.14..+0.17 ms.  Variant: the base
+   `reflection_rt` traces and shades with `RtPayloadLite` (template `reflectionTraceVisible` / `reflectionSecondary` / `diEndpointTransmittance`, linked `rt_alpha_lite`): p50 median 2.762 vs 2.784 (shipped) vs 2.732 (75924b2),
+   p95 3.783 vs 3.865 (shipped) vs 3.640 (75924b2): within the run-to-run spread, not adopted (code reverted).  Variant on top of it: `kReflectionBackfaceSkips` 4 -> 0 (the 26fe229 back-face continuation loop): p50 2.669 / 2.717 against 2.705 / 2.877 for the same build with 4 and 2.758 / 2.808 for 75924b2 (a third window was contended by another job, all variants +1.8 ms, discarded);
+   the spread of one variant between two runs (0.17) is larger than any difference, so neither the payload nor the loop is shown to be the cause (code reverted).
+   Other candidates left untested: bf0799f environment term, BSDF module (tickets 01/03/08), ticket 13 transport.
+
+**Fix** (commit ec63efc): scenes without `MATERIAL_FEATURE_TRANSMISSION` in the feature union are served the cheap kernels (`ao_rtao` and `fog_inject_rt` always: no transmittance exists for their rays;
+`shadow_sun_rt_lite`, `shadow_temporal_scalar`); scenes with glass keep the ticket-14/15 kernels (unchanged names, descriptors and archive entries), requested on first use (`TransmissionPipelines`, fallback = the cheap kernel
+while the glass kernel is not available, counted as a fallback use, never in a scene without glass); a history layout change restarts the history.  The scalar kernel is exact for the grey masks of a scene without glass (same recurrence,
+bit for bit): F13 exactness captures on 94da95c, 5 cases, PNG 0 px and PFM bit-identical; `visual_check` (8 benches, API + shader validation) 0 px.
+
+**Verification:** per-pass p50 table below; ctest 31 passed + 1 skipped (`terrain_materials_verify`, no data) and 926 doctest cases (the ticket-24 layout test included); `metal_syntax_check` does not exist in this macOS build; the 8 transmissive-shadow keys (tickets 14 and 15, `--shadows rt` and `csm`, point ReSTIR, curved report) GREEN with every negative control failing;
+archive: +4 compute descriptors (916 compute / 143 mesh / 288 render / 35 tile), `archive_check` all scenarios pass, D2: 0 archive misses and 0 render-thread compiles; API + shader validation: exit 0 on pane-sun@rt, pane-sun@csm and a 24-frame Sponza D2,
+the only messages are the 24 "Redundant call to setViewport/setDepthStencilState" notices per 24 frames that 1d64ba5 prints identically.
+
+| pass (p50, ms) | 75924b2 (2 runs) | 1d64ba5 (2 runs) | fix (2 runs) |
+|---|---|---|---|
+| F13 world-radius RTAO | 1.048 / 1.046 | 1.504 / 1.507 | 1.047 / 1.048 |
+| Solar RT visibility | 0.435 / 0.432 | 0.502 / 0.504 | 0.429 / 0.433 |
+| Solar temporal moments | 0.390 / 0.389 | 0.457 / 0.454 | 0.391 / 0.390 |
+| Froxel source with independent RT visibility | 0.118 / 0.117 | 0.129 / 0.130 | 0.118 / 0.118 |
+| F13 reflection sample 0 | 2.701 / 2.676 | 2.721 / 2.825 | 2.747 / 2.739 |
+| Material resolve | 0.306 / 0.305 | 0.315 / 0.315 | 0.314 / 0.316 |
+| GPU p50 / p95 of the frame | 14.48 / 15.46, 14.39 / 15.49 | 15.11 / 16.51, 15.14 / 16.25 | 14.53 / 15.66, 14.50 / 15.69 |
+
+Sky sentinel (`Physical sky and aerial perspective` p95) read 0.81-0.82 in EVERY run of this session, the 75924b2 ones included (clean: 0.674-0.677): the machine was not quiet, so these are indicative; the band measurement is the orchestrator's.
+Remaining after the fix: frame p50 +0.04..+0.11 ms, p95 +0.17..+0.20 ms against 75924b2, per pass dominated by `F13 reflection sample 0` (p95 +0.15) and +0.04 each on three small passes whose p50 did not move.
