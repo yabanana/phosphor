@@ -16,11 +16,11 @@ Rig constants: 1024x768 (1600x640 for IridescenceSuzanne), 48 warm-up + 48 measu
 - **Anisotropy in the environment.** The Sample Renderer fetches the image-based light along a bent normal; Phosphor's declared environment model is a split sum at an effective roughness, which is invisible in a constant environment (ticket 11). Anisotropic stretching of environment reflections, which the Khronos AnisotropyRotationTest README says needs image-based lighting, cannot appear here.
 - **Sheen table.** Phosphor generates its own Charlie E(mu, roughness) table (tools/sheen_table.py); the Sample Renderer ships a pre-baked LUT image. Both clamp at the table edge.
 - **Lighting and tonemap.** Image-based lighting, the HDR environment itself, its orientation, the clear colour / skybox and the tonemap are different in every Khronos image; see DISCLAIMER.
-- **Unsupported by design.** KHR_materials_unlit and KHR_lights_punctual are reported unsupported (decision 02): a model that requires them is refused, a model that merely uses unlit materials renders them lit.
+- **Unlit and punctual lights (updated in the F15 closure).** KHR_materials_unlit is rendered (lowered onto emission: the base colour is displayed as is, nothing reflects light; the vertex colour factor is not applied, the engine has no COLOR_0 stream) and KHR_lights_punctual is imported by the loader, but NOT under the declared rig: the rig's sun is the only light, so a model's own lights, intensities and cones do not show in these captures.
 
 ## Run summary
 
-- Models: 21 rendered, 3 refused with a stated loader reason, 0 failed unexpectedly.
+- Models: 21 rendered, 3 refused with a stated loader reason, 0 failed unexpectedly (state of 2026-11-14; since the F15 closure DiffuseTransmissionTest renders as well: 22 rendered, 2 refused).
 - Archive: 0 archive misses and 0 fallback draws over the whole final run (before the targeted update 110 misses over 10 models).
 - O7: 0 GPU allocations in the measured frames, summed over the rendered models (warm-up 48 frames, measured 48).
 - Validation (API + shader, `MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1`, archive off): 21 of 21 rendered models clean (exit 0, EXIT marker 0, no validation failure, no unclassified line); the only messages are the known baseline notices of the validation layer (redundant setDepthStencilState / setViewport calls, 96 of each per capture, identical on the phase-head binary per the ticket 15 record) and loader warnings.
@@ -44,7 +44,7 @@ Rig constants: 1024x768 (1600x640 for IridescenceSuzanne), 48 warm-up + 48 measu
 | IridescenceDielectricSpheres | A | - | rendered | 3 -> 0 | 0 | 0 | clean (exit 0; only the known baseline notices: 192 redundant state calls) |
 | IridescenceMetallicSpheres | A | - | rendered | 0 -> 0 | 0 | 0 | clean (exit 0; only the known baseline notices: 192 redundant state calls) |
 | IridescenceSuzanne | A | - | rendered | 19 -> 0 | 0 | 0 | clean (exit 0; only the known baseline notices: 192 redundant state calls) |
-| DiffuseTransmissionTest | A | KHR_materials_unlit, KHR_lights_punctual | REFUSED: glTF /Users/danielsan/Documents/phosphor/.claude/worktrees/f15-plan-c38b51/build/khronos-corpus/DiffuseTransmissionTest/glTF/DiffuseTransmissionTest.gltf requires extension(s) that cannot be honoured: KHR_materials_unlit (not understood by this loader), KHR_lights_punctual (not understood by this loader); refusing to load | 0 -> 0 | 0 | - | refused before rendering (loader reason in the table) |
+| DiffuseTransmissionTest | A | KHR_materials_unlit, KHR_lights_punctual | rendered (F15 closure; refused before) | 19 -> 0 | 0 | 0 | clean (exit 0; API + shader validation: 0 messages, 0 known notices since the render-state tracker removed the redundant depth/viewport calls) |
 | EmissiveStrengthTest | A | - | rendered | 0 -> 0 | 0 | 0 | clean (exit 0; only the known baseline notices: 192 redundant state calls) |
 | TextureTransformTest | A | - | rendered | 0 -> 0 | 0 | 0 | clean (exit 0; only the known baseline notices: 192 redundant state calls) |
 | TextureTransformMultiTest | A | KHR_texture_transform | REFUSED: glTF /Users/danielsan/Documents/phosphor/.claude/worktrees/f15-plan-c38b51/build/khronos-corpus/TextureTransformMultiTest/glTF/TextureTransformMultiTest.gltf requires extension(s) that cannot be honoured: KHR_texture_transform (material 1 ('BaseColorTest1Mat') has a non-uniform transform); refusing to load | 0 -> 0 | 0 | - | refused before rendering (loader reason in the table) |
@@ -329,11 +329,25 @@ Named approximations:
 
 ### DiffuseTransmissionTest
 
-Shows: diffuse transmission; REQUIRES KHR_materials_unlit and KHR_lights_punctual.
+Shows: diffuse transmission (factor, colour, textures) next to KHR_materials_unlit label panels; REQUIRES KHR_materials_unlit and KHR_lights_punctual (rendered since the F15 closure: unlit lowered onto emission, the file's directional light is replaced by the declared rig sun).
+
+Renders:
+
+- All four diffuse-transmission sweeps render as laid out by the model: the factor row turns from the opaque teal base at 0 to the transmitted white at 1, the colour-factor row shifts to red, the stripe texture and the glTF logo colour texture modulate the transmitted lobe, and the purple bars behind the panels show through the lit panels.
+- The KHR_materials_unlit label panels (text textures with alpha, base colour and colour-texture panels) display their texture as is (numeric fixture `tools/f15_unlit_lights_check.py`: centre value = base colour with error 0.00000, the lit twin of the file fails the same predicate).
+- Under API + shader validation the capture is clean (0 messages, 0 notices).
+
+Approximations (named):
+
+- KHR_lights_punctual: the file's directional light (intensity 1) is NOT imported under the declared rig (every model is lit by the same 3 W/m2 sun and the 0.5 environment), so the brightness differs from the Khronos image.
+- The `textbehind` material is alphaMode BLEND: the engine renders it opaque until F16 (loader warning).
+- The vertex colour factor of KHR_materials_unlit is not applied (no COLOR_0 stream; the model has none).
 
 Defects:
 
-- **C22-R1** [by-design] Refused: the model REQUIRES KHR_materials_unlit and KHR_lights_punctual. Root-cause hypothesis: Decision 02: both extensions are reported unsupported, so the loader refuses the asset (glTF 3.2) instead of rendering it wrongly. The thin diffuse transmission lobe itself is covered by the independent reference (ticket 16), not by this model.
+- **C22-R1** [fixed] Was refused: the model REQUIRES KHR_materials_unlit and KHR_lights_punctual. Fixed in the F15 closure (loader-misc): unlit is lowered onto the emission path and the loader imports punctual lights (a declared rig keeps its sun). The thin diffuse transmission lobe is covered by the independent reference (ticket 16).
+
+Archive: 19 misses before the targeted update (15 pipelines: the unlit + thin-subsurface feature union had never been harvested because the model was refused), 0 after (`.scratch/f15/harvest/loader-misc-2.json`).
 
 ### EmissiveStrengthTest
 
@@ -449,7 +463,7 @@ Renders correctly:
 | C22-D4 | TransmissionRoughnessTest | fixed | Near-black grainy squares where a glass tile overlaps the opaque label planes (rows 2 to 5 of the smooth column); the Khronos image shows the label through the glass. |
 | C22-D7 | IORTestGrid | named-approximation | White transmissive spheres at IOR >= 1.76 are visibly grainy in the single settled frame; the Khronos image is smooth. |
 | C22-A1 | IridescenceMetallicSpheres | named-approximation | Dense metal lattices show black holes inside each sphere: a sphere sees its neighbours as dark. |
-| C22-R1 | DiffuseTransmissionTest | by-design | Refused: the model REQUIRES KHR_materials_unlit and KHR_lights_punctual. |
+| C22-R1 | DiffuseTransmissionTest | fixed | Was refused (REQUIRES KHR_materials_unlit and KHR_lights_punctual); both are rendered since the F15 closure. |
 | C22-R2 | TextureTransformMultiTest | open | Refused: material 'BaseColorTest1Mat' has a non-uniform KHR_texture_transform (a transform on one texture slot only). |
 | C22-R2b | GlamVelvetSofa | open | Refused: material 'GlamVelvetSofa_fabric_champagne' has a non-uniform KHR_texture_transform (scale 5x5 on the normal texture only). |
 

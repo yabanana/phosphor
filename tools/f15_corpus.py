@@ -63,7 +63,7 @@ MODELS = {
     "IridescenceDielectricSpheres": {"tier": "A", "view": (30, 20), "shows": "iridescence over dielectrics, thickness and film IOR sweep"},
     "IridescenceMetallicSpheres": {"tier": "A", "view": (30, 20), "shows": "iridescence over metals, thickness and film IOR sweep"},
     "IridescenceSuzanne": {"tier": "A", "view": (0, 0), "resolution": "1600x640", "shows": "iridescence + transmission + volume + IOR on one material; KHR_lights_punctual used"},
-    "DiffuseTransmissionTest": {"tier": "A", "view": (0, 0), "shows": "diffuse transmission; REQUIRES KHR_materials_unlit and KHR_lights_punctual"},
+    "DiffuseTransmissionTest": {"tier": "A", "view": (0, 0), "shows": "diffuse transmission (factor, colour, textures) next to KHR_materials_unlit label panels; REQUIRES KHR_materials_unlit and KHR_lights_punctual (rendered since the F15 closure: unlit lowered onto emission, the file's directional light is replaced by the declared rig sun)"},
     "EmissiveStrengthTest": {"tier": "A", "view": (0, 0), "shows": "emissiveStrength above 1"},
     "TextureTransformTest": {"tier": "A", "view": (0, 0), "shows": "KHR_texture_transform offset / rotation / scale on the base colour"},
     "TextureTransformMultiTest": {"tier": "A", "view": (0, 0), "shows": "transform on several textures incl. texCoord override, clearcoat and unlit; README: rows of identical checkmarks"},

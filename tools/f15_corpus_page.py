@@ -46,8 +46,9 @@ DEVIATIONS = [
     ("Sheen table", "Phosphor generates its own Charlie E(mu, roughness) table (tools/sheen_table.py); the Sample Renderer ships a pre-baked LUT image. Both clamp at the table edge."),
     ("Lighting and tonemap", "Image-based lighting, the HDR environment itself, its orientation, the clear colour / skybox and the tonemap are different in every Khronos image; "
                              "see DISCLAIMER."),
-    ("Unsupported by design", "KHR_materials_unlit and KHR_lights_punctual are reported unsupported (decision 02): a model that requires them is refused, a model that merely uses "
-                              "unlit materials renders them lit."),
+    ("Unlit and punctual lights", "KHR_materials_unlit is rendered (F15 closure): the surface shows its base colour as emission, nothing reflects light, the vertex colour factor is not "
+                                 "applied (the engine has no COLOR_0 stream, for lit materials either).  KHR_lights_punctual in a file is NOT imported under the declared rig (every model "
+                                 "is lit by the same sun, so side by sides stay comparable): a model's own lights, intensities and cones do not show in these captures."),
 ]
 
 

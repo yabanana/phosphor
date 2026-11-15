@@ -185,14 +185,22 @@
     "defects": []
   },
   "DiffuseTransmissionTest": {
-    "renders": [],
-    "approximations": [],
+    "renders": [
+      "All four diffuse-transmission sweeps render as laid out by the model: the factor row turns from the opaque teal base at 0 to the transmitted white at 1, the colour-factor row shifts to red, the stripe texture and the glTF logo colour texture modulate the transmitted lobe, and the purple bars behind the panels show through the lit panels.",
+      "The KHR_materials_unlit label panels (text textures with alpha, base colour and colour-texture panels) display their texture as is: lowered onto emission, no light reaches them (numeric fixture tools/f15_unlit_lights_check.py: centre value = base colour with error 0.00000, the lit twin fails).",
+      "Under API + shader validation the capture is clean (0 messages, 0 notices); the required KHR_materials_unlit and KHR_lights_punctual no longer refuse the asset."
+    ],
+    "approximations": [
+      "KHR_lights_punctual: the file's directional light (intensity 1) is NOT imported under the declared rig (every model of the corpus is lit by the same 3 W/m2 sun and the 0.5 environment), so the brightness differs from the Khronos image; without the rig the loader does import it (tests/test_gltf_unlit_lights.cpp, tools/f15_unlit_lights_check.py).",
+      "The 'textbehind' material is alphaMode BLEND: the engine renders it opaque until F16 (loader warning).",
+      "The vertex colour factor of KHR_materials_unlit is not applied (the engine has no COLOR_0 stream; the model has none)."
+    ],
     "defects": [
       {
         "id": "C22-R1",
-        "status": "by-design",
-        "summary": "Refused: the model REQUIRES KHR_materials_unlit and KHR_lights_punctual.",
-        "hypothesis": "Decision 02: both extensions are reported unsupported, so the loader refuses the asset (glTF 3.2) instead of rendering it wrongly. The thin diffuse transmission lobe itself is covered by the independent reference (ticket 16), not by this model."
+        "status": "fixed",
+        "summary": "Was refused: the model REQUIRES KHR_materials_unlit and KHR_lights_punctual.",
+        "hypothesis": "Fixed in the F15 closure (loader-misc, e8b6399): KHR_materials_unlit is lowered onto the emission path and KHR_lights_punctual is imported by the loader (a declared rig keeps its sun and skips the file's lights). The thin diffuse transmission lobe is covered by the independent reference (ticket 16)."
       }
     ]
   },
