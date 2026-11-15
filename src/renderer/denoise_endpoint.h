@@ -34,6 +34,10 @@ PHOSPHOR_GPU_CONSTANT int kDenoiseEndpointRadius = 4;
 /// CURRENT frame (the largest endpoint distance to a same-key 4-neighbour: how far one pixel moves the endpoint).
 PHOSPHOR_GPU_CONSTANT float kDenoiseEndpointAccept = 1.5f;
 
+/// Blend floor of an endpoint-matched ROUGH interface, in units of 1 / maxHistory (a smooth one blends at 1 / maxHistory, see denoise_temporal_lobe): the
+/// soft-change test stays for rough pixels, whose blurred radiance of a moving emitter changes without the endpoint moving.
+PHOSPHOR_GPU_CONSTANT float kDenoiseEndpointRoughFloor = 2.0f;
+
 /// Key of the first non-glass hit of slot `slot`; 0 is reserved for the environment.
 inline u32 denoiseEndpointKeyOfSlot(u32 slot) { return slot + 1u; }
 

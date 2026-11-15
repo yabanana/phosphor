@@ -35,7 +35,7 @@ struct DenoisePasses::Impl {
     struct Age {u64 frame=~u64{0};u32 frames=0;}; // frames accumulated since the last reset, including that frame
     std::array<std::array<Age,Signals>,Views> ages{};
     struct Content {u64 scene=0,external=0,revision=0;bool operator==(const Content&)const=default;};
-    struct History {MTL::Buffer* pair[2]{};u64 capacity=0,contentEpoch=0;u32 lastWritten=0;Content content{};bool contentKnown=false;};
+    struct History {MTL::Buffer* pair[2]{};u64 capacity=0,contentEpoch=0;u32 lastWritten=0;Content content{};bool contentKnown=false;bool endpoint=false;};
     std::array<std::array<History,Signals>,Views> histories{};
     struct SlotSignal {
         std::array<MTL4::ArgumentTable*,2*MaxAtrous+5> tables{}; // [MaxAtrous+5+i]: the energy experiment's weight-sum pass of iteration i
@@ -105,8 +105,11 @@ struct DenoisePasses::Impl {
         for(auto* table:diffuseTables)if(table)table->release();}
     void invalidate(const char* reason){for(auto& r:registries)for(u32 v=0;v<Views;++v)r.invalidate(v,reason);}
     void reserve(u32 sig){auto& h=histories.at(frame.view).at(sig);const u64 count=u64(frame.backingWidth)*frame.backingHeight;
-        if(count<=h.capacity)return;for(auto* b:h.pair)c.memory().release(b,MemoryCategory::RayTracing);
-        h.capacity=count;h.lastWritten=0;for(auto*& b:h.pair)b=lighting::buffer(c,denoiseHistoryBytes(count,sig==DENOISE_SIGNAL_SPECULAR),"F13 view signal history");
+        // F15.1 ticket 13: the specular history carries the endpoint extension only while the scene's feature union has transmission (lobe kernels wanted);
+        // a change of that union reallocates like a growth.  Every other history and every featureless scene keeps the base size.
+        const bool endpoint=sig==DENOISE_SIGNAL_SPECULAR&&lobeWanted&&(lobeMask&MATERIAL_FEATURE_TRANSMISSION)!=0u;
+        if(count<=h.capacity&&endpoint==h.endpoint)return;h.endpoint=endpoint;for(auto* b:h.pair)c.memory().release(b,MemoryCategory::RayTracing);
+        h.capacity=std::max<u64>(count,h.capacity);h.lastWritten=0;for(auto*& b:h.pair)b=lighting::buffer(c,denoiseHistoryBytes(std::max<u64>(count,h.capacity),sig==DENOISE_SIGNAL_SPECULAR,endpoint),"F13 view signal history");
         registries[sig].invalidate(frame.view,"denoise allocation growth");++graphVersion;
     }
     // Chooses the specular kernel set of this frame (all lobe variants, or all base kernels).
@@ -177,8 +180,8 @@ struct DenoisePasses::Impl {
         // Both imports stay persistent even though pair sides are rebound.
         // The temporal pass reads AND writes them at Dispatch; the graph emits
         // its cross-frame queue barrier before either physical side is used.
-        s.previous=g.importBuffer(label+" previous history",{denoiseHistoryBytes(h.capacity,sig==DENOISE_SIGNAL_SPECULAR)},ImportContentsDefined);
-        s.next=g.importBuffer(label+" next history",{denoiseHistoryBytes(h.capacity,sig==DENOISE_SIGNAL_SPECULAR)},ImportOutput);
+        s.previous=g.importBuffer(label+" previous history",{denoiseHistoryBytes(h.capacity,sig==DENOISE_SIGNAL_SPECULAR,h.endpoint)},ImportContentsDefined);
+        s.next=g.importBuffer(label+" next history",{denoiseHistoryBytes(h.capacity,sig==DENOISE_SIGNAL_SPECULAR,h.endpoint)},ImportOutput);
         if(options.debugHistoryCorrupt)g.addPass(label+" negative view",PassType::Compute,[this,sig](PassBuilder& b){
             auto& s=signal[sig];b.read(s.previous,Usage::ShaderRead,StageDispatch);s.previous=b.write(s.previous,Usage::ShaderWrite,StageDispatch);
         },[this,sig](PassContext& ctx){auto& s=signal[sig];auto& h=histories[frame.view][sig];auto* t=slots[frame.slot][sig].tables[MaxAtrous+3];
@@ -197,6 +200,7 @@ struct DenoisePasses::Impl {
             for(const auto& [side,header,records,extension]:{std::array<u32,4>{s.readSide,5,2,7},std::array<u32,4>{s.writeSide,6,4,8}}){const auto base=h.pair[side]->gpuAddress();
                 t->setAddress(base,header);t->setAddress(base+denoiseHistoryRecordsOffset(),records);t->setAddress(specularSignal?base+denoiseHistorySpecularOffset(h.capacity):base,extension);}
             if(s.lobeGuide.valid())t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(s.lobeGuide))->gpuAddress(),9);
+            for(const auto& [side,index]:{std::array<u32,2>{s.readSide,10},std::array<u32,2>{s.writeSide,11}}){const auto base=h.pair[side]->gpuAddress();t->setAddress(specularSignal&&h.endpoint?base+denoiseHistoryEndpointOffset(h.capacity):base,index);}
             texture(t,ctx,s.raw,0);texture(t,ctx,s.motion,1);texture(t,ctx,s.temporalOutput,2);texture(t,ctx,s.moments,3);
             lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,temporalKernel(sig),t,frame.width*frame.height);
             // Encoding is not GPU completion. Persistent imports/order preserve

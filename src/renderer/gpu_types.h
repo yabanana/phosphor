@@ -1216,9 +1216,15 @@ struct GPUDenoiseHistoryRecord {
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseHistoryRecord) == 64, "GPUDenoiseHistoryRecord layout");
 struct GPUDenoiseSpecularHistory {
     float roughness, hitDistance; u32 secondarySlot, secondaryGeneration;
-    float endpoint[3]; u32 endpointKey; // F15.1 ticket 13: refracted-path endpoint of a transmissive pixel; endpointKey = key + 1, 0 = none
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseSpecularHistory) == 32, "GPUDenoiseSpecularHistory layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseSpecularHistory) == 16, "GPUDenoiseSpecularHistory layout");
+// F15.1 ticket 13: the refracted-path endpoint of a transmissive pixel, a SECOND extension that follows the specular one in the history buffer
+// only when the scene's feature union contains transmission (denoiseHistoryBytes(count, specular, endpoint)); read and written by the transmission
+// lobe kernels only, so the base record and the base kernels stay as they were.  endpointKey = key + 1, 0 = none.
+struct GPUDenoiseEndpointHistory {
+    float endpoint[3]; u32 endpointKey;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseEndpointHistory) == 16, "GPUDenoiseEndpointHistory layout");
 
 // F14: ALL positions/radii/heights/distances are WORLD METRES; extinction and
 // scattering coefficients are m^-1. RGB radiance and irradiance remain linear

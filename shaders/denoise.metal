@@ -14,10 +14,13 @@
 #define DN_KERNEL(name) name##_lobe
 #define DN_FN(name) name##_lobe // helpers whose body differs between the two modes: distinct symbols (no ODR merge)
 #define DN_GUIDE_PARAM(index) , const device GPULobeGuide* guides [[buffer(index)]]
+// F15.1 ticket 13: the endpoint history extension (previous 10, next 11); allocated only when the feature union has transmission, touched only then
+#define DN_ENDPOINT_PARAM ,const device GPUDenoiseEndpointHistory* previousEndpoint [[buffer(10)]],device GPUDenoiseEndpointHistory* nextEndpoint [[buffer(11)]]
 #else
 #define DN_KERNEL(name) name
 #define DN_FN(name) name
 #define DN_GUIDE_PARAM(index)
+#define DN_ENDPOINT_PARAM
 #endif
 
 constant uint FC_DENOISE_SIGNAL [[function_constant(40)]];
@@ -85,7 +88,7 @@ inline bool denoiseSampleHasEndpoint(GPUSpecularSample s){return (s.flags&SPECUL
     isfinite(s.direction[0])&&isfinite(s.direction[1])&&isfinite(s.direction[2]);}
 // The previous-frame pixel (index `found`) whose endpoint is nearest the current one in the (2R+1)^2 window around the surface reprojection `c`,
 // accepted when within kDenoiseEndpointAccept of the footprint of the current endpoint field (the largest distance to a same-key 4-neighbour).
-inline bool denoiseEndpointFind(constant GPUDenoiseParams& p,const device GPUSpecularSample* specular,const device GPUDenoiseSpecularHistory* previousSpecular,
+inline bool denoiseEndpointFind(constant GPUDenoiseParams& p,const device GPUSpecularSample* specular,const device GPUDenoiseEndpointHistory* previousEndpoint,
     uint2 pixel,int2 c,GPUSpecularSample spec,thread uint& found){
     if(!denoiseSampleHasEndpoint(spec))return false;
     const uint key=denoiseEndpointKeyDecode(spec.proposalSolidAngle);const float3 e(spec.direction[0],spec.direction[1],spec.direction[2]);
@@ -97,7 +100,7 @@ inline bool denoiseEndpointFind(constant GPUDenoiseParams& p,const device GPUSpe
     const uint want=denoiseEndpointHistoryKey(key);float best=INFINITY;bool have=false;
     for(int dy=-kDenoiseEndpointRadius;dy<=kDenoiseEndpointRadius;++dy)for(int dx=-kDenoiseEndpointRadius;dx<=kDenoiseEndpointRadius;++dx){
         const int2 q=c+int2(dx,dy);if(any(q<0)||any(q>=size))continue;const uint index=uint(q.y)*p.width+uint(q.x);
-        const GPUDenoiseSpecularHistory h=previousSpecular[index];if(h.endpointKey!=want)continue;
+        const GPUDenoiseEndpointHistory h=previousEndpoint[index];if(h.endpointKey!=want)continue;
         const float d=denoiseEndpointDistance(e.x,e.y,e.z,h.endpoint[0],h.endpoint[1],h.endpoint[2]);if(d<best){best=d;found=index;have=true;}}
     return have&&denoiseEndpointAccept(best,footprint);
 }
@@ -151,7 +154,7 @@ inline bool denoiseNeighbor(GPUDISurface a,GPUDISurface b,constant GPUDenoisePar
 kernel void DN_KERNEL(denoise_temporal)(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
     const device GPUDenoiseHistoryRecord* previous [[buffer(2)]],const device GPUSpecularSample* specular [[buffer(3)]],device GPUDenoiseHistoryRecord* next [[buffer(4)]],
     const device GPUDenoiseHistoryHeader* previousHeader [[buffer(5)]],device GPUDenoiseHistoryHeader* nextHeader [[buffer(6)]],
-    const device GPUDenoiseSpecularHistory* previousSpecular [[buffer(7)]],device GPUDenoiseSpecularHistory* nextSpecular [[buffer(8)]]DN_GUIDE_PARAM(9),
+    const device GPUDenoiseSpecularHistory* previousSpecular [[buffer(7)]],device GPUDenoiseSpecularHistory* nextSpecular [[buffer(8)]]DN_GUIDE_PARAM(9)DN_ENDPOINT_PARAM,
     texture2d<float,access::read> raw [[texture(0)]],texture2d<float,access::read> motion [[texture(1)]],
     texture2d<float,access::write> output [[texture(2)]],texture2d<float,access::write> moments [[texture(3)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.width*p.height)return;const uint2 pixel(tid%p.width,tid/p.width);const GPUDISurface s=surfaces[tid];
@@ -165,15 +168,15 @@ kernel void DN_KERNEL(denoise_temporal)(constant GPUDenoiseParams& p [[buffer(0)
     if(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR&&(spec.flags&SPECULAR_SAMPLE_STOCHASTIC)&&!(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS))h.flags|=DENOISE_HISTORY_STOCHASTIC;
     if(s.valid&&(!all(isfinite(current))||!all(isfinite(normal))||dot(normal,normal)<=0))h.flags=1u;
     if(s.valid&&all(isfinite(current))&&all(isfinite(normal))&&dot(normal,normal)>0){current=max(current,0.0f);if(denoiseSignal(p)==DENOISE_SIGNAL_AO)current=saturate(current);
-        DenoiseHistory old{};bool reuse=false;bool endpointHistory=false;
+        DenoiseHistory old{};bool reuse=false;bool endpointHistory=false,endpointRough=false;
         if(!(p.flags&DENOISE_RESET)){const float2 delta=motion.read(pixel).xy,center=float2(pixel)+.5f+delta;
             if(all(isfinite(delta))&&all(center>=0)&&all(center<float2(p.width,p.height))){const uint2 q=uint2(center);
 #ifdef PHOSPHOR_DENOISE_LOBE
                 // F15.1 ticket 13: a transmissive pixel matches the previous pixel by its refracted endpoint (no history when none is accepted)
                 const bool endpointMatch=kDenoiseEndpoints&&lobes&&lobe.key==(SPECULAR_LOBE_TRANSMISSION|4u)&&(spec.flags&SPECULAR_SAMPLE_ENDPOINT)!=0u;
-                uint found=q.y*p.width+q.x;const bool matched=endpointMatch?denoiseEndpointFind(p,specular,previousSpecular,pixel,int2(q),spec,found):true;
+                uint found=q.y*p.width+q.x;const bool matched=endpointMatch?denoiseEndpointFind(p,specular,previousEndpoint,pixel,int2(q),spec,found):true;
                 if(matched){old=denoiseLoad(p,previousHeader,previous,previousSpecular,found);
-                    reuse=DN_FN(denoiseCompatible)(s,old,p,spec,lobes,lobe,!endpointMatch);endpointHistory=endpointMatch&&reuse&&max(s.roughness*s.roughness,0.002f)<=phosphor::kTransmissionSmoothAlpha;} // only a SMOOTH interface (h = n) has an exact endpoint: a rough pixel keeps the soft test and the blend floor
+                    reuse=DN_FN(denoiseCompatible)(s,old,p,spec,lobes,lobe,!endpointMatch);const bool smoothInterface=max(s.roughness*s.roughness,0.002f)<=phosphor::kTransmissionSmoothAlpha;endpointHistory=endpointMatch&&reuse&&smoothInterface;endpointRough=endpointMatch&&reuse&&!smoothInterface;} // only a SMOOTH interface (h = n) has an exact endpoint: a rough pixel keeps the soft test and the blend floor
 #else
                 old=denoiseLoad(p,previousHeader,previous,previousSpecular,q.y*p.width+q.x);
                 reuse=denoiseCompatible(s,old,p,spec);
@@ -200,7 +203,8 @@ kernel void DN_KERNEL(denoise_temporal)(constant GPUDenoiseParams& p [[buffer(0)
         const bool still=(p.flags&DENOISE_STATIONARY)!=0;const uint length=still?min(reuse?old.length+spp:spp,p.maxHistory):frames;
         // F15.1 ticket 13: an endpoint-matched history is the same refracted point (no reprojection error to outrun), so it integrates over the whole
         // history cap: the floor of the blend is 1 / maxHistory instead of temporalAlpha (denoiseEndpointAlpha of the CPU mirror).
-        const float baseAlpha=endpointHistory?min(p.temporalAlpha,1.0f/float(p.maxHistory)):((p.flags&DENOISE_SOFT_CHANGE)?2*p.temporalAlpha:p.temporalAlpha);
+        const float softAlpha=(p.flags&DENOISE_SOFT_CHANGE)?2*p.temporalAlpha:p.temporalAlpha;
+        const float baseAlpha=endpointHistory?min(p.temporalAlpha,1.0f/float(p.maxHistory)):(endpointRough?min(softAlpha,kDenoiseEndpointRoughFloor/float(p.maxHistory)):softAlpha);
         const float alpha=reuse?(still?min(1.0f,float(spp)/float(length)):max(baseAlpha,1.0f/float(length))):1;
         const float ma=reuse?max(p.momentsAlpha,1.0f/float(frames)):1,L=diLuminance(current);float3 color=reuse?mix(oldColor,current,alpha):current;if(denoiseSignal(p)==DENOISE_SIGNAL_AO)color=saturate(color);
         h.length=length;h.firstMoment=reuse?mix(old.firstMoment,L,ma):L;h.secondMoment=reuse?mix(old.secondMoment,L*L,ma):L*L;
@@ -217,6 +221,9 @@ kernel void DN_KERNEL(denoise_temporal)(constant GPUDenoiseParams& p [[buffer(0)
         for(uint i=0;i<3;++i){h.color[i]=color[i];h.position[i]=s.position[i];h.normal[i]=normalize(normal)[i];}
         h.valid=all(isfinite(color))&&isfinite(h.variance);if(!h.valid)h.flags=1u;
     }
+#ifdef PHOSPHOR_DENOISE_LOBE
+    if(kDenoiseEndpoints&&denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR)nextEndpoint[tid]=denoisePackEndpoint(h);
+#endif
     next[tid]=denoisePackRecord(h);if(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR)nextSpecular[tid]=denoisePackSpecular(h);
     if(tid==0)nextHeader[0]=denoisePackHeader(h); // the same domain identity for every pixel of this dispatch
     output.write(float4(h.color[0],h.color[1],h.color[2],1),pixel);

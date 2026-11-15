@@ -59,6 +59,10 @@ inline GPUDenoiseHistoryRecord denoisePackRecord(DenoiseHistory h) {
 inline GPUDenoiseSpecularHistory denoisePackSpecular(DenoiseHistory h) {
     GPUDenoiseSpecularHistory out{};
     out.roughness = h.roughness; out.hitDistance = h.hitDistance; out.secondarySlot = h.secondarySlot; out.secondaryGeneration = h.secondaryGeneration;
+    return out;
+}
+inline GPUDenoiseEndpointHistory denoisePackEndpoint(DenoiseHistory h) {
+    GPUDenoiseEndpointHistory out{};
     for (u32 i = 0; i < 3; ++i) out.endpoint[i] = h.endpoint[i];
     out.endpointKey = h.endpointKey;
     return out;
@@ -73,16 +77,16 @@ inline DenoiseHistory denoiseUnpack(GPUDenoiseHistoryHeader header, GPUDenoiseHi
     h.signal = header.signal; h.viewID = header.viewID; h.historyEpoch = header.historyEpoch; h.signalRevision = header.signalRevision;
     h.slot = r.slot; h.instanceGeneration = r.instanceGeneration; h.materialRevision = r.materialRevision;
     h.roughness = spec.roughness; h.hitDistance = spec.hitDistance; h.secondarySlot = spec.secondarySlot; h.secondaryGeneration = spec.secondaryGeneration;
-    for (u32 i = 0; i < 3; ++i) h.endpoint[i] = spec.endpoint[i];
-    h.endpointKey = spec.endpointKey;
     return h;
 }
 #ifndef __METAL_VERSION__
 // Byte offsets inside one history buffer of `capacity` pixels.
 inline u64 denoiseHistoryRecordsOffset() { return sizeof(GPUDenoiseHistoryHeader); }
 inline u64 denoiseHistorySpecularOffset(u64 capacity) { return denoiseHistoryRecordsOffset() + capacity * sizeof(GPUDenoiseHistoryRecord); }
-inline u64 denoiseHistoryBytes(u64 capacity, bool specular) {
-    return denoiseHistorySpecularOffset(capacity) + (specular ? capacity * sizeof(GPUDenoiseSpecularHistory) : 0);
+// The endpoint extension (F15.1 ticket 13) follows the specular one; only a specular history of a scene whose feature union has transmission has it.
+inline u64 denoiseHistoryEndpointOffset(u64 capacity) { return denoiseHistorySpecularOffset(capacity) + capacity * sizeof(GPUDenoiseSpecularHistory); }
+inline u64 denoiseHistoryBytes(u64 capacity, bool specular, bool endpoint = false) {
+    return denoiseHistorySpecularOffset(capacity) + (specular ? capacity * sizeof(GPUDenoiseSpecularHistory) : 0) + (specular && endpoint ? capacity * sizeof(GPUDenoiseEndpointHistory) : 0);
 }
 #endif
 } // namespace phosphor

@@ -52,12 +52,13 @@ struct DenoiseLobePixel { u32 sampleFlags=0; DenoiseLobeGuide guide{}; };
 [[nodiscard]] float denoiseEndpointFootprint(const GPUSpecularSample& center,const GPUSpecularSample* neighbours,u32 count);
 // The index of the candidate (a history specular extension per window pixel, scan order) whose endpoint is nearest the sample's and is accepted
 // by the footprint rule, or -1.  Ties go to the lowest index (the shader scans the window in the same order).
-[[nodiscard]] int denoiseEndpointSelect(const GPUSpecularSample& center,float footprint,const GPUDenoiseSpecularHistory* candidates,u32 count);
+[[nodiscard]] int denoiseEndpointSelect(const GPUSpecularSample& center,float footprint,const GPUDenoiseEndpointHistory* candidates,u32 count);
 // neighborhoodMean/Sigma: the current 3x3 raw statistics, used by DENOISE_SOFT_CHANGE.
 [[nodiscard]] DenoiseHistory denoiseTemporal(const GPUDISurface&,glm::vec3 current,const DenoiseHistory&,
     const GPUDenoiseParams&,glm::vec3 neighborhoodLow,glm::vec3 neighborhoodHigh,const GPUSpecularSample& specular={},float neighborhoodVariance=-1,
     glm::vec3 neighborhoodMean=glm::vec3(0),glm::vec3 neighborhoodSigma=glm::vec3(-1),const DenoiseLobeGuide* lobe=nullptr,
-    bool endpointMatched=false); // F15.1 ticket 13: the history was matched by the endpoint of a SMOOTH interface: no soft test, the blend floor is 1 / maxHistory
+    bool endpointMatched=false,bool endpointRough=false); // endpointRough: matched by the endpoint of a ROUGH interface: soft test kept, blend floor kDenoiseEndpointRoughFloor / maxHistory.
+    // F15.1 ticket 13: the history was matched by the endpoint of a SMOOTH interface: no soft test, the blend floor is 1 / maxHistory
 [[nodiscard]] float denoiseSpatialWeight(const GPUDISurface&,const GPUDISurface&,float centerLuminance,float neighborLuminance,
     float variance,const GPUDenoiseParams&,const DenoiseLobePixel* lobeA=nullptr,const DenoiseLobePixel* lobeB=nullptr);
 } // namespace phosphor
