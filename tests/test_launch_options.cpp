@@ -1286,6 +1286,10 @@ TEST_CASE("F13/F14 budget defaults are the measured ones") {
     CHECK_FALSE(parse({"--reflection-boost-samples","9"},nb,error));CHECK_FALSE(parse({"--reflection-boost-roughness","2"},nb,error));LaunchOptions mh;REQUIRE(parse({"--specular-max-history","32"},mh,error));CHECK(mh.specularMaxHistory==32);
     CHECK_FALSE(parse({"--specular-max-history","300"},mh,error));
     LaunchOptions ao3;REQUIRE(parse({"--ao-atrous-iterations","3"},ao3,error));CHECK(ao3.aoAtrousIterations==3);
+    // F13.4 experiment: --lighting-denoise-energy defaults off, needs the custom denoiser.
+    {LaunchOptions e0;REQUIRE(parse({},e0,error));CHECK_FALSE(e0.lightingDenoiseEnergy);
+     LaunchOptions e1;REQUIRE(parse({"--render-path","visibility","--reflections","ssr","--lighting-denoise","custom","--lighting-denoise-energy","on"},e1,error));CHECK(e1.lightingDenoiseEnergy);
+     LaunchOptions e2;CHECK_FALSE(parse({"--lighting-denoise-energy","on"},e2,error));LaunchOptions e3;CHECK_FALSE(parse({"--lighting-denoise-energy","maybe"},e3,error));}
     LaunchOptions badAo;CHECK_FALSE(parse({"--ao-atrous-iterations","0"},badAo,error));CHECK_FALSE(parse({"--ao-atrous-iterations","6"},badAo,error));
     LaunchOptions w;REQUIRE(parse({"--ssr-rough-steps","64","--ao-rays","4","--specular-atrous-iterations","3"},w,error));
     CHECK(w.ssrRoughSteps==64);CHECK(w.aoRays==4);CHECK(w.specularAtrousIterations==3);
