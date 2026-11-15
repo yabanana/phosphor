@@ -347,6 +347,18 @@ struct GPUSubsurfaceWalkParams {
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUSubsurfaceWalkParams) == 64, "GPUSubsurfaceWalkParams layout");
 
+/// F15.1 (ticket 17/18, RT tier): temporal accumulation and spatial prefilter of the walk signal (shaders/subsurface_accumulate.metal).
+/// window = radius of the (2 r + 1)^2 prefilter, maxCount = bound of the history length (the exponential memory), depthTolerance = relative view-depth tolerance of
+/// both the prefilter and the history rejection, normalCosine = the normal cone of the prefilter.
+PHOSPHOR_GPU_CONSTANT u32 SSS_ACCUM_RESET = 1u;
+PHOSPHOR_GPU_CONSTANT u32 SSS_ACCUM_NO_REJECT = 2u; // negative control: the history is read at the same pixel without any rejection (motion and depth ignored)
+struct GPUSubsurfaceAccumParams {
+    u32   width, height, outputWidth, outputHeight;
+    u32   flags, window, maxCount, pad0;
+    float nearPlane, depthTolerance, normalCosine, pad1;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUSubsurfaceAccumParams) == 48, "GPUSubsurfaceAccumParams layout");
+
 struct GPUMeshInfo {
     u32 meshletCount;
     u32 meshletOffset;     // into the global meshlet buffer

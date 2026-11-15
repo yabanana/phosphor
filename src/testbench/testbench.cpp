@@ -65,7 +65,7 @@ std::unique_ptr<TestBench> createTestBench(TestBenchType type, const TestBenchPa
             if(TransmissionValidation::validScenario(params.materialScenario))return std::make_unique<TransmissionValidation>(params.materialScenario, params.transmissionMotion);
             if(TransmissiveShadowValidation::validScenario(params.materialScenario))return std::make_unique<TransmissiveShadowValidation>(params.materialScenario);
             if(GlassReceiverValidation::validScenario(params.materialScenario))return std::make_unique<GlassReceiverValidation>(params.materialScenario);
-            if(!params.materialScenario.empty())return std::make_unique<MaterialValidation>(params.materialScenario, params.materialToggleEvery);
+            if(!params.materialScenario.empty()){auto bench=std::make_unique<MaterialValidation>(params.materialScenario, params.materialToggleEvery);bench->setMotion(params.materialMotion);return bench;}
             return std::make_unique<PBRGrid>();
         case TestBenchType::StressTest:  return std::make_unique<StressTest>();
         case TestBenchType::SceneViewer:

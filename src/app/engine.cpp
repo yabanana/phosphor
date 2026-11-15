@@ -349,6 +349,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
             if (options_.subsurfaceWalkShadows == 1 || (options_.subsurfaceWalkShadows < 0 && options_.shadows != ShadowMode::Off)) flags |= SSS_WALK_SHADOW_RAYS;
             if (!options_.debugSubsurfaceWalkLights) flags |= SSS_WALK_NO_LIGHTS;
             visibility_->setSubsurfaceWalk(rt_.get(), options_.subsurfaceSamples, options_.subsurfaceSteps, flags);
+            visibility_->setSubsurfaceAccumulation(options_.subsurfaceAccumulate, 4u, options_.subsurfaceHistory, options_.debugSubsurfaceHistoryNoReject, options_.lightingSeed);
             LOG_INFO("Subsurface: RT random walk tier (%u walks per pixel, <= %u events, %s shadow rays); the screen-space diffusion serves until the scene's acceleration structures exist",
                      options_.subsurfaceSamples, options_.subsurfaceSteps, (flags & SSS_WALK_SHADOW_RAYS) ? "with" : "without");
         }
@@ -1234,7 +1235,7 @@ void Engine::switchTestBench(TestBenchType type) {
                              static_cast<float>(std::max<u32>(context_->width(), 1)) / static_cast<float>(std::max<u32>(context_->height(), 1))};
     benchParams.materialOverridesPath = options_.materialOverridesPath;
     benchParams.terrainTexturesPath = options_.terrainTexturesPath;
-    benchParams.materialToggleEvery=options_.materialToggleEvery;benchParams.transmissionMotion=options_.transmissionMotion;benchParams.materialScenario=options_.materialScene;benchParams.lightingScenario=options_.lightingScene;benchParams.reflectionScenario=options_.reflectionScene;
+    benchParams.materialToggleEvery=options_.materialToggleEvery;benchParams.transmissionMotion=options_.transmissionMotion;benchParams.materialMotion=options_.materialMotion;benchParams.materialScenario=options_.materialScene;benchParams.lightingScenario=options_.lightingScene;benchParams.reflectionScenario=options_.reflectionScene;
     benchParams.instances         = options_.sceneInstances;
     benchParams.localLightCount=options_.localLightCount;benchParams.areaLights=options_.areaLights;benchParams.stationaryLights=options_.stationaryLights;
     benchParams.meshes            = options_.sceneMeshes;
@@ -1730,6 +1731,19 @@ bool Engine::frame(float dt) {
         if (out) LOG_INFO("Class manifest written to %s (%zu material classes)", options_.exportClassManifest.c_str(), manifest.scenes[0].classes.size());
         else LOG_ERROR("Cannot write the class manifest %s", options_.exportClassManifest.c_str());
     }
+    if (visibility_) {
+        // F15.1 (ticket 17/18): the accumulated walk depends on the lights; any change of their parameters starts a new history.
+        u64 signature = 1469598103934665603ull;
+        for (const GPULight& l : lights_) {
+            // the fields that define the light itself: not the shadow-map slot / padding, and not the position of a directional light (it follows the camera)
+            GPULight key{};
+            key.type = l.type; key.intensity = l.intensity; key.range = l.range; key.innerCone = l.innerCone; key.outerCone = l.outerCone;
+            for (int i = 0; i < 3; ++i) { key.direction[i] = l.direction[i]; key.color[i] = l.color[i]; key.position[i] = l.type == LIGHT_DIRECTIONAL ? 0.0f : l.position[i]; }
+            const auto* bytes = reinterpret_cast<const unsigned char*>(&key);
+            for (size_t i = 0; i < sizeof(GPULight); ++i) signature = (signature ^ bytes[i]) * 1099511628211ull;
+        }
+        visibility_->setSubsurfaceLightsSignature(signature);
+    }
     if (visibility_)
         visibility_->prepareFrame(
             frame.slot, renderWidth, renderHeight, renderBackingWidth_, renderBackingHeight_, *store_,
@@ -1919,6 +1933,7 @@ bool Engine::frame(float dt) {
     if (scenario_) scenario_->bind(*graphExecutor_, frame.index);
     if (asyncProbe_) asyncProbe_->bind(*graphExecutor_, frame.slot);
     if (rt_) rt_->bindResources(*graphExecutor_);
+    if (visibility_) visibility_->bindFrame(*graphExecutor_);
     if (shadows_) shadows_->bindFrame(*graphExecutor_);
     if (directLighting_)directLighting_->bindFrame(*graphExecutor_);
     if(gi_)gi_->bindFrame(*graphExecutor_);

@@ -1,0 +1,39 @@
+{
+  "function_descriptors": {
+    "library_function_descriptors": [
+      {
+        "label": "8F2BA50481F93818C3E1A5A38BB3DFABC9459CC3B35CEB57A08F8EA9C69FA08A",
+        "library": "C6840FFBEE04BD357BE42BDA6BACFAF626995E14E75B274F8DEB0BB851C98633",
+        "name": "subsurface_accumulate"
+      }
+    ],
+    "specialized_function_descriptors": []
+  },
+  "generator": "MetalFramework",
+  "libraries": [
+    {
+      "label": "C6840FFBEE04BD357BE42BDA6BACFAF626995E14E75B274F8DEB0BB851C98633",
+      "path": "@PHOSPHOR_METALLIB@"
+    }
+  ],
+  "pipeline_descriptors": {
+    "compute_pipeline_descriptors": [
+      {
+        "compute_function_descriptor": "fnd:8F2BA50481F93818C3E1A5A38BB3DFABC9459CC3B35CEB57A08F8EA9C69FA08A",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      }
+    ],
+    "mesh_render_pipeline_descriptors": [],
+    "render_pipeline_descriptors": [],
+    "tile_render_pipeline_descriptors": []
+  },
+  "version": {
+    "major": 0,
+    "minor": 1,
+    "sub_minor": 0
+  }
+}

@@ -481,6 +481,23 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if (!needCount(count)) return false;
             if (count == 0 || count > 4096) { error = std::string(arg) + ": expected 1..4096"; return false; }
             if (arg == "--subsurface-samples") out.subsurfaceSamples = count; else out.subsurfaceSteps = count;
+        } else if (arg == "--material-motion") {
+            out.materialMotion = true;
+        } else if (arg == "--debug-subsurface-history") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value != "reject-never" && *value != "normal") { error = "--debug-subsurface-history: expected reject-never or normal"; return false; }
+            out.debugSubsurfaceHistoryNoReject = *value == "reject-never";
+        } else if (arg == "--subsurface-accumulate") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value != "on" && *value != "off") { error = "--subsurface-accumulate: expected on or off"; return false; }
+            out.subsurfaceAccumulate = *value == "on";
+        } else if (arg == "--subsurface-history") {
+            u32 count = 0;
+            if (!needCount(count)) return false;
+            if (count == 0 || count > 255) { error = "--subsurface-history: expected 1..255"; return false; }
+            out.subsurfaceHistory = count;
         } else if (arg == "--debug-subsurface-di-diffuse") {
             const auto value = needValue();
             if (!value) return false;

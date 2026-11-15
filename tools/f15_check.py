@@ -253,7 +253,7 @@ THRESHOLDS = {
 LUMA_WEIGHTS = (0.2126, 0.7152, 0.0722)
 FRAMES, RESOLUTION = 128, "1280x720"
 WALK_FRAMES = 96                                                    # frames the rt-walk captures accumulate (4 walks per pixel each)
-WALK_ARGS = ["--subsurface-mode", "rt-walk", "--subsurface-samples", "4", "--subsurface-steps", "512"]
+WALK_ARGS = ["--subsurface-mode", "rt-walk", "--subsurface-accumulate", "off", "--subsurface-samples", "4", "--subsurface-steps", "512"]  # the bias keys: no accumulation (the product keys run the defaults)
 ACCUMULATE = 112  # frames averaged by --capture-linear-accumulate for the stochastic transmission transport (frames 16..127).  Measured
 #                   (F15.1 ticket 13): the refraction estimator is unbiased (per-object mean ratio to Mitsuba within 0.5 %) but its per-pixel
 #                   noise at 8 samples x 32 frames is 4-8 % on rough spheres (two seeds, same tolerance as the 256-sample Mitsuba noise),
@@ -1229,6 +1229,29 @@ def _layer_hit_keys():
 
 
 SCENARIOS.update(_layer_hit_keys())
+
+def _product_keys():
+    """F15.1 (ticket 17/18, RT tier): the keys of the PRODUCT output.  Every walk gate above is the bias check of the converged estimator (64-256 walks x 96
+    frames, noisy term pooled over the reference's 5x5 window).  The owner's criterion is that the RT walk meets the bound when enabled, as a user runs it:
+    DEFAULT settings (16 walks per pixel, temporal accumulation + 9x9 edge-aware prefilter), a static camera, the engine's own warm-up frames, ONE capture,
+    NO extra pooling and no noise twin.  Same bounds, same pixel sets, same ground truth / pair scenes.  The negative controls are those of the base keys
+    (the walk-less twins and the reference-side controls); the moving-camera clip keys are tools/f15_walk_clip_check.py."""
+    out = {}
+    for name in ("subsurface-volumetric-sun@rt-walk", "subsurface-volumetric-backlit@rt-walk", "subsurface-volumetric-point@rt-walk",
+                 "subsurface-volumetric-point@rt-walk-restir", "subsurface-volumetric-point@rt-walk-clustered",
+                 "subsurface-volumetric-env@rt-walk-composite", "subsurface-volumetric-hemi@rt-walk"):
+        spec = dict(SCENARIOS[name])
+        for key in ("accumulate", "noise_twin", "pending", "reference_args_walk"):
+            spec.pop(key, None)
+        spec["engine_args"] = ["--subsurface-mode", "rt-walk"]
+        spec["terms"] = "PRODUCT output (defaults: 16 walks, accumulation on, one capture at the last frame, no pooling) of: " + spec["terms"]
+        if name.endswith("composite") or "hemi" in name:
+            spec["pair"] = spec["pair"]
+        out[name + "-product"] = spec
+    return out
+
+
+SCENARIOS.update(_product_keys())
 # Red-state expectations (before ticket 03): direct metallic rows 0 and 1 pass, intermediate rows fail.
 GPU_PROCESS = re.compile(r"^(phosphor|soc_bench|f\d+_spike)$")
 

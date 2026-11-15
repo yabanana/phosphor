@@ -2129,8 +2129,23 @@ class RtWalkKeys(unittest.TestCase):
             if name.endswith("lights-off"):
                 self.assertEqual(spec["pending"], "negative control", name)  # must FAIL
                 self.assertIn("lights-off", " ".join(spec["engine_args"]) + name)
+            elif name.endswith("-product"):
+                self.assertNotIn("noise_twin", spec, name)  # the product keys are judged on ONE capture, no pooling
             elif spec["kind"] == "subsurface" or spec["kind"] == "subsurface-backlit":
                 self.assertIn(spec["noise_twin"], check.SCENARIOS, name)
+
+    def test_the_product_keys_run_the_defaults_with_one_capture_and_the_same_bounds(self):
+        products = [k for k in check.SCENARIOS if k.endswith("-product")]
+        self.assertEqual(len(products), 7)
+        for name in products:
+            spec = check.SCENARIOS[name]
+            self.assertEqual(spec["engine_args"], ["--subsurface-mode", "rt-walk"], name)  # defaults: 16 walks, accumulation on
+            self.assertNotIn("accumulate", spec, name)  # one capture at the last frame
+            self.assertNotIn("pending", spec, name)
+            self.assertTrue(spec["rt"])
+            self.assertEqual(check.expected_subsurface_mode(name), "rt-walk")
+        # the converged-estimator keys (the bias check) run without accumulation
+        self.assertIn("--subsurface-accumulate", check.SCENARIOS["subsurface-volumetric-sun@rt-walk"]["engine_args"])
 
     def _report(self, tmp, effective, reason=""):
         folder = pathlib.Path(tmp)

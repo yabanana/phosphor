@@ -7,6 +7,7 @@
 #include "renderer/temporal_layout.h"
 #include "renderer/exposure.h"
 #include "rendergraph/render_graph.h"
+#include <algorithm>
 #include <array>
 #include <memory>
 #include <unordered_map>
@@ -19,6 +20,7 @@ class SceneStore;
 class GpuScene;
 class AccelerationStructures;
 class RtConsumer;
+class MetalGraphExecutor;
 namespace rg {
 class PassContext;
 }
@@ -78,6 +80,13 @@ class VisibilityRenderer {
     /// After AccelerationStructures::prepareFrame: binds the walk's intersection function table for this frame slot.
     void prepareSubsurfaceWalk(u32 slot);
     [[nodiscard]] bool subsurfaceWalkActive() const { return walk_; }
+    /// Temporal accumulation + spatial prefilter of the walk signal (default on): `window` = prefilter radius, `maxCount` = history length bound (<= 255).
+    void setSubsurfaceAccumulation(bool enabled, u32 window, u32 maxCount, bool noReject = false, u32 seed = 0) { accumulate_ = enabled; accumWindow_ = window; accumMaxCount_ = std::min(maxCount, 255u); accumNoReject_ = noReject; walkSeed_ = seed; }
+    /// A signature of everything the accumulated walk depends on besides the camera (the lights): a change starts a new history.
+    void setSubsurfaceLightsSignature(u64 signature) { if (signature != lightsSignature_) { lightsSignature_ = signature; histResetRequested_ = true; ++lightsResets_; } }
+    [[nodiscard]] u32 subsurfaceHistoryResets() const { return lightsResets_; }
+    /// Binds the ping-pong history textures of the accumulation (after the graph is built).
+    void bindFrame(MetalGraphExecutor &executor);
     /// The walk's gain target (rgb = weight x exiting radiance per unit uniform dome radiance, a = weight): the reflection composite multiplies its
     /// ambient / GI diffuse term by it for walk pixels.  Valid after addResolve in a graph with the walk pass.
     [[nodiscard]] rg::TextureRef subsurfaceGain() const { return walk_ ? sssGain_ : rg::TextureRef{}; }
@@ -169,12 +178,24 @@ class VisibilityRenderer {
     };
     std::array<Buffers, METAL_FRAMES_IN_FLIGHT> frames_{};
     // Separate tables: mutation after encoding must not change earlier work.
-    std::array<MTL4::ArgumentTable *, 7> tables_{};
+    std::array<MTL4::ArgumentTable *, 8> tables_{}; // 7: the walk accumulation pass
     // F15.1 (ticket 17): diffuse-irradiance target, clear and diffusion passes (tables_ 5 and 6).
     bool subsurfaceAllowed_ = false, subsurface_ = false;
     float sssNear_ = 0.1f, sssTanX_ = 1.0f, sssTanY_ = 1.0f;
     pipe::PipelineHandle sssClear_, sssDiffuse_, fallbackSss_;
     rg::TextureRef sss_, sssResult_, sssGain_;
+    // Ticket 17/18 (RT tier): the walk's raw outputs and the accumulation history (ping-pong: previous / current imports bound each frame).
+    rg::TextureRef walkRaw_, walkTerm_, walkGain_, histTermPrev_, histTermCur_, histGainPrev_, histGainCur_;
+    pipe::PipelineHandle sssAccumulate_ = pipe::INVALID_PIPELINE;
+    bool accumulate_ = true, accumNoReject_ = false;
+    u32 walkSeed_ = 0;
+    u32 accumWindow_ = 4, accumMaxCount_ = 64;
+    std::array<MTL::Texture *, 2> histTerm_{}, histGain_{};
+    u32 histWidth_ = 0, histHeight_ = 0, histCur_ = 0;
+    bool histFresh_ = true, histResetRequested_ = false;
+    u64 lightsSignature_ = 0;
+    u32 lightsResets_ = 0;
+    MTL::GPUAddress accumParamsAddress_ = 0;
     // Ticket 17/18: the RT walk tier (SSS_OUTPUT == 2): the kernel replaces the diffusion pass.
     AccelerationStructures* walkRt_ = nullptr;
     std::unique_ptr<RtConsumer> walkConsumer_;

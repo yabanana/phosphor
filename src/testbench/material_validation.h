@@ -173,6 +173,9 @@ public:
     [[nodiscard]] const char* getName() const override { return name_.c_str(); }
     [[nodiscard]] const char* assetSource() const override { return "procedural-material-validation-v2"; }
     [[nodiscard]] CameraSetup getDefaultCamera() const override;
+    /// F15.1 (ticket 17/18, walk clip): with `motion` the camera strafes +-1.5 m sideways looking at the scene target (--material-motion), never a camera cut.
+    bool scriptedCamera(double t, glm::vec3& position, glm::vec3& target, bool& cut) const override;
+    void setMotion(bool motion) { motion_ = motion; }
 
     [[nodiscard]] std::string_view scenario() const { return scenario_; }
     [[nodiscard]] std::span<const EntityID> spheres() const { return spheres_; } // row-major: row * columns + column
@@ -193,6 +196,7 @@ public:
 
 private:
     std::string scenario_, name_;
+    bool motion_ = false;
     u32 toggleEvery_ = 0, updates_ = 0;
     std::vector<EntityID> spheres_;
     EntityID sun_ = INVALID_ENTITY;

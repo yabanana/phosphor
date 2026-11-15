@@ -1219,3 +1219,16 @@ CameraSetup MaterialValidation::getDefaultCamera() const {
     return {{0.0f, centreY, distance}, {0.0f, centreY, 0.0f}, distance, false};
 }
 } // namespace phosphor
+
+namespace phosphor {
+bool MaterialValidation::scriptedCamera(double t, glm::vec3& position, glm::vec3& target, bool& cut) const {
+    cut = false; // a continuous strafe: never a camera cut
+    if (!motion_ || !std::isfinite(t) || t < 0.0) return false;
+    const CameraSetup base = getDefaultCamera();
+    target = base.target;
+    // the camera slides +-1.5 m sideways while looking at the same target: every pixel moves (parallax and sweep), measured: about 1 pixel per frame at 1280x720 with the fixed timestep
+    const glm::vec3 right = glm::normalize(glm::cross(base.target - base.position, glm::vec3(0.0f, 1.0f, 0.0f)));
+    position = base.position + right * (1.5f * static_cast<float>(std::sin(20.0 * t)));
+    return true;
+}
+} // namespace phosphor

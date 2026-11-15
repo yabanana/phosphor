@@ -236,13 +236,14 @@ kernel void subsurface_walk(constant GPUSubsurfaceWalkParams& p [[buffer(0)]], c
                             const device float* table [[buffer(10)]], const device RtTextureHandle* textures [[buffer(11)]],
                             texture2d<float, access::read> color [[texture(0)]], texture2d<float, access::read> sss [[texture(1)]],
                             texture2d<float, access::read> normalRoughness [[texture(2)]], texture2d<float, access::write> result [[texture(3)]],
-                            texture2d<float, access::write> gainTexture [[texture(4)]],
+                            texture2d<float, access::write> gainTexture [[texture(4)]], texture2d<float, access::write> termTexture [[texture(5)]],
                             uint2 pixel [[thread_position_in_grid]]) {
     if (pixel.x >= p.outputWidth || pixel.y >= p.outputHeight) return;
     const float4 base = color.read(pixel);
     const float4 own = sss.read(pixel);
     const uint material = uint(own.w);
     gainTexture.write(float4(0.0f), pixel);
+    termTexture.write(float4(0.0f), pixel);
     if (material == 0u || pixel.x >= p.width || pixel.y >= p.height || p.samples == 0u) {
         result.write(base, pixel);
         return;
@@ -317,5 +318,6 @@ kernel void subsurface_walk(constant GPUSubsurfaceWalkParams& p [[buffer(0)]], c
     // the composite-owned ambient / GI diffuse: rgb = w (1 - metallic) x the transfer factor, a = w (the walk code carries w (1 - metallic): metallic cancels in the
     // composite through its own (1 - metallic) base factor, so a = the weight of the diffuse substrate it replaces)
     if ((p.flags & SSS_WALK_NO_LIGHTS) == 0u) gainTexture.write(float4(weight * transferSum / float(p.samples), weight), pixel);
+    termTexture.write(float4(weight * sum / float(p.samples), 1.0f), pixel);
     result.write(float4(base.rgb + weight * sum / float(p.samples), base.a), pixel);
 }

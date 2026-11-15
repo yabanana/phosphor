@@ -7,6 +7,7 @@
 #include "platform/metal/acceleration_structures.h"
 #include "platform/metal/rt_consumer.h"
 #include "platform/metal/lighting_dispatch.h"
+#include "platform/metal/metal_graph_executor.h"
 #include "renderer/subsurface_walk_table.h"
 #include "pipeline/forward_variants.h"
 #include "pipeline/material_classes.generated.h"
@@ -87,7 +88,7 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
     for (auto &table : tables_) {
         auto *desc = MTL4::ArgumentTableDescriptor::alloc()->init();
         desc->setMaxBufferBindCount(18);
-        desc->setMaxTextureBindCount(12); // F15 closure ticket 19: texture 11 = E(-N) companion of the GI irradiance
+        desc->setMaxTextureBindCount(16); // 11 = E(-N) companion of the GI irradiance (ticket 19); up to 15 for the subsurface walk accumulation (ticket 17)
         NS::Error *error = nullptr;
         table = c.device()->newArgumentTable(desc, &error);
         desc->release();
@@ -133,6 +134,7 @@ pipe::PipelineDesc VisibilityRenderer::fallbackDesc(u32 sss) const {
 }
 VisibilityRenderer::~VisibilityRenderer() {
     context_.waitIdle();
+    for (auto *t : {histTerm_[0], histTerm_[1], histGain_[0], histGain_[1]}) if (t) context_.memory().release(t, MemoryCategory::Other);
     if (lightingFallbackDepth_) lightingFallbackDepth_->release();
     for (auto &f : frames_) {
         context_.memory().release(f.tiles, MemoryCategory::Other);
@@ -206,7 +208,8 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
         const bool featureBinsWanted = binning_ && !forceAllLobes_ && mask != 0u;
         subsurface_ = subsurfaceAllowed_ && !tileResolve_ && mask != 0u && store.volumetricSubsurface();
         // Ticket 17/18: the optional RT walk replaces the diffusion when the acceleration structures exist and its kernel is resident.
-        walk_ = subsurface_ && walkWanted_ && walkRt_ && walkRt_->active() && sssWalk_ != pipe::INVALID_PIPELINE && pipelines_.isFinal(sssWalk_);
+        walk_ = subsurface_ && walkWanted_ && walkRt_ && walkRt_->active() && sssWalk_ != pipe::INVALID_PIPELINE && pipelines_.isFinal(sssWalk_) &&
+                (!accumulate_ || pipelines_.isFinal(sssAccumulate_));
         const u32 so = walk_ ? 100u : (subsurface_ ? 50u : 0u);
         const auto sssConstant = [&](pipe::PipelineDesc d) {
             if (subsurface_) d.constant(kSssConstant, pipe::ConstantType::UInt, sssOutput());
@@ -324,12 +327,38 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
         wp.width = width; wp.height = height; wp.outputWidth = outputWidth; wp.outputHeight = outputHeight;
         wp.tanHalfFovX = sssTanX_; wp.tanHalfFovY = sssTanY_;
         wp.slotCount = store.slotCapacity(); wp.meshCount = static_cast<u32>(walkRt_->meshes().size());
-        wp.samples = walkSamples_; wp.maxSteps = walkSteps_; wp.frameIndex = constants.frameIndex; wp.flags = walkFlags_;
+        wp.samples = walkSamples_; wp.maxSteps = walkSteps_; wp.frameIndex = constants.frameIndex ^ (walkSeed_ * 2654435761u); wp.flags = walkFlags_;
         wp.lightCount = constants.lightCount; wp.materialCount = static_cast<u32>(store.materials().size());
         walkParamsAddress_ = lighting::upload(context_, wp);
         const auto table = context_.frameUploads().allocate(sizeof(kSubsurfaceTableData));
         std::memcpy(table.cpu, kSubsurfaceTableData, sizeof(kSubsurfaceTableData));
         walkTableAddress_ = table.gpu;
+        if (accumulate_) {
+            // the history: two RGBA32F textures per signal (term, gain), ping-pong; (re)allocated with the output size (a new history then)
+            if (histWidth_ != outputWidth || histHeight_ != outputHeight || !histTerm_[0]) {
+                for (auto **t : {&histTerm_[0], &histTerm_[1], &histGain_[0], &histGain_[1]}) {
+                    if (*t) context_.memory().release(*t, MemoryCategory::Other);
+                    auto *d = MTL::TextureDescriptor::texture2DDescriptor(MTL::PixelFormatRGBA32Float, outputWidth, outputHeight, false);
+                    d->setStorageMode(MTL::StorageModePrivate);
+                    d->setUsage(MTL::TextureUsageShaderRead | MTL::TextureUsageShaderWrite);
+                    *t = context_.memory().newTexture(d, MemoryCategory::Other, "Subsurface walk accumulation history");
+                    if (!*t) throw std::runtime_error("Subsurface accumulation history allocation failed");
+                }
+                histWidth_ = outputWidth;
+                histHeight_ = outputHeight;
+                histFresh_ = true;
+            }
+            histCur_ ^= 1u; // the texture written this frame; the other one holds the previous frame
+            GPUSubsurfaceAccumParams ap{};
+            ap.width = width; ap.height = height; ap.outputWidth = outputWidth; ap.outputHeight = outputHeight;
+            ap.flags = ((histFresh_ || histResetRequested_ || !temporal.historyValid) ? SSS_ACCUM_RESET : 0u) | (accumNoReject_ ? SSS_ACCUM_NO_REJECT : 0u);
+            ap.window = accumWindow_; ap.maxCount = accumMaxCount_;
+            // depth tolerance (prefilter neighbours and history), relative to the VIEW depth, 10 %: a strafing camera changes the view depth of a surface point by more than 2 % per frame and 2 % rejected the history (clip: product 0.197 / 0.734; 10 %: 0.070 / 0.190); the normal test (0.9) still separates surfaces
+            ap.nearPlane = sssNear_; ap.depthTolerance = 0.10f; ap.normalCosine = 0.9f;
+            accumParamsAddress_ = lighting::upload(context_, ap);
+            histFresh_ = false;
+            histResetRequested_ = false;
+        }
     }
 }
 void VisibilityRenderer::setSubsurfaceWalk(AccelerationStructures *rt, u32 samples, u32 maxSteps, u32 flags) {
@@ -341,7 +370,15 @@ void VisibilityRenderer::setSubsurfaceWalk(AccelerationStructures *rt, u32 sampl
     if (!walkWanted_) return;
     // linked alpha function: the walk traces with the 16-byte lite payload (the alpha test is the same, rt_common.h)
     sssWalk_ = pipelines_.request(lighting::kernel("subsurface_walk", true, true));
+    sssAccumulate_ = pipelines_.request(lighting::kernel("subsurface_accumulate"));
     walkConsumer_ = std::make_unique<RtConsumer>(context_, pipelines_, *rt);
+}
+void VisibilityRenderer::bindFrame(MetalGraphExecutor &executor) {
+    if (!(walk_ && accumulate_ && histTerm_[0])) return;
+    executor.bindTexture(histTermPrev_, histTerm_[histCur_ ^ 1u]);
+    executor.bindTexture(histTermCur_, histTerm_[histCur_]);
+    executor.bindTexture(histGainPrev_, histGain_[histCur_ ^ 1u]);
+    executor.bindTexture(histGainCur_, histGain_[histCur_]);
 }
 void VisibilityRenderer::prepareSubsurfaceWalk(u32 slot) {
     if (walk_) walkConsumer_->prepare(slot, sssWalk_);
@@ -580,10 +617,13 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
         });
     if (subsurface_ && walk_) {
         // F15.1 (ticket 17/18, RT tier): the random walk through the real geometry replaces the screen-space diffusion (same inputs, same
-        // output: a new colour version that every later consumer reads).
+        // output: a new colour version that every later consumer reads).  With accumulation (the default) the walk's noisy term and gain go through the
+        // temporal / spatial accumulation pass below, which produces the colour and the gain the product reads.
         const TextureRef resolved = outputs_[0];
         const TextureRef sss = sss_;
         const TextureRef normal = outputs_[1];
+        const TextureRef depthRef = depth_;
+        const TextureRef motion = outputs_[4];
         graph.addPass(
             "Subsurface RT walk", PassType::Compute,
             [&](PassBuilder &b) {
@@ -592,11 +632,13 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
                 b.read(normal, Usage::ShaderRead, StageDispatch);
                 b.read(scene_.dataRef(), Usage::ShaderRead, StageDispatch);
                 walkRt_->declareTraceReads(b);
-                TextureRef out = b.createTexture("Subsurface linear HDR",
+                TextureRef out = b.createTexture("Subsurface walk raw colour",
                                                  {resolveFormat(0, lighting_), params_.outputWidth, params_.outputHeight});
-                sssResult_ = b.write(out, Usage::ShaderWrite, StageDispatch);
-                TextureRef gain = b.createTexture("Subsurface ambient gain", {Format::RGBA16Float, params_.outputWidth, params_.outputHeight});
-                sssGain_ = b.write(gain, Usage::ShaderWrite, StageDispatch);
+                walkRaw_ = b.write(out, Usage::ShaderWrite, StageDispatch);
+                TextureRef gain = b.createTexture("Subsurface ambient gain (raw)", {Format::RGBA16Float, params_.outputWidth, params_.outputHeight});
+                walkGain_ = b.write(gain, Usage::ShaderWrite, StageDispatch);
+                TextureRef term = b.createTexture("Subsurface walk term (raw)", {Format::RGBA16Float, params_.outputWidth, params_.outputHeight});
+                walkTerm_ = b.write(term, Usage::ShaderWrite, StageDispatch);
                 b.setProfileShaders("subsurface_walk");
             },
             [this, resolved, sss, normal](PassContext &ctx) {
@@ -617,8 +659,9 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
                 table->setTexture(static_cast<MTL::Texture *>(ctx.texture(resolved))->gpuResourceID(), 0);
                 table->setTexture(static_cast<MTL::Texture *>(ctx.texture(sss))->gpuResourceID(), 1);
                 table->setTexture(static_cast<MTL::Texture *>(ctx.texture(normal))->gpuResourceID(), 2);
-                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(sssResult_))->gpuResourceID(), 3);
-                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(sssGain_))->gpuResourceID(), 4);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(walkRaw_))->gpuResourceID(), 3);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(walkGain_))->gpuResourceID(), 4);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(walkTerm_))->gpuResourceID(), 5);
                 enc->setComputePipelineState(pipelines_.compute(sssWalk_));
                 enc->setArgumentTable(table);
                 enc->dispatchThreadgroups(
@@ -626,6 +669,58 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
                     MTL::Size::Make(16, 16, 1));
                 scene_.countCommands(3);
             });
+        if (accumulate_) {
+            const auto describe = [&](const char *name) { return graph.importTexture(name, {Format::RGBA32Float, params_.outputWidth, params_.outputHeight}, ImportContentsDefined | ImportOutput); };
+            histTermPrev_ = describe("Subsurface walk term history (previous)");
+            histTermCur_ = describe("Subsurface walk term history (current)");
+            histGainPrev_ = describe("Subsurface walk gain history (previous)");
+            histGainCur_ = describe("Subsurface walk gain history (current)");
+            const TextureRef prevT = histTermPrev_, prevG = histGainPrev_;
+            graph.addPass(
+                "Subsurface walk accumulation", PassType::Compute,
+                [&](PassBuilder &b) {
+                    for (auto ref : {resolved, sss, normal, depthRef, motion, walkTerm_, walkGain_, prevT, prevG})
+                        b.read(ref, Usage::ShaderRead, StageDispatch);
+                    TextureRef out = b.createTexture("Subsurface linear HDR",
+                                                     {resolveFormat(0, lighting_), params_.outputWidth, params_.outputHeight});
+                    sssResult_ = b.write(out, Usage::ShaderWrite, StageDispatch);
+                    TextureRef gain = b.createTexture("Subsurface ambient gain", {Format::RGBA16Float, params_.outputWidth, params_.outputHeight});
+                    sssGain_ = b.write(gain, Usage::ShaderWrite, StageDispatch);
+                    histTermCur_ = b.write(histTermCur_, Usage::ShaderWrite, StageDispatch);
+                    histGainCur_ = b.write(histGainCur_, Usage::ShaderWrite, StageDispatch);
+                    b.setProfileShaders("subsurface_accumulate");
+                },
+                [this, resolved, sss, normal, depthRef, motion, prevT, prevG](PassContext &ctx) {
+                    auto *enc = static_cast<MTL4::ComputeCommandEncoder *>(ctx.encoder());
+                    auto *table = tables_[7];
+                    table->setAddress(accumParamsAddress_, 0);
+                    const auto bindTexture = [&](TextureRef ref, u32 index) {
+                        table->setTexture(static_cast<MTL::Texture *>(ctx.texture(ref))->gpuResourceID(), index);
+                    };
+                    bindTexture(resolved, 0);
+                    bindTexture(walkTerm_, 1);
+                    bindTexture(walkGain_, 2);
+                    bindTexture(sss, 3);
+                    bindTexture(depthRef, 4);
+                    bindTexture(normal, 5);
+                    bindTexture(motion, 6);
+                    bindTexture(prevT, 7);
+                    bindTexture(prevG, 8);
+                    bindTexture(sssResult_, 9);
+                    bindTexture(histTermCur_, 10);
+                    bindTexture(histGainCur_, 11);
+                    bindTexture(sssGain_, 12);
+                    enc->setComputePipelineState(pipelines_.compute(sssAccumulate_));
+                    enc->setArgumentTable(table);
+                    enc->dispatchThreadgroups(
+                        MTL::Size::Make((params_.outputWidth + 15) / 16, (params_.outputHeight + 15) / 16, 1),
+                        MTL::Size::Make(16, 16, 1));
+                    scene_.countCommands(3);
+                });
+        } else {
+            sssResult_ = walkRaw_;
+            sssGain_ = walkGain_;
+        }
         composedColor_ = sssResult_;
     } else if (subsurface_) {
         // F15.1 (ticket 17): screen-space Burley diffusion of the volumetric pixels' diffuse irradiance, added to the resolved colour.

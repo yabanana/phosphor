@@ -3090,6 +3090,11 @@
         "label": "A351943A9EFA8844D3E7303942BDD498FDAD89A2BC26764E46E3218532F086E2",
         "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
         "name": "restir_di_temporal_lobe"
+      },
+      {
+        "label": "8F2BA50481F93818C3E1A5A38BB3DFABC9459CC3B35CEB57A08F8EA9C69FA08A",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "subsurface_accumulate"
       }
     ],
     "specialized_function_descriptors": [
@@ -41548,6 +41553,14 @@
             "fnd:55532D4A98F24BFCC0C86246DBAAD4A42AF47C7E3B8547115B05ED9A13CE3C48"
           ]
         }
+      },
+      {
+        "compute_function_descriptor": "fnd:8F2BA50481F93818C3E1A5A38BB3DFABC9459CC3B35CEB57A08F8EA9C69FA08A",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
       }
     ],
     "mesh_render_pipeline_descriptors": [

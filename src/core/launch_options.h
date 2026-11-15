@@ -212,7 +212,9 @@ namespace phosphor {
 //   --rt off|on        F9 BLAS/TLAS infrastructure (default off)
 //   --subsurface-mode diffusion|rt-walk  F15.1 (ticket 17/18): the volumetric-subsurface technique: the screen-space Burley diffusion
 //                      (default) or the optional ray-traced random walk (needs --rt on; otherwise the diffusion serves, logged)
-//   --subsurface-samples N  walks per pixel and frame of rt-walk (default 4)
+//   --subsurface-samples N  walks per pixel and frame of rt-walk (default 16)
+//   --subsurface-accumulate on|off  temporal accumulation (reprojection, depth / material rejection) + 9x9 edge-aware prefilter of the walk (default on)
+//   --subsurface-history N  bound of the accumulated history length (default 64)
 //   --subsurface-steps N    hard bound of the events of one walk (default 512)
 //   --subsurface-walk-shadows on|off  occlude the lights at the exits of the walk by a shadow ray (default: on with --shadows other than off)
 //   --debug-subsurface-walk-lights off  negative control: the walk lights nothing
@@ -372,7 +374,9 @@ struct LaunchOptions {
     // F15.1 (ticket 17/18): the volumetric-subsurface technique (SubsurfaceMode::RtWalk needs rtEnabled).
     enum class SubsurfaceMode : u8 { Diffusion, RtWalk };
     SubsurfaceMode subsurfaceMode = SubsurfaceMode::Diffusion;
-    u32          subsurfaceSamples = 4;
+    u32          subsurfaceSamples = 16;       // walks per pixel and frame (accumulated over frames: the product default)
+    bool         subsurfaceAccumulate = true;  // --subsurface-accumulate on|off: temporal accumulation + spatial prefilter of the walk signal
+    u32          subsurfaceHistory = 64;       // --subsurface-history N: bound of the accumulated history length (frames, <= 255)
     u32          subsurfaceSteps = 512;
     int          subsurfaceWalkShadows = -1;  // -1 = follows --shadows, 0 off, 1 on
     bool         debugSubsurfaceDiDiffuse = false; // --debug-subsurface-di-diffuse keep: negative control, DI keeps its full diffuse on top of the walk
@@ -490,6 +494,8 @@ struct LaunchOptions {
     // F15.3 (ticket 13): --capture-linear-accumulate N averages the last N frames (ending at --capture-linear-frame) of the
     // linear signal on the CPU (test infrastructure for the one-stochastic-sample-per-pixel transport; 0 = the single frame).
     u32 captureLinearAccumulate = 0;
+    bool materialMotion = false;  // --material-motion: scripted camera strafe on a material scenario (walk clip)
+    bool debugSubsurfaceHistoryNoReject = false; // --debug-subsurface-history reject-never: negative control of the walk accumulation
     bool transmissionMotion = false; // --transmission-motion: scripted camera orbit + moving emissive panel on a transmission fixture (F15.1 ticket 13 clip)
     u32 materialToggleEvery = 0; // --material-toggle-every N: specular grids edit/toggle their extension every N frames
     bool giProbeAnchor=false;
