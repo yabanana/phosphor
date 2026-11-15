@@ -49,8 +49,12 @@ def cross(a, b):
     return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
 
 
-def schlick(cos_theta):
-    return MIRROR_F0 + (1.0 - MIRROR_F0) * (1.0 - min(max(cos_theta, 0.0), 1.0)) ** 5
+GATE_MIN_FRESNEL = 0.1  # the engine's declared Fresnel gate (kReflectionMirrorMinFresnel): a hit reflected at a lower Fresnel ends the chain
+DIELECTRIC_F0 = 0.04  # a black dielectric (baseColor 0, metallic 0): only its specular reflection remains
+
+
+def schlick(cos_theta, f0=MIRROR_F0):
+    return f0 + (1.0 - f0) * (1.0 - min(max(cos_theta, 0.0), 1.0)) ** 5
 
 
 class Quad:
@@ -105,7 +109,7 @@ def nearest(scene, origin, direction):
     return best
 
 
-def radiance(scene, origin, direction, bounces=MAX_EXTRA_BOUNCES):
+def radiance(scene, origin, direction, bounces=MAX_EXTRA_BOUNCES, f0=MIRROR_F0):
     """Returns (radiance, class, sun_masked) of one camera ray; `bounces` = extra bounces of the estimator (0: single bounce)."""
     sun = normalize(SUN_TOWARD)
     cos_mask = math.cos(math.radians(SUN_MASK_DEGREES))
@@ -118,7 +122,9 @@ def radiance(scene, origin, direction, bounces=MAX_EXTRA_BOUNCES):
         t, n = hit
         point = add_scaled(o, d, t)
         events += 1
-        throughput *= schlick(-dot(n, d))
+        fresnel = schlick(-dot(n, d), f0)
+        throughput *= fresnel
+        masked = masked or (event >= 1 and fresnel < GATE_MIN_FRESNEL)  # outside the declared gate: not gated against the model
         r = normalize(add_scaled(d, n, -2.0 * dot(d, n)))
         masked = masked or dot(r, sun) > cos_mask
         if event == bounces + 1:
@@ -144,7 +150,7 @@ def frame(bounds_min, bounds_max, aspect, fov_y_degrees=60.0, margin=1.12):
     return (centre[0], centre[1], centre[2] + distance), tan_half, distance
 
 
-def render(scene, width, height, bounds_min, bounds_max, bounces=MAX_EXTRA_BOUNCES):
+def render(scene, width, height, bounds_min, bounds_max, bounces=MAX_EXTRA_BOUNCES, f0=MIRROR_F0):
     """Per-pixel grids: radiance, class, masked."""
     origin, tan_half, _ = frame(bounds_min, bounds_max, width / height)
     aspect = width / height
@@ -155,7 +161,7 @@ def render(scene, width, height, bounds_min, bounds_max, bounces=MAX_EXTRA_BOUNC
         for x in range(width):
             ndc_x = (x + 0.5) / width * 2.0 - 1.0
             ndc_y = 1.0 - (y + 0.5) / height * 2.0
-            rad[y][x], cls[y][x], mask[y][x] = radiance(scene, origin, normalize((ndc_x * tan_half * aspect, ndc_y * tan_half, -1.0)), bounces)
+            rad[y][x], cls[y][x], mask[y][x] = radiance(scene, origin, normalize((ndc_x * tan_half * aspect, ndc_y * tan_half, -1.0)), bounces, f0)
     return rad, cls, mask
 
 
@@ -201,6 +207,9 @@ SCENES = {
     # A mirror ball in front of a tilted mirror wall: ball sees the wall (2), the wall sees the ball (2), the ball sees the wall seeing the ball (3).
     "ball": _tilted_wall_and_ball(),
 }
+# Same corridor made of a smooth black dielectric (F0 0.04): the owner's "every smooth surface" scope.  Entry: scene description + F0.
+SCENES["dielectric-corridor"] = SCENES["corridor"]
+SCENE_F0 = {"dielectric-corridor": DIELECTRIC_F0}
 
 
 def build_scene(description):

@@ -25,7 +25,7 @@ def single_bounce_rows(name):
     """What the F13 single-bounce engine shows: the model with 0 extra bounces (a mirror hit that is not followed returns no light)."""
     description = model.SCENES[name]
     low, high = model.scene_bounds(description)
-    rad, _, _ = model.render(model.build_scene(description), check.WIDTH, check.HEIGHT, low, high, bounces=0)
+    rad, _, _ = model.render(model.build_scene(description), check.WIDTH, check.HEIGHT, low, high, bounces=0, f0=model.SCENE_F0.get(name, model.MIRROR_F0))
     return rad
 
 

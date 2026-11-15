@@ -50,7 +50,7 @@ def write_ply(path, corners, normal):
     path.write_bytes(header.encode() + body)
 
 
-def write_snapshot(folder, description):
+def write_snapshot(folder, description, dielectric=False):
     """scene.json + PLY quads of a model scene (quads only), camera framed like the corpus rig (yaw 0, pitch 0)."""
     meshes, instances = [], []
     for k, (corner, u, v) in enumerate(description["quads"]):
@@ -66,20 +66,20 @@ def write_snapshot(folder, description):
             "camera": {"position": list(origin), "direction": [0, 0, -1], "up": [0, 1, 0], "fov_y_radians": math.radians(60.0), "near": 0.05,
                        "far": 0, "width": WIDTH, "height": HEIGHT, "jitter_pixels": [0, 0], "projection": "perspective_reverse_z_infinite"},
             "sky": [model.ENVIRONMENT] * 3, "sun_angular_radius": 0.0, "textures": [],
-            "materials": [{"base": [0.8, 0.8, 0.8, 1], "emissive": [0, 0, 0], "metallic": 1, "roughness": 0.04, "normal_scale": 1,
+            "materials": [{"base": [0, 0, 0, 1] if dielectric else [0.8, 0.8, 0.8, 1], "emissive": [0, 0, 0], "metallic": 0 if dielectric else 1, "roughness": 0.04, "normal_scale": 1,
                            "occlusion_strength": 1, "alpha_cutoff": 0, "flags": 0, "textures": [0xFFFFFFFF] * 5}],
             "meshes": meshes, "instances": instances, "lights": [], "sampled_lights": []}
     (folder / "scene.json").write_text(json.dumps(data))
     return data
 
 
-def class_errors(reference_image, description, spp):
+def class_errors(reference_image, description, spp, f0=model.MIRROR_F0, classes=CLASSES):
     """Per class k: (stable pixels, mean relative error of reference/environment vs model/environment), model classes at the declared bound."""
     low, high = model.scene_bounds(description)
-    rad, cls, mask = model.render(model.build_scene(description), WIDTH, HEIGHT, low, high)
+    rad, cls, mask = model.render(model.build_scene(description), WIDTH, HEIGHT, low, high, f0=f0)
     stable = model.stable_mask(cls, mask, 2)
     result = {}
-    for k in CLASSES:
+    for k in classes:
         pixels = [(y, x) for y in range(HEIGHT) for x in range(WIDTH) if stable[y][x] and cls[y][x] == k]
         expected = [rad[y][x] / model.ENVIRONMENT for y, x in pixels]
         floor = FLOOR * (sum(expected) / max(len(expected), 1))
@@ -127,6 +127,21 @@ class MirrorContinuation(unittest.TestCase):
         errors = class_errors(image, self.description, spp)
         self.assertLessEqual(errors[2][1], GATE, errors)  # one extra hit reaches class 2
         self.assertGreater(errors[3][1], 0.5, errors)  # but not class 3
+
+    def test_smooth_dielectrics_continue_too(self):
+        """The owner's scope (no F0 floor): two facing black smooth dielectrics (F0 0.04) against the analytic model."""
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            data = write_snapshot(root, self.description, dielectric=True)
+            results = {}
+            for bounces in (0, 3):
+                context = self.reference.Context(root, data, 2, "regularized", mirror_bounces=bounces)
+                results[bounces] = class_errors(context.render_pass(1, 16), self.description, 16, f0=model.DIELECTRIC_F0, classes=(1, 2))
+        self.assertGreaterEqual(results[3][2][0], MIN_PIXELS, results)
+        self.assertLessEqual(results[3][1][1], GATE, results)
+        self.assertLessEqual(results[3][2][1], GATE, results)
+        self.assertGreater(results[0][2][1], 0.5, results)  # negative control: no continuation, class 2 is dark
+        self.assertLessEqual(results[0][1][1], GATE, results)
 
     def test_argument_is_validated(self):
         with self.assertRaises(ValueError):

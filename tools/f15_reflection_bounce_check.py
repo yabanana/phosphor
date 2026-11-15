@@ -42,7 +42,7 @@ GATE = 0.05
 FLOOR = 0.05
 MIN_PIXELS = 400
 BACKGROUND_TOLERANCE = 0.05
-EXPECTED_CLASSES = {"corridor": (1, 2, 3, 4), "ball": (1, 2, 3)}
+EXPECTED_CLASSES = {"corridor": (1, 2, 3, 4), "ball": (1, 2, 3), "dielectric-corridor": (1, 2)}
 LUMA = (0.2126, 0.7152, 0.0722)
 SPHERE_SEGMENTS, SPHERE_RINGS = 96, 48
 
@@ -75,7 +75,7 @@ def sphere_mesh(centre, radius):
     return positions, normals, uvs, indices
 
 
-def write_scene(folder, description):
+def write_scene(folder, description, dielectric=False):
     """glTF (one mesh per quad / sphere, one metal material); returns the .gltf path."""
     folder.mkdir(parents=True, exist_ok=True)
     meshes_data = [quad_mesh(*q) for q in description["quads"]] + [sphere_mesh(c, r) for c, r in description["spheres"]]
@@ -97,7 +97,7 @@ def write_scene(folder, description):
                                        "indices": accessor_base + 3, "material": 0}]})
         nodes.append({"mesh": k})
     document = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": list(range(len(nodes)))}], "nodes": nodes, "meshes": meshes,
-                "materials": [{"name": "mirror", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.8, 0.8, 1], "metallicFactor": 1, "roughnessFactor": 0}}],
+                "materials": [{"name": "black dielectric" if dielectric else "mirror", "pbrMetallicRoughness": {"baseColorFactor": [0, 0, 0, 1] if dielectric else [0.8, 0.8, 0.8, 1], "metallicFactor": 0 if dielectric else 1, "roughnessFactor": 0}}],
                 "accessors": accessors, "bufferViews": views, "buffers": [{"uri": "scene.bin", "byteLength": len(blob)}]}
     (folder / "scene.bin").write_bytes(bytes(blob))
     path = folder / "scene.gltf"
@@ -156,7 +156,7 @@ def reference(scene_name, width=WIDTH, height=HEIGHT):
     """(radiance grid, class grid, stable mask, model camera distance) of a fixture scene at the declared bound."""
     description = model.SCENES[scene_name]
     low, high = model.scene_bounds(description)
-    rad, cls, mask = model.render(model.build_scene(description), width, height, low, high)
+    rad, cls, mask = model.render(model.build_scene(description), width, height, low, high, f0=model.SCENE_F0.get(scene_name, model.MIRROR_F0))
     return rad, cls, model.stable_mask(cls, mask), model.frame(low, high, width / height)[2]
 
 
@@ -201,15 +201,17 @@ def verdict(result, expected, control=False):
 
 def run_scene(name, args):
     folder = args.out / name
-    scene = write_scene(folder / "scene", model.SCENES[name])
+    scene = write_scene(folder / "scene", model.SCENES[name], dielectric=name in model.SCENE_F0)
     rad, cls, stable, distance = reference(name)
     expected = EXPECTED_CLASSES[name]
     report = {"scene": str(scene), "model_distance": distance}
-    runs = {"fixed": args.bounces}
+    runs = {"fixed": (args.binary, args.bounces)}
     if args.control:
-        runs["control"] = 0
-    for label, bounces in runs.items():
-        pfm, log = capture(args.binary.resolve(), scene, folder / label, bounces)
+        runs["control"] = (args.binary, 0)
+    if args.floor_binary and name in model.SCENE_F0:
+        runs["floor_control"] = (args.floor_binary, args.bounces)  # a build that still has the F0 >= 0.5 floor: the dielectric scene must FAIL there
+    for label, (binary, bounces) in runs.items():
+        pfm, log = capture(binary.resolve(), scene, folder / label, bounces)
         rig = corpus.RIG_LINE.search(log)
         if not rig:
             raise CaptureFailed(f"no CORPUS_RIG line in {folder / label / 'engine.log'}")
@@ -224,6 +226,8 @@ def run_scene(name, args):
         result["counters"] = {"extra_traces": int(counters.group(1)), "bound_ended": int(counters.group(2))} if counters else None
         ok, reasons = verdict(result, expected, control=(label == "control"))
         result["ok"], result["reasons"] = ok, reasons
+        if label == "floor_control":
+            result["fails_as_required"] = not ok
         report[label] = result
     return report
 
@@ -234,6 +238,7 @@ def main(argv=None):
     parser.add_argument("--scenes", nargs="*", default=list(model.SCENES), choices=list(model.SCENES))
     parser.add_argument("--bounces", type=int, default=3, help="--reflection-bounces of the main run (default 3, the bound the model declares)")
     parser.add_argument("--control", action=argparse.BooleanOptionalAction, default=True, help="also run --reflection-bounces 0, which must fail")
+    parser.add_argument("--floor-binary", type=pathlib.Path, help="a build WITH the F0 floor: the dielectric scene must fail on it (exit 3 if it passes)")
     parser.add_argument("--out", type=pathlib.Path, default=REPO / "build/f15-reflection-bounce")
     args = parser.parse_args(argv)
     code = 0
@@ -246,6 +251,8 @@ def main(argv=None):
             if not report["fixed"]["ok"]:
                 code = max(code, 1)
             elif args.control and not report["control"]["ok"]:
+                code = 3 if code == 0 else code
+            elif "floor_control" in report and report["floor_control"]["ok"]:
                 code = 3 if code == 0 else code
     except CaptureFailed as error:
         print(error)
