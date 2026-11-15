@@ -946,8 +946,15 @@ struct GPUDIParams {
     float depthRelativeThreshold, normalThreshold, targetFloor, pad0;
     u32 stbnDimensions, stbnSeed, slotCount, pad1; // pad1!=0 forces full-light brute iteration in cluster shade
     float emitterSpecularLow, emitterSpecularHigh; u32 pad2, pad3; // = ReflectionSettings rtRoughnessLow/High
+    // F15.1 (ticket 22): GPU address of the material extension buffer: the per-slot texture transforms of the secondary-site texture lookups
+    // (emitter / hit / capture surfaces); 0 when the scene has none.  Set by the host that owns the params.
+#if defined(__METAL_VERSION__)
+    const device GPUMaterialExtRecord* materialExtensions;
+#else
+    u64 materialExtensions;
+#endif
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUDIParams) == 112, "GPUDIParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDIParams) == 120, "GPUDIParams layout");
 
 struct GPULightCluster {
     u32 count, overflow, pad[2]; // overflow selects full local-light iteration
@@ -994,8 +1001,15 @@ struct GPUProbeGridParams {
     u32 cacheCapacity, cacheProbeLimit, cacheMaxAge, cacheGeneration;
     u32 geometryRevision, lightRevision, materialRevision, viewRevision;
     u32 debugFlags, debugPadding[3];
+    // F15.1 (ticket 22): GPU address of the material extension buffer: the per-slot texture transforms of the secondary-site texture lookups
+    // (emitter / hit / capture surfaces); 0 when the scene has none.  Set by the host that owns the params.
+#if defined(__METAL_VERSION__)
+    const device GPUMaterialExtRecord* materialExtensions;
+#else
+    u64 materialExtensions;
+#endif
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeGridParams) == 176, "GPUProbeGridParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeGridParams) == 184, "GPUProbeGridParams layout");
 
 struct GPUProbeState {
     float offset[3]; u32 state;
@@ -1123,8 +1137,15 @@ struct GPUReflectionParams {
     u32 ssrSteps, ssrBinarySteps, probeCount, seed;
     float environment[3], maxProbeMip;
     float regularizationScale; u32 ssrRoughSteps, boostSamples; float boostRoughness; // k: alpha' = max(alpha_secondary, k*alpha_camera); SSR steps at roughness 1; samples after a reset below boostRoughness
+    // F15.1 (ticket 22): GPU address of the material extension buffer: the per-slot texture transforms of the secondary-site texture lookups
+    // (emitter / hit / capture surfaces); 0 when the scene has none.  Set by the host that owns the params.
+#if defined(__METAL_VERSION__)
+    const device GPUMaterialExtRecord* materialExtensions;
+#else
+    u64 materialExtensions;
+#endif
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionParams) == 304, "GPUReflectionParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionParams) == 312, "GPUReflectionParams layout");
 struct GPUSpecularSample {
     float radiance[3], hitDistance; // weighted outgoing Lo; 0 distance for environment/miss
     float direction[3], proposalSolidAngle;
@@ -1149,8 +1170,15 @@ struct GPUProbeCaptureParams {
     float viewProjection[16], capturePosition[4];
     u32 lightCount, slotCount, materialCount, sampledLightCount;
     float environment[3]; u32 storageFlags; // formerly unused raster seed; ABI size unchanged
+    // F15.1 (ticket 22): GPU address of the material extension buffer: the per-slot texture transforms of the secondary-site texture lookups
+    // (emitter / hit / capture surfaces); 0 when the scene has none.  Set by the host that owns the params.
+#if defined(__METAL_VERSION__)
+    const device GPUMaterialExtRecord* materialExtensions;
+#else
+    u64 materialExtensions;
+#endif
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeCaptureParams) == 112, "GPUProbeCaptureParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeCaptureParams) == 120, "GPUProbeCaptureParams layout");
 struct GPUProbeFilterParams {
     u32 side, mip, sampleCount, cubeIndex;
     float roughness, sourceSide; u32 storageFlags, diagnosticReadback;

@@ -212,7 +212,7 @@ struct ReflectionPasses::Impl {
         params={};std::memcpy(params.viewProjection,f.constants.viewProjection,64);const auto inverse=glm::inverse(glm::make_mat4(f.constants.viewProjection));std::memcpy(params.inverseViewProjection,glm::value_ptr(inverse),64);
         std::memcpy(params.view,f.constants.view,64);std::memcpy(params.cameraPosition,f.constants.cameraPosition,16);
         params.width=f.width;params.height=f.height;params.frameIndex=u32(f.index);params.maxDistance=settings.maxDistance;params.ssrThickness=settings.ssrThickness;
-        params.rtRoughnessLow=settings.rtRoughnessLow;params.rtRoughnessHigh=settings.rtRoughnessHigh;params.slotCount=store.slotCapacity();params.meshCount=u32(geometry.size());params.materialCount=u32(store.materials().size());params.lightCount=f.constants.lightCount;
+        params.rtRoughnessLow=settings.rtRoughnessLow;params.rtRoughnessHigh=settings.rtRoughnessHigh;params.materialExtensions=scene.materialExtensionsAddress();params.slotCount=store.slotCapacity();params.meshCount=u32(geometry.size());params.materialCount=u32(store.materials().size());params.lightCount=f.constants.lightCount;
         params.ssrSteps=settings.ssrSteps;params.ssrBinarySteps=settings.ssrBinarySteps;params.probeCount=1;params.seed=options.lightingSeed;params.maxProbeMip=ProbeMips-1;
         for(u32 i=0;i<3;++i)params.environment[i]=environment[i];params.regularizationScale=options.reflectionRegularizationScale;params.ssrRoughSteps=options.ssrRoughSteps;
         // The analytic probe is a fixed gradient, not the declared environment:
@@ -260,7 +260,7 @@ struct ReflectionPasses::Impl {
             std::memcpy(capture.viewProjection,glm::value_ptr(vp),64);std::memcpy(capture.inverseViewProjection,glm::value_ptr(inv),64);for(u32 k=0;k<3;++k)capture.cameraPosition[k]=probe.capturePosition[k];capture.width=capture.height=ProbeSide;
             if(probeFormat==MTL::PixelFormatRGBA16Float)capture.flags|=REFLECTION_CAPTURE_HALF;
             captureAddress[face]=lighting::upload(c,capture);
-            GPUProbeCaptureParams raster{};std::memcpy(raster.viewProjection,glm::value_ptr(vp),64);for(u32 k=0;k<3;++k){raster.capturePosition[k]=probe.capturePosition[k];raster.environment[k]=params.environment[k];}
+            GPUProbeCaptureParams raster{};raster.materialExtensions=scene.materialExtensionsAddress();std::memcpy(raster.viewProjection,glm::value_ptr(vp),64);for(u32 k=0;k<3;++k){raster.capturePosition[k]=probe.capturePosition[k];raster.environment[k]=params.environment[k];}
             raster.slotCount=store.slotCapacity();raster.materialCount=u32(store.materials().size());raster.lightCount=f.constants.lightCount;raster.sampledLightCount=direct.lightCount();raster.storageFlags=probeFormat==MTL::PixelFormatRGBA16Float?REFLECTION_CAPTURE_HALF:0u;rasterCaptureAddress[face]=lighting::upload(c,raster);}
         for(u32 mip=0;mip<ProbeMips;++mip){GPUProbeFilterParams filter{std::max(1u,ProbeSide>>mip),mip,128,0,float(mip)/float(ProbeMips-1),float(ProbeSide),probeFormat==MTL::PixelFormatRGBA16Float?REFLECTION_CAPTURE_HALF:0u,0};
             filterAddress[mip]=lighting::upload(c,filter);validateAddress[mip]=filterAddress[mip];}GPUProbeFilterParams rawCheck{ProbeSide,~0u,0,0,0,float(ProbeSide),probeFormat==MTL::PixelFormatRGBA16Float?REFLECTION_CAPTURE_HALF:0u,u32(options.debugLighting!=0)};rawValidateAddress=lighting::upload(c,rawCheck);

@@ -48,7 +48,7 @@ kernel void DI_KERNEL(restir_di_candidates)(constant GPUDIParams& p [[buffer(0)]
             if(!diLightFinite(light)){r.pad[0]|=DI_ERROR_WEIGHT;continue;}
             const float2 uv(diRandom(pixel, base + 2u, p, ranks), diRandom(pixel, base + 3u, p, ranks));
             const DISample sample = diSampleTexturedLight(light, selectedEntry.lightIndex, uv,
-                                                          diVec(surface.position), emitters, materials, textures);
+                                                          diVec(surface.position), emitters, materials, textures, p.materialExtensions);
             GPUDIReservoir candidate = diEmpty(p);
             candidate.lightIndex = selectedEntry.lightIndex; candidate.lightID = light.id; candidate.lightGeneration = light.generation;
             candidate.u = uv.x; candidate.v = uv.y;
@@ -159,7 +159,7 @@ inline float3 DI_FN(diShadeSelected)(GPUDISurface surface, DILobe lobe, GPUDIRes
                                thread DISample& sample) {
     if (!surface.valid || reservoir.lightIndex >= p.lightCount || !diValid(reservoir, lights[reservoir.lightIndex], p)) return float3(0);
     sample = diSampleTexturedLight(lights[reservoir.lightIndex], reservoir.lightIndex,
-                                   float2(reservoir.u, reservoir.v), diVec(surface.position), emitters, materials, textures);
+                                   float2(reservoir.u, reservoir.v), diVec(surface.position), emitters, materials, textures, p.materialExtensions);
     return DI_FN(diBRDFLobe)(surface, sample, diEmitterSpecularWeight(p, lights[reservoir.lightIndex], surface), lobe, DI_FN(diEmitterCoatWeight)(p, lights[reservoir.lightIndex], lobe)) * reservoir.normalization;
 }
 

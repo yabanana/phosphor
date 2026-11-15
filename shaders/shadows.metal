@@ -9,6 +9,7 @@
 #include "renderer/cull_math.h"
 #include "renderer/visibility_math.h"
 #include "renderer/meshlet_layout.h"
+#include "texture_transform_core.h" // F15.1 (ticket 22): per-slot texture transforms at the alpha tests and the transmittance tint
 
 static float4x4 shadowMatrix(constant float* m) {
     return float4x4(float4(m[0],m[1],m[2],m[3]),float4(m[4],m[5],m[6],m[7]),
@@ -182,11 +183,12 @@ using ShadowDepthMesh=metal::mesh<ShadowDepthOut,void,MESHLET_MESH_GROUP,MESHLET
     }
 }
 fragment void shadow_depth_fragment(ShadowDepthOut in [[stage_in]],
-    const device GPUMaterial* materials [[buffer(16)]],const device RtTextureHandle* textures [[buffer(17)]]) {
+    const device GPUMaterial* materials [[buffer(16)]],const device RtTextureHandle* textures [[buffer(17)]],
+    const device GPUMaterialExtRecord* extensions [[buffer(22)]]) { // F15.1 (ticket 22): the base colour slot's transform
     const device GPUMaterial& m=materials[in.material];
     if(m.alphaCutoff>0) {
         float alpha=m.baseColor[3];
-        if(m.baseColorTex!=INVALID_TEXTURE_INDEX) alpha*=float(half(textures[m.baseColorTex].tex.sample(kRtAlphaSampler,in.uv,level(0)).a));
+        if(m.baseColorTex!=INVALID_TEXTURE_INDEX) alpha*=float(half(textures[m.baseColorTex].tex.sample(kRtAlphaSampler,texXfSlotUv(extensions,m.flags,m.textureTransformIndex,TT_SLOT_BASE_COLOR,in.uv),level(0)).a));
         if(alpha<m.alphaCutoff) discard_fragment();
     }
 }
@@ -273,11 +275,11 @@ fragment float4 shadow_transmit_fragment(ShadowTransmitOut in [[stage_in]],bool 
     float factor=1.0f; float3 tint(1.0f);
     if(entry || !solid) {
         factor=e1.transmissionFactor;
-        if(e1.transmissionTex!=INVALID_TEXTURE_INDEX) factor*=float(half(textures[e1.transmissionTex].tex.sample(kRtAlphaSampler,in.uv,level(0)).r));
+        if(e1.transmissionTex!=INVALID_TEXTURE_INDEX) factor*=float(half(textures[e1.transmissionTex].tex.sample(kRtAlphaSampler,texXfSlotUv(extensions,m.flags,m.textureTransformIndex,TT_SLOT_TRANSMISSION,in.uv),level(0)).r));
         float metallic=m.metallic;
-        if(m.metallicRoughnessTex!=INVALID_TEXTURE_INDEX) metallic*=float(half(textures[m.metallicRoughnessTex].tex.sample(kRtAlphaSampler,in.uv,level(0)).b));
+        if(m.metallicRoughnessTex!=INVALID_TEXTURE_INDEX) metallic*=float(half(textures[m.metallicRoughnessTex].tex.sample(kRtAlphaSampler,texXfSlotUv(extensions,m.flags,m.textureTransformIndex,TT_SLOT_METAL_ROUGH,in.uv),level(0)).b));
         tint=float3(m.baseColor[0],m.baseColor[1],m.baseColor[2]);
-        if(m.baseColorTex!=INVALID_TEXTURE_INDEX) tint*=float3(half3(textures[m.baseColorTex].tex.sample(kRtAlphaSampler,in.uv,level(0)).rgb));
+        if(m.baseColorTex!=INVALID_TEXTURE_INDEX) tint*=float3(half3(textures[m.baseColorTex].tex.sample(kRtAlphaSampler,texXfSlotUv(extensions,m.flags,m.textureTransformIndex,TT_SLOT_BASE_COLOR,in.uv),level(0)).rgb));
         factor=saturate(factor)*(1.0f-saturate(metallic));
     }
     const float distance=shadowTransmitDistance(in.position.z,p.cascades[p.cascadeIndex].depthRange);

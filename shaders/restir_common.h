@@ -3,6 +3,7 @@
 #include "renderer/gpu_types.h"
 #include "materials/bsdf.h"
 #include "renderer/lobe_guide_pack.h"
+#include "texture_transform_core.h" // F15.1 (ticket 22): per-slot texture transforms of emitter surfaces
 // F15.1 (ticket 07): the lobe-guide kernels are separate entry points ("<name>_lobe", compiled by
 // restir_di_lobe.metal / light_cluster_lobe.metal with PHOSPHOR_DI_LOBE, linked into the first material module) that always carry the reserved function
 // constant MATERIAL_FEATURES (22, shaders/variants.def).  Everything else, the base kernels included, never
@@ -109,7 +110,8 @@ inline DISample diSampleLight(GPUSampledLight l, float2 uv, float3 receiver) {
 // arithmetic. No camera derivatives exist on a sampled light surface.
 inline DISample diSampleTexturedLight(GPUSampledLight l, uint lightIndex, float2 uv, float3 receiver,
                                       const device GPUEmissiveSurface* emitters,
-                                      const device GPUMaterial* materials, const device DITextureHandle* textures) {
+                                      const device GPUMaterial* materials, const device DITextureHandle* textures,
+                                      const device GPUMaterialExtRecord* extensions = nullptr) { // F15.1 (ticket 22): per-slot texture transforms
     DISample s = diSampleLight(l, uv, receiver);
     if (!s.valid || l.type != DI_LIGHT_TRIANGLE || !(l.flags & DI_LIGHT_TEXTURED_EMISSION)) return s;
     const GPUEmissiveSurface emitter = emitters[lightIndex];
@@ -120,11 +122,13 @@ inline DISample diSampleTexturedLight(GPUSampledLight l, uint lightIndex, float2
                            root * (1.0f - uv.y) * float2(emitter.uv1[0], emitter.uv1[1]) +
                            root * uv.y * float2(emitter.uv2[0], emitter.uv2[1]);
     const half3 texel = m.emissiveTex == INVALID_TEXTURE_INDEX ? half3(1) :
-                        half3(textures[m.emissiveTex].tex.sample(kDIEmitterSampler, lightUV, level(0.0f)).rgb);
+                        half3(textures[m.emissiveTex].tex.sample(kDIEmitterSampler,
+                              texXfSlotUv(extensions, m.flags, m.textureTransformIndex, TT_SLOT_EMISSIVE, lightUV), level(0.0f)).rgb);
     s.radiance = float3(m.emissive[0], m.emissive[1], m.emissive[2]) * float3(texel);
     if (m.alphaCutoff > 0) {
         const half alphaTexel = m.baseColorTex == INVALID_TEXTURE_INDEX ? half(1) :
-                                half(textures[m.baseColorTex].tex.sample(kDIEmitterSampler, lightUV, level(0.0f)).a);
+                                half(textures[m.baseColorTex].tex.sample(kDIEmitterSampler,
+                                     texXfSlotUv(extensions, m.flags, m.textureTransformIndex, TT_SLOT_BASE_COLOR, lightUV), level(0.0f)).a);
         const float alpha = m.baseColor[3] * float(alphaTexel);
         if (!isfinite(alpha)) { s.valid = false; return s; }
         if (alpha < m.alphaCutoff) s.radiance = float3(0);
@@ -415,7 +419,7 @@ inline bool DI_FN(diMerge)(thread GPUDIReservoir& r, GPUDIReservoir source, GPUD
         return accepted;
     }
     const DISample sample = diSampleTexturedLight(light, source.lightIndex, float2(source.u, source.v),
-                                                 diVec(destination.position), emitters, materials, textures);
+                                                 diVec(destination.position), emitters, materials, textures, p.materialExtensions);
     source.target = DI_FN(diTarget)(destination, sample, p.targetFloor, lobe);
     const bool accepted = diStream(r, source, source.target * source.normalization * float(m), m, random);
     if (accepted) r.age = mergedAge; // A fresh selection must not rejuvenate old mass.

@@ -1,0 +1,24 @@
+{
+  "function_descriptors": {
+    "library_function_descriptors": [],
+    "specialized_function_descriptors": []
+  },
+  "generator": "MetalFramework",
+  "libraries": [
+    {
+      "label": "DB877D1919C22A61FF5140477CDB123052BA475DA6658AF9F3D2A2C707D97F35",
+      "path": "@PHOSPHOR_METALLIB@"
+    }
+  ],
+  "pipeline_descriptors": {
+    "compute_pipeline_descriptors": [],
+    "mesh_render_pipeline_descriptors": [],
+    "render_pipeline_descriptors": [],
+    "tile_render_pipeline_descriptors": []
+  },
+  "version": {
+    "major": 0,
+    "minor": 1,
+    "sub_minor": 0
+  }
+}

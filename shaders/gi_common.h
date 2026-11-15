@@ -2,6 +2,7 @@
 #define PHOSPHOR_RT_NO_ALPHA_FUNCTION
 #include "rt_common.h"
 #include "restir_common.h"
+#include "texture_transform_core.h" // F15.1 (ticket 22)
 
 // F12 irradiance atlas tiles: x = probe % countX; y = probe / countX.
 // Tile stride is texels + 2 (explicit seam-folded 1-texel border).
@@ -109,12 +110,12 @@ inline bool giMaterial(GPURtHit hit,constant GPUProbeGridParams& p,const device 
     float2 uv=float2(a.u,a.v)*(1.0f-hit.u-hit.v)+float2(v.u,v.v)*hit.u+float2(w.u,w.v)*hit.v;
     const device GPUMaterial& m=materials[i.materialIndex];
     float3 base=float3(m.baseColor[0],m.baseColor[1],m.baseColor[2]);
-    if(m.baseColorTex!=INVALID_TEXTURE_INDEX) base*=float3(half3(textures[m.baseColorTex].tex.sample(kGiMaterialSampler,uv,level(0.0f)).rgb));
+    if(m.baseColorTex!=INVALID_TEXTURE_INDEX) base*=float3(half3(textures[m.baseColorTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_BASE_COLOR,uv),level(0.0f)).rgb));
     float metallic=m.metallic;
-    if(m.metallicRoughnessTex!=INVALID_TEXTURE_INDEX) metallic*=float(half(textures[m.metallicRoughnessTex].tex.sample(kGiMaterialSampler,uv,level(0.0f)).b));
+    if(m.metallicRoughnessTex!=INVALID_TEXTURE_INDEX) metallic*=float(half(textures[m.metallicRoughnessTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_METAL_ROUGH,uv),level(0.0f)).b));
     out.diffuse=max(base,0.0f)*(1.0f-saturate(metallic));
     out.emissive=float3(m.emissive[0],m.emissive[1],m.emissive[2]);
-    if(m.emissiveTex!=INVALID_TEXTURE_INDEX) out.emissive*=float3(half3(textures[m.emissiveTex].tex.sample(kGiMaterialSampler,uv,level(0.0f)).rgb));
+    if(m.emissiveTex!=INVALID_TEXTURE_INDEX) out.emissive*=float3(half3(textures[m.emissiveTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_EMISSIVE,uv),level(0.0f)).rgb));
     out.emissive=max(out.emissive,0.0f);
     if(m.flags&MATERIAL_FLAG_UNLIT)out.emissive=float3(0.0f);
     // F12.1 residue found in F15: the atlas ignores transmission (declared: secondary_gi_and_probe_hits_ignore_transmission), so a glass pane is a
@@ -177,7 +178,7 @@ inline float3 giSecondaryRadiance(float3 point,float3 normal,GiMaterial material
     }
     if(extra.sampledLightCount) {
         uint index=min(uint(giRandom(seed)*float(extra.sampledLightCount)),extra.sampledLightCount-1u);
-        DISample sample=diSampleTexturedLight(sampled[index],index,float2(giRandom(seed),giRandom(seed)),point,emissive,materials,textures);
+        DISample sample=diSampleTexturedLight(sampled[index],index,float2(giRandom(seed),giRandom(seed)),point,emissive,materials,textures,p.materialExtensions);
         float cosN=max(0.0f,dot(normal,sample.wi));
         if(sample.valid && cosN>0.0f) {
             float inversePdf=sample.delta?float(extra.sampledLightCount):float(extra.sampledLightCount)/max(sample.pdfArea,1e-20f);

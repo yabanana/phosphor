@@ -4,6 +4,7 @@
 #include "renderer/meshlet_layout.h"
 using namespace metal;
 using namespace phosphor;
+#include "texture_transform_core.h" // F15.1 (ticket 22): the base colour slot transform of the cache alpha test
 
 // F10.5 adds buffer18 GPUShadowCacheParams, 19 CPU conservative static class,
 // 20 expected GPUShadowCacheTile[64], 21 persistent GPUShadowCacheTile[64].
@@ -76,14 +77,15 @@ using CacheMesh=metal::mesh<CacheDepthOut,void,MESHLET_MESH_GROUP,MESHLET_MESH_G
 struct CacheTexture { texture2d<float> tex; };
 fragment void shadow_cache_depth_fragment(CacheDepthOut in [[stage_in]],
     const device GPUMaterial* materials [[buffer(16)]],const device CacheTexture* textures [[buffer(17)]],
-    constant GPUShadowCacheParams& cache [[buffer(18)]]) {
+    constant GPUShadowCacheParams& cache [[buffer(18)]],
+    const device GPUMaterialExtRecord* extensions [[buffer(22)]]) { // F15.1 (ticket 22): the base colour slot's transform
     const uint tile=cacheTile(uint2(in.position.xy),cache.resolution);
     if(cache.casterClass==0 && !cacheBit(cache.currentLo,cache.currentHi,tile))discard_fragment();
     const device GPUMaterial& m=materials[in.material];
     if(m.alphaCutoff>0) {
         constexpr sampler alphaSampler(filter::linear,mip_filter::linear,address::repeat);
         float alpha=m.baseColor[3];
-        if(m.baseColorTex!=INVALID_TEXTURE_INDEX)alpha*=float(half(textures[m.baseColorTex].tex.sample(alphaSampler,in.uv,level(0)).a));
+        if(m.baseColorTex!=INVALID_TEXTURE_INDEX)alpha*=float(half(textures[m.baseColorTex].tex.sample(alphaSampler,texXfSlotUv(extensions,m.flags,m.textureTransformIndex,TT_SLOT_BASE_COLOR,in.uv),level(0)).a));
         if(alpha<m.alphaCutoff)discard_fragment();
     }
 }

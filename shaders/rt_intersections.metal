@@ -1,5 +1,6 @@
 // One exported alpha entry shared by all statically linked RT consumers.
 #include "rt_common.h"
+#include "texture_transform_core.h" // F15.1 (ticket 22): per-slot texture transforms at the secondary sites
 
 // F15.1 (ticket 14): the transmittance of ONE transmissive triangle crossed by a RT_PROBE_SHADOW_TRANSMITTED ray, accumulated in log space
 // into the payload (order independent: no sorting of the hits).  Hardware invokes the intersection function for every non-opaque triangle the
@@ -45,11 +46,12 @@ inline void rtAccumulateTransmittance(uint primitive, uint slot, float2 bary, fl
     float3 tint(1.0f);
     if (entry || !solid) {
         factor = e1.transmissionFactor;
-        if (e1.transmissionTex != INVALID_TEXTURE_INDEX) factor *= float(half(textures[e1.transmissionTex].tex.sample(kRtAlphaSampler, uv, level(0)).r));
+        // F15.1 (ticket 22): each slot samples its own KHR_texture_transform (the uv itself for a material without one).
+        if (e1.transmissionTex != INVALID_TEXTURE_INDEX) factor *= float(half(textures[e1.transmissionTex].tex.sample(kRtAlphaSampler, texXfSlotUv(extensions, m.flags, m.textureTransformIndex, TT_SLOT_TRANSMISSION, uv), level(0)).r));
         float metallic = m.metallic;
-        if (m.metallicRoughnessTex != INVALID_TEXTURE_INDEX) metallic *= float(half(textures[m.metallicRoughnessTex].tex.sample(kRtAlphaSampler, uv, level(0)).b));
+        if (m.metallicRoughnessTex != INVALID_TEXTURE_INDEX) metallic *= float(half(textures[m.metallicRoughnessTex].tex.sample(kRtAlphaSampler, texXfSlotUv(extensions, m.flags, m.textureTransformIndex, TT_SLOT_METAL_ROUGH, uv), level(0)).b));
         tint = float3(m.baseColor[0], m.baseColor[1], m.baseColor[2]);
-        if (m.baseColorTex != INVALID_TEXTURE_INDEX) tint *= float3(half3(textures[m.baseColorTex].tex.sample(kRtAlphaSampler, uv, level(0)).rgb));
+        if (m.baseColorTex != INVALID_TEXTURE_INDEX) tint *= float3(half3(textures[m.baseColorTex].tex.sample(kRtAlphaSampler, texXfSlotUv(extensions, m.flags, m.textureTransformIndex, TT_SLOT_BASE_COLOR, uv), level(0)).rgb));
         factor = saturate(factor) * (1.0f - saturate(metallic));
     }
     // Shared with the CSM transmittance pass (F15.1 ticket 15): the entry factor, the Fresnel pass and the signed medium term.
@@ -63,7 +65,8 @@ inline void rtAccumulateTransmittance(uint primitive, uint slot, float2 bary, fl
 template<typename Payload>
 inline bool rtAlphaMaskedTest(uint primitive, float2 bary, float distance, ray_data Payload& payload, const device GPUMaterial& m,
                               const device GPUInstance& instance, const device GPURtMesh* meshes, const device RtTextureHandle* textures,
-                              const device GPUVertex* vertices, const device uint* indices) {
+                              const device GPUVertex* vertices, const device uint* indices,
+                              const device GPUMaterialExtRecord* extensions) {
     const device GPURtMesh& mesh = meshes[instance.meshIndex];
     if (primitive >= mesh.indexCount / 3u) return false;
     if (m.baseColorTex == INVALID_TEXTURE_INDEX) return m.baseColor[3] >= m.alphaCutoff;
@@ -71,7 +74,11 @@ inline bool rtAlphaMaskedTest(uint primitive, float2 bary, float distance, ray_d
     const device GPUVertex& v0 = vertices[mesh.vertexOffset + indices[base]];
     const device GPUVertex& v1 = vertices[mesh.vertexOffset + indices[base + 1u]];
     const device GPUVertex& v2 = vertices[mesh.vertexOffset + indices[base + 2u]];
-    const float2 uv0(v0.u, v0.v), uv1(v1.u, v1.v), uv2(v2.u, v2.v);
+    // F15.1 (ticket 22): the base colour slot's KHR_texture_transform moves the vertex uvs (affine: the interpolation and the cone LOD
+    // follow); a material without one keeps every value as it was.
+    const float2 uv0 = texXfSlotUv(extensions, m.flags, m.textureTransformIndex, TT_SLOT_BASE_COLOR, float2(v0.u, v0.v)),
+                 uv1 = texXfSlotUv(extensions, m.flags, m.textureTransformIndex, TT_SLOT_BASE_COLOR, float2(v1.u, v1.v)),
+                 uv2 = texXfSlotUv(extensions, m.flags, m.textureTransformIndex, TT_SLOT_BASE_COLOR, float2(v2.u, v2.v));
     const float2 uv = uv0 * (1.0f - bary.x - bary.y) + uv1 * bary.x + uv2 * bary.y;
     const auto texture = textures[m.baseColorTex].tex;
     float lod = 0.0f;
@@ -122,7 +129,7 @@ bool rt_alpha_generic(uint primitive [[primitive_id]], uint slot [[user_instance
         if (!transmissive) ++payload.opaqueAlphaTests;
         return true;
     }
-    return rtAlphaMaskedTest(primitive, bary, distance, payload, m, instance, meshes, textures, vertices, indices);
+    return rtAlphaMaskedTest(primitive, bary, distance, payload, m, instance, meshes, textures, vertices, indices, extensions);
 }
 
 // F15 ticket 24: the entry of every pipeline that never traces a RT_PROBE_SHADOW_TRANSMITTED ray.  The payload is the 16-byte
@@ -137,7 +144,8 @@ bool rt_alpha_lite(uint primitive [[primitive_id]], uint slot [[user_instance_id
                     const device uint* indices [[buffer(3)]],
                     const device GPUInstance* instances [[buffer(4)]],
                     const device GPURtMesh* meshes [[buffer(5)]],
-                    constant GPURtParams& params [[buffer(6)]]) {
+                    constant GPURtParams& params [[buffer(6)]],
+                    const device GPUMaterialExtRecord* extensions [[buffer(7)]]) { // F15.1 (ticket 22): the IFT binds it for every table
     ++payload.alphaTests;
     if (slot >= params.slotCount) return false;
     const device GPUInstance& instance = instances[slot];
@@ -149,5 +157,5 @@ bool rt_alpha_lite(uint primitive [[primitive_id]], uint slot [[user_instance_id
         if (!transmissive) ++payload.opaqueAlphaTests;
         return true;
     }
-    return rtAlphaMaskedTest(primitive, bary, distance, payload, m, instance, meshes, textures, vertices, indices);
+    return rtAlphaMaskedTest(primitive, bary, distance, payload, m, instance, meshes, textures, vertices, indices, extensions);
 }

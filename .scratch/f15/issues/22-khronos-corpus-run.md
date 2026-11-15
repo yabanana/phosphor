@@ -194,3 +194,38 @@ Open: numeric texture fixtures (coat normal, anisotropy direction, iridescence t
   most grazing pixels (470 of 1884 covered pixels gain > 5 %). The subset scenes contain no smooth dielectric secondary hit, so the clips are not affected. Sponza D2: with the criterion
   without the F0 floor 828 of 921600 linear pixels changed (max 0.0031) through its smooth dielectric texels; with F0 >= 0.5 zero extra traces.
 - Quiet D2 A/B (bounces 3 vs 0): Sponza D2 triggers no extra trace, so expect the unused-branch cost only; use the commands in the agent report.
+
+2026-11-15 (second round) — per-slot KHR_texture_transform at the secondary sites (orchestrator review: the declared gaps are closed):
+
+- Sites now applying a slot's transform (commit message of this round lists the files): RT any-hit alpha test and the transmittance tint (`rt_intersections.metal`; the lite
+  entry gained buffer 7, which every IFT already bound), CSM alpha (`shadow_depth_fragment`) and static-cache alpha (`shadow_cache_depth_fragment`) plus the transmittance tint
+  (`shadows.metal`; the extension buffer is bound at SB_EXTENSIONS 22 for every raster draw), RT reflection hit surfaces and glass hits (`reflections.metal`, incl. the normal slot's
+  rotated tangent frame), GI hit surfaces (`gi_common.h giMaterial`), probe capture surfaces (`reflection_probes.metal`), emitter textures of DI / reflections / GI / probes
+  (`restir_common.h diSampleTexturedLight`: emissive and base-colour-alpha slots).  Mechanism: `shaders/texture_transform_core.h` (constant-free helpers, `texXfSlotUv`), the
+  extension-buffer address as a new last field `materialExtensions` of GPUDIParams (112 -> 120 B), GPUProbeGridParams (176 -> 184), GPUReflectionParams (304 -> 312),
+  GPUProbeCaptureParams (112 -> 120), filled where each params struct is built.  No function constant (the plain entries stay constant-free for metal-tt); every transform is a guarded
+  alternative: a material without MATERIAL_FLAG_TEXTURE_TRANSFORM hands the sampler the very same uv.
+- Fixtures (`tools/f15_texture_transform_secondary.py`, CPU self-test = ctest `f15_texture_transform_secondary_python`; thresholds fixed in its docstring before any comparison; a build without the
+  site change = `build/pre-sec`, the binary of 096675f):
+    rt-shadow / csm-shadow / cache-shadow: an alpha-masked quad (per-slot transform on the alpha channel of the base colour texture, DIFFERENT transforms on two decoy slots) shadows a floor
+    behind it from the sun (`--shadows rt` / `csm` / `csm --shadow-cache on`); the reference is the planar sun ray and the README formula; only floor pixels whose sun ray crosses the caster count.
+      before: agreement of the reference 0.592 (rt) / 0.586 (csm, cache) against thresholds 0.99 / 0.97 / 0.97 (FAIL; the identity control scores 0.84 / 0.82: the shadow ignored the transform);
+      after: 1.0 on 2219 valid pixels in all three; negative controls (the transform of another slot = the uniform-bake result, identity) 0.41 - 0.59 (< 0.90).
+    reflection: a palette quad (transformed base colour slot, decoys on two others) seen in a mirror floor (`--reflections rt`, pitch 30): before 0.113 (threshold 0.95, FAIL), after 1.0 on 1972
+      valid pixels; controls 0.03 - 0.09.
+  The same four cases under API + shader validation (archive off): 1.0, clean (only the known baseline notices; the csm / cache captures add redundant setDepthStencilState / setRenderPipelineState
+  notices of the shadow passes, not new failures).  O7: 0 GPU allocations in all four.
+- Featureless scenes unchanged (this round's final build): `f15_exact.sh` 5 cases PFM byte-identical (cmp) to build/litefix/exact-new (sponza-d2 included: its RT alpha path runs the changed
+  `rtAlphaMaskedTest`), `visual_check` 0 px on 8 benches, the five-slot primary fixture still 1.0 on every slot.
+- NOT covered by a numeric fixture (implemented through the same helper, covered by review and the shaders compiling into the archive build): GI hit surfaces (`giMaterial`: indirect colour bleeding
+  is smooth, no per-pixel reference exists), the static probe capture (the cube map holds a parallax-corrected, filtered environment: a mirror of it shows a blur, not the cells: tried, rejected as a
+  fixture), emitter textures (the texel of a randomly sampled area-light point is not observable per pixel), the transmittance tint of the RT / CSM glass passes (existing transmission fixtures
+  do not use transformed slots).  `fog.metal` samples textured emitters without the extension buffer (its params struct has none): a textured emitter with a per-slot transform is lit untransformed
+  by the fog in-scatter only.
+- Still unsupported, by decision: a second UV set per material (GPUVertex 48 -> 56 B) is Out of Scope in `.scratch/f15/spec.md` (the Out of Scope list, lines 217-219: "...per-texture (non-uniform)
+  texture transforms, a second UV set"; the owner override covered the non-uniform transform only): the Unsupported reason stays named ("the textures of this material use different UV sets (the
+  engine has one UV stream per mesh)").  Layer sub-material transforms and the layer mask / height UV wait for the layers agent's integrated code (orchestrator follow-up).
+- Archive: texxform-2.json is EMPTY by measurement: the four fixture scenes (RT, CSM, cache, reflection) request only pipelines the archive already holds (`PIPELINES ... misses 0` in all four, and
+  `filter_pipeline_harvest.py --constant 26 --function ... --skip-present` keeps 0 descriptors from their harvests): the secondary-site changes edit shader bodies, not descriptors.
+- For the orchestrator's quiet-machine timing: the guards add one flag test (`m.flags & TEXTURE_TRANSFORM`) at each of the sites above and a pointer field to four params structs.  Sponza D2 (RT alpha
+  tests, RT shadows) A/B against 096675f is the number to take; output is bit-identical.

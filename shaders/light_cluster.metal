@@ -183,7 +183,7 @@ kernel void DI_KERNEL(light_cluster_shade)(constant GPUDIParams& p [[buffer(0)]]
                             fract(diRandom(pixel, 41u, p, ranks) + diWhite(0, 0, p.frameIndex, lightIndex * 2u + 1u, p.stbnSeed)));
             if(!diLightFinite(lights[lightIndex]))atomic_fetch_add_explicit(signalErrors+3,1u,memory_order_relaxed);
             const DISample sample = diSampleTexturedLight(lights[lightIndex], lightIndex, uv,
-                                                          diVec(surface.position), emitters, materials, textures);
+                                                          diVec(surface.position), emitters, materials, textures, p.materialExtensions);
             const float3 contribution=DI_FN(diBRDFLobe)(surface,sample,diEmitterSpecularWeight(p,lights[lightIndex],surface),lobe,DI_FN(diEmitterCoatWeight)(p,lights[lightIndex],lobe));diRecordNonfinite(contribution,signalErrors,0u);
             if (sample.valid && sample.pdfArea > 0) {value += (count < listCount ? stratumWeight * contribution : contribution) / sample.pdfArea;diRecordNonfinite(value,signalErrors,2u);}
         }
@@ -235,7 +235,7 @@ kernel void DI_KERNEL(light_cluster_shade_rt)(constant GPUDIParams& p [[buffer(0
                             fract(diRandom(pixel, 41u, p, ranks) + diWhite(0, 0, p.frameIndex, lightIndex * 2u + 1u, p.stbnSeed)));
             if(!diLightFinite(lights[lightIndex]))atomic_fetch_add_explicit(signalErrors+3,1u,memory_order_relaxed);
             const DISample sample = diSampleTexturedLight(lights[lightIndex], lightIndex, uv,
-                                                          diVec(surface.position), emitters, materials, textures);
+                                                          diVec(surface.position), emitters, materials, textures, p.materialExtensions);
             const float3 contribution = DI_FN(diBRDFLobe)(surface, sample, diEmitterSpecularWeight(p, lights[lightIndex], surface), lobe, DI_FN(diEmitterCoatWeight)(p, lights[lightIndex], lobe));diRecordNonfinite(contribution,signalErrors,0u);
             if (sample.valid && sample.pdfArea > 0) {
                 // F15.1 (ticket 14): the visibility ray's RGB transmittance (0 = blocked) scales the contribution.

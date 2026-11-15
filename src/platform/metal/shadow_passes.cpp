@@ -448,7 +448,7 @@ struct ShadowPasses::Impl {
         for(size_t i=0;i<slot.casterDraws.size();++i) {
             const auto& range=slot.casterDraws[i];
             auto* t=slot.rasterTables[tableBase+i];common(t,ctx);t->setAddress(slot.drawParams[base+i],SB_PARAMS);
-            if(transmit){const auto extensions=scene.materialExtensionsAddress();t->setAddress(extensions?extensions:scene.buffers().materials()->gpuAddress(),SB_EXTENSIONS);}
+            {const auto extensions=scene.materialExtensionsAddress();t->setAddress(extensions?extensions:scene.buffers().materials()->gpuAddress(),SB_EXTENSIONS);} // transmittance tint, F15.1 ticket 22: the alpha tests too
             if(cached){t->setAddress(cls==0?slot.staticParams[cascade]:slot.dynamicParams[cascade],18);t->setAddress(slot.classificationAddress,19);}
             if(range.meshShader) {
                 auto* state=pipelines.render(cached?cacheMesh:transmit?transmitMesh:meshDepth);

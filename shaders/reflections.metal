@@ -1,4 +1,5 @@
 #include "reflection_common.h"
+#include "texture_transform_core.h" // F15.1 (ticket 22): per-slot texture transforms at the reflection hits
 
 // RT and screen-space kernels share params0/surfaces1, cache13/GIparams14,
 // probeMetadata18, specOutput17. Textures: baseRadiance0, depth1, cubeAtlas2,
@@ -24,11 +25,14 @@ inline bool reflectionMaterial(GPURtHit hit,float3 point,float3 geometric,float3
     if(dot(n,outgoing)<0)n=-n;n=normalize(n);if(dot(geometric,outgoing)<0)geometric=-geometric;
     const float3 tangent=(float3x3(model[0].xyz,model[1].xyz,model[2].xyz))*(float3(a.tx,a.ty,a.tz)*bary.x+float3(b.tx,b.ty,b.tz)*bary.y+float3(c.tx,c.ty,c.tz)*bary.z);
     float3 t=tangent-n*dot(n,tangent);if(m.normalTex!=INVALID_TEXTURE_INDEX&&dot(t,t)>1e-8f){t=normalize(t);
-        float3 tn=float3(half3(textures[m.normalTex].tex.sample(kGiMaterialSampler,uv,level(0)).rgb))*2-1;tn.xy*=m.normalScale;
-        float handed=(a.tw*bary.x+b.tw*bary.y+c.tw*bary.z)*((instance.flags&INSTANCE_FLAG_MIRRORED)?-1.0f:1.0f);n=normalize(t*tn.x+cross(n,t)*handed*tn.y+n*tn.z);}
-    float3 albedo=float3(m.baseColor[0],m.baseColor[1],m.baseColor[2]);if(m.baseColorTex!=INVALID_TEXTURE_INDEX)albedo*=float3(half3(textures[m.baseColorTex].tex.sample(kGiMaterialSampler,uv,level(0)).rgb));
-    float rough=m.roughness,metal=m.metallic;if(m.metallicRoughnessTex!=INVALID_TEXTURE_INDEX){half4 mr=half4(textures[m.metallicRoughnessTex].tex.sample(kGiMaterialSampler,uv,level(0)));rough*=float(mr.g);metal*=float(mr.b);}
-    emission=float3(m.emissive[0],m.emissive[1],m.emissive[2]);if(m.emissiveTex!=INVALID_TEXTURE_INDEX)emission*=float3(half3(textures[m.emissiveTex].tex.sample(kGiMaterialSampler,uv,level(0)).rgb));
+        // F15.1 (ticket 22): the normal slot's KHR_texture_transform (the texel axes follow the transformed uv); unchanged without one.
+        float3 tn=float3(half3(textures[m.normalTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_NORMAL,uv),level(0)).rgb))*2-1;tn.xy*=m.normalScale;
+        float handed=(a.tw*bary.x+b.tw*bary.y+c.tw*bary.z)*((instance.flags&INSTANCE_FLAG_MIRRORED)?-1.0f:1.0f);
+        if((m.flags&MATERIAL_FLAG_TEXTURE_TRANSFORM)!=0u){float3 tt=t,bb=cross(n,t)*handed;texXfFrameOn(texXfForOn(p.materialExtensions,m.flags,m.textureTransformIndex),TT_SLOT_NORMAL,tt,bb);n=normalize(tt*tn.x+bb*tn.y+n*tn.z);}
+        else n=normalize(t*tn.x+cross(n,t)*handed*tn.y+n*tn.z);}
+    float3 albedo=float3(m.baseColor[0],m.baseColor[1],m.baseColor[2]);if(m.baseColorTex!=INVALID_TEXTURE_INDEX)albedo*=float3(half3(textures[m.baseColorTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_BASE_COLOR,uv),level(0)).rgb));
+    float rough=m.roughness,metal=m.metallic;if(m.metallicRoughnessTex!=INVALID_TEXTURE_INDEX){half4 mr=half4(textures[m.metallicRoughnessTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_METAL_ROUGH,uv),level(0)));rough*=float(mr.g);metal*=float(mr.b);}
+    emission=float3(m.emissive[0],m.emissive[1],m.emissive[2]);if(m.emissiveTex!=INVALID_TEXTURE_INDEX)emission*=float3(half3(textures[m.emissiveTex].tex.sample(kGiMaterialSampler,texXfSlotUv(p.materialExtensions,m.flags,m.textureTransformIndex,TT_SLOT_EMISSIVE,uv),level(0)).rgb));
     surface={};for(uint i=0;i<3;++i){surface.position[i]=point[i];surface.geometricNormal[i]=geometric[i];surface.shadingNormal[i]=n[i];surface.albedo[i]=albedo[i];surface.viewDirection[i]=outgoing[i];}
     surface.roughness=clamp(rough,.04f,1.0f);surface.metallic=saturate(metal);surface.instanceSlot=hit.slot;surface.instanceGeneration=hit.generation;surface.valid=1;
     const bool finite=all(isfinite(n))&&all(isfinite(albedo))&&all(isfinite(emission));if(!finite)numericError=true;return finite;
@@ -110,7 +114,7 @@ inline float3 reflectionSecondary(GPURtHit hit,float3 direction,
         else if(sample.valid&&any(contribution>0))result+=contribution*diEndpointTransmittance<Payload>(surface,sample,as,ift,instances,p.slotCount);
     }
     if(extra.sampledLightCount){const uint i=min(uint(giRandom(seed)*extra.sampledLightCount),extra.sampledLightCount-1u);
-        const DISample sample=diSampleTexturedLight(sampled[i],i,float2(giRandom(seed),giRandom(seed)),point,emitters,materials,textures);
+        const DISample sample=diSampleTexturedLight(sampled[i],i,float2(giRandom(seed),giRandom(seed)),point,emitters,materials,textures,p.materialExtensions);
         if(sample.valid&&sample.pdfArea>0){const float3 contribution=diBRDF(surface,sample)*float(extra.sampledLightCount)/sample.pdfArea;
             if(!all(isfinite(contribution))||any(contribution<0))numericError=true;else result+=contribution*diEndpointTransmittance<Payload>(surface,sample,as,ift,instances,p.slotCount);}}
     // GI atlas is INDIRECT irradiance. Add once; AO never modulates it.
@@ -223,9 +227,9 @@ inline ReflectionGlassHit reflectionGlassHit(GPURtHit hit,float3 direction,const
     g.glass=true;g.thin=!volume;g.entering=dot(direction,geometric)<0;
     const float side=g.thin?(dot(direction,geometric)<0?1.0f:-1.0f):(g.entering?1.0f:-1.0f); // the side the incoming ray is on
     g.normal=side*outward;g.geometric=side*geometric;g.point=point;
-    float rough=m.roughness;if(m.metallicRoughnessTex!=INVALID_TEXTURE_INDEX)rough*=float(half4(textures[m.metallicRoughnessTex].tex.sample(kGiMaterialSampler,uv,level(0))).g);
+    float rough=m.roughness;if(m.metallicRoughnessTex!=INVALID_TEXTURE_INDEX)rough*=float(half4(textures[m.metallicRoughnessTex].tex.sample(kGiMaterialSampler,texXfSlotUv(extRecords,m.flags,m.textureTransformIndex,TT_SLOT_METAL_ROUGH,uv),level(0))).g);
     g.alpha=bsdfAlpha(clamp(rough,.04f,1.0f));g.ior=e0.ior;
-    float3 tint=float3(m.baseColor[0],m.baseColor[1],m.baseColor[2]);if(m.baseColorTex!=INVALID_TEXTURE_INDEX)tint*=float3(half3(textures[m.baseColorTex].tex.sample(kGiMaterialSampler,uv,level(0)).rgb));
+    float3 tint=float3(m.baseColor[0],m.baseColor[1],m.baseColor[2]);if(m.baseColorTex!=INVALID_TEXTURE_INDEX)tint*=float3(half3(textures[m.baseColorTex].tex.sample(kGiMaterialSampler,texXfSlotUv(extRecords,m.flags,m.textureTransformIndex,TT_SLOT_BASE_COLOR,uv),level(0)).rgb));
     g.tint=tint;g.attenuationColor=float3(e1.attenuationColor[0],e1.attenuationColor[1],e1.attenuationColor[2]);g.attenuationDistance=e1.attenuationDistance;
     return g;
 }

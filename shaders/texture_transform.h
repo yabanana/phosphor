@@ -9,64 +9,18 @@
 //
 // Needs gpu_types.h, the generated forward_variants.generated.metal.h (kTextureTransform) and <metal_stdlib>.
 
-struct TexXf {
-    const device GPUTextureTransformRecord *rec;
-    uint mask;
-};
-
-static TexXf texXfNone() {
-    TexXf x;
-    x.rec = nullptr;
-    x.mask = 0u;
-    return x;
-}
+#include "texture_transform_core.h"
 
 // The "On" functions never reference kTextureTransform: an entry point that only exists for scenes with transforms (the *_tt_fs alpha
 // tests) uses them, so its descriptor needs no function constant (metal-tt cannot lower an unspecialised descriptor whose function
 // references one).  The plain names compile the transform in only when the pipeline sets the reserved constant.
 
-// The block of a material: the extension buffer address plus the material's first transform record.
-static TexXf texXfForOn(const device GPUMaterialExtRecord *extensions, uint flags, uint index) {
-    TexXf x = texXfNone();
-    if (extensions != nullptr && (flags & MATERIAL_FLAG_TEXTURE_TRANSFORM) != 0u) {
-        x.rec = reinterpret_cast<const device GPUTextureTransformRecord *>(extensions + index);
-        x.mask = x.rec[0].slotMask;
-    }
-    return x;
-}
-
 static TexXf texXfFor(const device GPUMaterialExtRecord *extensions, uint flags, uint index) {
     return kTextureTransform != 0u ? texXfForOn(extensions, flags, index) : texXfNone();
 }
 
-static bool texXfHasOn(TexXf x, uint slot) {
-    return ((x.mask >> slot) & 1u) != 0u;
-}
-
 static bool texXfHas(TexXf x, uint slot) {
     return kTextureTransform != 0u && texXfHasOn(x, slot);
-}
-
-static GPUTextureTransform texXfGet(TexXf x, uint slot) {
-    return x.rec[slot / 3u].t[slot % 3u];
-}
-
-static float2 texXfApply(GPUTextureTransform t, float2 uv) {
-    return float2(t.m[0] * uv.x + t.m[1] * uv.y + t.o[0], t.m[2] * uv.x + t.m[3] * uv.y + t.o[1]);
-}
-
-static float2 texXfLinear(GPUTextureTransform t, float2 d) {
-    return float2(t.m[0] * d.x + t.m[1] * d.y, t.m[2] * d.x + t.m[3] * d.y);
-}
-
-// The slot's uv and derivatives (unchanged when the slot has no transform).
-static void texXfUvOn(TexXf x, uint slot, thread float2 &uv, thread float2 &dx, thread float2 &dy) {
-    if (texXfHasOn(x, slot)) {
-        const GPUTextureTransform t = texXfGet(x, slot);
-        uv = texXfApply(t, uv);
-        dx = texXfLinear(t, dx);
-        dy = texXfLinear(t, dy);
-    }
 }
 
 // Unchanged when the feature is compiled out.
