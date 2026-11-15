@@ -165,3 +165,32 @@ Open: numeric texture fixtures (coat normal, anisotropy direction, iridescence t
 - **Default**: `--reflection-bounces` defaults to 0 (byte-identical to the F15 tip, all F13/F14 verdicts kept) until the reference models the continuation; ticking
   A1 as resolved needs `--reflection-bounces 3` as the product default plus that clip update (owner decision). Quiet D2 A/B (bounces 3 vs 0): see the
   agent report; Sponza D2 itself triggers no extra trace, so the expected cost is the unused-branch cost of the kernel only.
+
+### C22-A1 follow-up: reference updated, default 3 (2026-11-15, orchestrator decision)
+
+- **Reference** (`tools/f13_reference.py`, additive: `Context(mirror_bounces=0)`, `mirror_hit`, `mirror_chain`, `tail(skip_specular, mirror_continuation)`, CLI `--mirror-bounces N`,
+  also in `tools/f13_reference_clip.py render`): from the physics of a smooth surface, not from the engine kernel. The first hit of the camera's specular lobe continues along
+  its ideal mirror direction when its roughness <= 0.1 (any f0, dielectric or metal: the engine's F0 restriction is measured against it), weighted by its Schlick Fresnel, up to
+  N further hits, each lit and continued with its diffuse lobe like the first hit. Light accounting (D5): the environment reaches the camera through the continuation, emitters
+  (sun disk, panels) through the mirror hit's regularised light connection; the first version counted the sun through both (seed NRMSE 0.51 at 256 spp vs 0.094, fireflies up to 880): fixed.
+  Unit test `tools/test_f13_reference_mirror.py` (ctest `f13_reference_mirror_python`, needs Mitsuba through uv, skipped otherwise): two facing mirrors against the analytic
+  model of tools/f15_reflection_bounce_model.py, 160x90, 8 spp: bounces 3 classes 1-3 error 0.24 / 0.16 / 0.22 %, the 1.0x8.0 engine corridor classes 1-4 within 0.3 % (ref
+  0.4175/0.3679/0.2856/0.2205 vs model 0.4178/0.3678/0.2859/0.2205); negative control bounces 0: classes 2 and 3 error > 0.5 (fails as required); bounces 1 reaches class 2 only.
+  `f13_reference.py validate` 27/27 unchanged.
+- **Clip**: `roughness` re-rendered with `--mirror-bounces 3` (build/refclips/roughness-m3 in the agent worktree, 4096 spp, seed NRMSE 0.0131 < 0.02, 38 min with 4 threads).
+  Same-seed 64 spp, bounces 3 vs 0, relative rmse of the frame: roughness 4.3 %, mirror 0.09 %, moving-light 0.09 %, disocclusion 0.05 %, rough-emitter 0 (0 pixels differ). The
+  mirror / moving-light / disocclusion clips are therefore NOT re-rendered here (the rough floor lobe hits the mirror plane in ~0.7 % of pixels; moving-light needs ~5 h at 12 threads):
+  their verdicts are insensitive at 0.1 %, the orchestrator's final re-render after the merge covers them.
+- **F13/F14 reflection subset** (20 cases, default-3 binary, API validation, the runner's own gates): control 11/11, functional 3/3, independent-clip **6/6**. Independent-clip
+  linear RMSE p95, tip (t03) -> bounces 3 with the old clip -> bounces 3 with the re-rendered clip: roughness-custom 0.0303 -> 0.1023 (fail) -> 0.0394; metalfx-fallback 0.0303 -> 0.1023 -> 0.0393;
+  roughness-raw 0.1762 / 0.2513 / 0.2262 and roughness-rt8-control 0.1048 / 0.1898 / 0.1423 (non-gating controls, fail by design at every stage); mirror-custom 0.0184, mirror-raw 0.1068,
+  mirror-rt8 0.0398, moving-light 0.0515 / 0.1060 / 0.0421, disocclusion 0.0568 / 0.1103 / 0.0431, rough-emitter 0.0098 / 0.1768 / 0.1768 unchanged to 4 decimals in all three columns.
+  The gating roughness number rose 0.0303 -> 0.0394 against the continuation reference: the engine's chain still differs from the reference in the glossy gold sphere pair
+  (regularised sun glint at the continuing hit, probe environment vs exact sky); within the existing threshold, not loosened.
+- **Default 3**: `launch_options.h` and `tests/test_launch_options.cpp`; `f15_exact.sh` 5 cases cmp-identical to build/litefix/exact-new, visual_check all benches 0 px, fixtures unchanged
+  (corridor 0.20 / 0.32 / 0.39 / 0.70 %, ball 0.63 / 2.43 / 4.7 %, control 98-100 %).
+- **Scope F0 >= 0.5 (exclusion b of the plan)**: dielectric and low-F0 secondary hits keep the single bounce. Dielectric numbers from the reference (`mirror_hit` models every smooth
+  surface): a corridor of two facing smooth dielectrics (F0 0.04, roughness 0.04, sky 0.5) gains 1.95 % mean radiance over the covered pixels from the continuation, up to 27 % at the
+  most grazing pixels (470 of 1884 covered pixels gain > 5 %). The subset scenes contain no smooth dielectric secondary hit, so the clips are not affected. Sponza D2: with the criterion
+  without the F0 floor 828 of 921600 linear pixels changed (max 0.0031) through its smooth dielectric texels; with F0 >= 0.5 zero extra traces.
+- Quiet D2 A/B (bounces 3 vs 0): Sponza D2 triggers no extra trace, so expect the unused-branch cost only; use the commands in the agent report.
