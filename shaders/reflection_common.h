@@ -11,6 +11,16 @@ constexpr sampler kReflectionProbeSampler(filter::linear,mip_filter::linear,addr
 inline float4x4 reflectionMatrix(constant float* m){return float4x4(float4(m[0],m[1],m[2],m[3]),float4(m[4],m[5],m[6],m[7]),float4(m[8],m[9],m[10],m[11]),float4(m[12],m[13],m[14],m[15]));}
 inline float3 reflectionConstantVec(constant float* p){return float3(p[0],p[1],p[2]);}
 inline float3 reflectionTangent(float3 n){return normalize(cross(abs(n.z)<.999f?float3(0,0,1):float3(0,1,0),n));}
+inline float3 reflectionSampleVisibleNormal(float3 n,float3 v,float alpha,float2 u){
+    const float3 t=reflectionTangent(n),b=cross(n,t);const float3 ve=float3(dot(v,t),dot(v,b),dot(v,n));
+    const float3 vh=normalize(float3(alpha*ve.x,alpha*ve.y,ve.z));const float lensq=vh.x*vh.x+vh.y*vh.y;
+    const float3 t1=lensq>1e-12f?float3(-vh.y,vh.x,0.0f)*rsqrt(lensq):float3(1,0,0),t2=cross(vh,t1);
+    const float r=sqrt(u.x),phi=2*M_PI_F*u.y,p1=r*cos(phi);float p2=r*sin(phi);const float s=.5f*(1+vh.z);
+    p2=(1-s)*sqrt(max(0.0f,1-p1*p1))+s*p2;
+    const float3 nh=p1*t1+p2*t2+sqrt(max(0.0f,1-p1*p1-p2*p2))*vh;
+    const float3 ne=normalize(float3(alpha*nh.x,alpha*nh.y,max(0.0f,nh.z)));
+    return t*ne.x+b*ne.y+n*ne.z;
+}
 inline float3 reflectionSpecularBRDF(GPUDISurface s,float3 wi){
     float3 n=normalize(diVec(s.shadingNormal)),v=normalize(diVec(s.viewDirection));float nl=dot(n,wi),nv=dot(n,v);
     if(nl<=0||nv<=0||dot(v+wi,v+wi)<1e-20f)return 0;float3 h=normalize(v+wi);float nh=saturate(dot(n,h)),vh=saturate(dot(v,h));
@@ -116,9 +126,48 @@ inline ReflectionDirection reflectionDirectionAniso(GPUDISurface s, float2 u, Re
     out.valid=out.pdf>0;
     return out;
 }
+// F15 closure (transport): the reflection branch of a TRANSMISSIVE pixel (isotropic base lobe, no coat) draws its half vector from the visible-normal
+// density like the refraction branch (reflectionRefractSample), so the one-sample estimator's weights stay bounded by the branch probability floor
+// (1/32) times a Fresnel/G1 factor <= 1.  The D(h) n.h proposal weighs F V 4 (v.h)(n.l) / (n.h): unbounded at grazing views.  pdf = D G1(v) / (4 n.v).
+inline ReflectionDirection reflectionDirectionVndf(GPUDISurface s, float2 u) {
+    ReflectionDirection out{};
+    float3 n = diVec(s.shadingNormal), v = diVec(s.viewDirection);
+    if (!s.valid) return out;
+    if (!all(isfinite(n)) || !all(isfinite(v)) || dot(n, n) <= 0 || dot(v, v) <= 0) { out.error = true; return out; }
+    n = normalize(n); v = normalize(v);
+    const float a = bsdfAlpha(s.roughness), nv = dot(n, v);
+    const float3 h = reflectionSampleVisibleNormal(n, v, a, u);
+    if (dot(v, h) <= 0 || !(nv > 0)) return out;
+    out.direction = reflect(-v, h);
+    const float g1 = 2.0f * nv / (nv + sqrt(a * a + (1.0f - a * a) * nv * nv));
+    out.pdf = bsdfDGGX(dot(n, h), a) * g1 / (4.0f * nv);
+    out.valid = all(isfinite(out.direction)) && isfinite(out.pdf) && out.pdf > 0;
+    if (!out.valid) { out.error = true; return out; }
+    if (dot(n, out.direction) > 0) {
+        out.weight = reflectionSpecularBRDF(s, out.direction) * dot(n, out.direction) / out.pdf;
+        if (!all(isfinite(out.weight)) || any(out.weight < 0)) { out.error = true; out.weight = 0; }
+    }
+    return out;
+}
+// The Fresnel-chosen branch probability of a transmissive pixel evaluated at the half vector the refraction proposal draws from `u` (a function of u
+// only: the estimator stays unbiased for any p(u), and p follows the F(v.h) the sample weights carry instead of F(n.v), whose mismatch let a tail
+// sample reach 1 / (1 - p) = 32).  A smooth interface (alpha at the floor) has h = n: the value of the guide's pReflect.
+inline float reflectionTransmissiveSelect(GPUDISurface s, float2 u, ReflectionLobe lobe) {
+    float3 n = diVec(s.shadingNormal), v = diVec(s.viewDirection);
+    if (!s.valid || !all(isfinite(n)) || !all(isfinite(v)) || dot(n, n) <= 0 || dot(v, v) <= 0) return lobe.pReflect;
+    n = normalize(n); v = normalize(v);
+    const float a = bsdfAlpha(s.roughness);
+    const float3 h = a <= phosphor::kTransmissionSmoothAlpha ? n : reflectionSampleVisibleNormal(n, v, a, u);
+    const float vh = dot(v, h);
+    if (!(vh > 0)) return lobe.pReflect;
+    const float fe = bsdfMax3(bsdfSpecFresnel(lobe.spec, saturate(vh)));
+    const float tw = (1.0f - fe) * lobe.transFactor * (1.0f - saturate(s.metallic)) * bsdfMax3(max(diVec(s.albedo), 0.0f));
+    return phosphor::transmissionSelect(fe, tw);
+}
 inline ReflectionDirection reflectionDirectionLobe(GPUDISurface s, float2 u, ReflectionLobe lobe) {
     ReflectionDirection out = (lobe.aniso && !(lobe.coat && lobe.sampleCoat)) ? reflectionDirectionAniso(s, u, lobe)
-                                                                              : reflectionDirection(reflectionLobeSurface(s, lobe), u);
+                              : (lobe.trans && !lobe.coat) ? reflectionDirectionVndf(s, u)
+                                                           : reflectionDirection(reflectionLobeSurface(s, lobe), u);
     if (!lobe.extended || !out.valid || out.error) return out;
     if (lobe.coat) {
         const float3 nc = lobe.coatNormal, v = normalize(diVec(s.viewDirection)), n = normalize(diVec(s.shadingNormal));

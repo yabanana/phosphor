@@ -191,16 +191,7 @@ inline float3 reflectionSecondaryChain(GPURtHit hit,float3 direction,uint maxBou
 // Visible-normal sampling of the isotropic GGX distribution (Heitz 2018): the half vector is drawn from D(h) G1(v) |v.h| / |n.v|, so the one-sample
 // estimator of a reflection or a refraction through it weighs G1(o) <= 1 (bounded: the D(h) n.h proposal weighs |i.h| G / (|i.n| |h.n|), unbounded for
 // rough interfaces, and made the rough refraction of a three-interface walk fire).  Returns the world half vector for the unit view direction `v`.
-inline float3 reflectionSampleVisibleNormal(float3 n,float3 v,float alpha,float2 u){
-    const float3 t=reflectionTangent(n),b=cross(n,t);const float3 ve=float3(dot(v,t),dot(v,b),dot(v,n));
-    const float3 vh=normalize(float3(alpha*ve.x,alpha*ve.y,ve.z));const float lensq=vh.x*vh.x+vh.y*vh.y;
-    const float3 t1=lensq>1e-12f?float3(-vh.y,vh.x,0.0f)*rsqrt(lensq):float3(1,0,0),t2=cross(vh,t1);
-    const float r=sqrt(u.x),phi=2*M_PI_F*u.y,p1=r*cos(phi);float p2=r*sin(phi);const float s=.5f*(1+vh.z);
-    p2=(1-s)*sqrt(max(0.0f,1-p1*p1))+s*p2;
-    const float3 nh=p1*t1+p2*t2+sqrt(max(0.0f,1-p1*p1-p2*p2))*vh;
-    const float3 ne=normalize(float3(alpha*nh.x,alpha*nh.y,max(0.0f,nh.z)));
-    return t*ne.x+b*ne.y+n*ne.z;
-}
+// reflectionSampleVisibleNormal moved to reflection_common.h (the reflection proposal of a transmissive pixel uses it too).
 struct ReflectionGlassHit {
     bool glass;           // a transmissive interface the walk refracts through
     bool thin;            // thin-walled: no bend, no medium
@@ -463,6 +454,7 @@ kernel void REFL_KERNEL(reflection_rt)(constant GPUReflectionParams& p [[buffer(
 #ifdef PHOSPHOR_REFL_LOBE
     const float2 u=float2(giRandom(seed),giRandom(seed));
     // F15.1 (ticket 13): a transmissive pixel draws the branch first: reflection (today's lobes, weight / pReflect) or refraction (always traced).
+    if(lobe.trans&&!lobe.aniso&&!lobe.coat)lobe.pReflect=reflectionTransmissiveSelect(s,u,lobe); // F15 closure: p(u) at the sampled half vector (bounded weights)
     const float branchDraw=lobe.trans?giRandom(seed):0.0f; /* drawn only by transmissive pixels: every other pixel keeps its random sequence */ lobe.sampleRefract=lobe.trans&&(both?(k==0u):branchDraw>=lobe.pReflect);lobe.id=lobe.sampleRefract?SPECULAR_LOBE_TRANSMISSION:baseLobeId;lobe.refract=lobe.sampleRefract;
     if(lobe.sampleRefract){
         sample=reflectionRefractSample(s,u,lobe,as,ift,p,instances,meshes,vertices,indices,materials,textures,extRecords,lights,sampled,emitters,gi,states,extra,irradiance,moments,probes,atlas,seed,counts);

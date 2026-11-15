@@ -427,3 +427,21 @@ Values from the glass-temporal branch captures, evaluated by the orchestrator in
 
 Smooth glass passes under the uncorrected judge; the correction changes p95 by at most 0.0002. The refract-axis negative control fails the
 smooth gates under both judges. The final-tree clip run of the closure battery repeats these numbers.
+2026-11-15 — transport weights: fireflies of weight ~32 on smooth glass (finding relayed from the glass-temporal agent; agent "transport").
+
+Cause (reproduced in a CPU model, `tools/f15_transport_weights.py`, numpy via uv): the Fresnel branch probability p of a transmissive pixel came from F(n.v) (`reflection_lobe.h`
+`transmissionSelect`), but the refraction weight carries (1 - F(v.h)) of the SAMPLED half vector.  At a grazing view p clamps to 31/32; a tail sample of the visible-normal density
+has v.h >> n.v, so F(v.h) is small, the weight (1 - F(v.h)) / (1 - p) = x32 (the radiance 0.5 became 16.18).  The reflection branch also drew its half vector from the D(h) n.h
+proposal, whose weight F V 4 (v.h)(n.l) / n.h is unbounded.  Both are unbiased, neither bounded.  Model (ior 2.0, white, pixel-uniform sphere, 2 M samples per alpha): before, max sample weight 4.56
+(alpha 0.002, the smooth floor: reflection tail) and 27.8 (alpha 0.04 and 0.25, the refraction branch), 181 195 samples above 1.1 over four alphas; the engine's smooth shortcut (h = n)
+only applies at alpha <= 0.00201 (roughness <= 0.0447), so glass of roughness 0.05 already fires.
+Fix (shaders/reflection_common.h, reflections.metal): for a transmissive pixel without coat or anisotropy the branch probability is evaluated at the half vector the refraction proposal draws from the
+same random numbers (`reflectionTransmissiveSelect`: a function of u only, so the estimator stays unbiased for any p(u)), and the reflection branch draws its half vector from the visible-normal density
+(`reflectionDirectionVndf`, pdf D G1(v) / (4 n.v)).  Model after: max weight 1.000 (the unclamped estimator weighs r + t = 1), 0 samples above 1.1, means equal to the before model within 3 sigma
+(0.99998 / 0.99997 / 0.99735 / 0.97322 against 0.99997 / 0.99996 / 0.99735 / 0.97338).  Smooth glass keeps h = n for p (the pre-fix value); the reflection direction of a transmissive pixel changes by the
+visible-normal draw (images of transmissive scenes change at noise level; scenes without transmission are untouched: the new code is reachable only through `lobe.trans`, and `reflectionSampleVisibleNormal`
+moved unchanged into reflection_common.h).
+Verification status: metallib compiles (build clean).  The GPU transmission gates (`transmission-roughness-ior`, `-attenuation`, `-glass-behind-glass`, `-thin-volume`, `-single-sided`) were captured
+with the fixed binary (`build/f15c-w1`); their Mitsuba evaluation was still running when the owner's battery rule stopped further jobs; `-factor-tint` and `-emissive-panel` were not captured.  The in-engine
+raw-weight counter fixture was not built (no GPU budget): the CPU model is the failing-before / passing-after fixture (exit 3 if the before model stops exceeding the bound, exit 1 if the after model does).
+Feature-less scenes: not re-run after this change (shaders touched are the `_lobe` reflection kernels only); the five F13 exactness PFMs were bit-identical before it (commit of the ticket 14 closure).

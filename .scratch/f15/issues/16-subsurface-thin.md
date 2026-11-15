@@ -297,3 +297,15 @@ controls fail). The environment margin of the ior cell (4.94 %) is thin: the dec
   `specular-grid-env-resolve` stay GREEN. The reference mirrors the fit per pixel (`thin_env_albedo`, `thin_env_is_default`): a first version decided "default" over the whole image and broke the sheen / aniso
   columns by 1.7 % (found by the gate, fixed). Unit test `test_declared_thin_albedo_fit_tracks_the_exact_table_and_keeps_the_radiance_within_the_bound` (fit < 2 %, the old fit > 4 %).
 - Featureless: the five F13 exactness PFMs are byte-identical; visual_check with `EXTRA_ARGS=--pipeline-sync` on this tree: all 8 benches 0 px (`build/visual3.log`).
+2026-11-15 — back-lit thin receiver and the RT sun visibility (agent "transport"; ticket 16 residue "CSM/RT sun shadows of a back-lit thin receiver use the standard sun visibility").
+
+Analysis (code): the RT sun kernel (`shadowSunRt`, shaders/shadows.metal) flips the surface normal to the light side before `rtOffsetRay`, so the shadow ray of a single-sided thin
+receiver starts on the SUN side and cannot hit its own carrier; the DI visibility (`diEndpointTransmittance`) does the same for local lights (and the existing t16 keys
+`subsurface-thin-point@restir|@clustered` already gate it at 0.04 % on quad carriers with RT visibility rays).  The CSM path (depth bias along the camera-facing normal, "shadow depth stays
+two-sided") is the one that can self-shadow a back-lit thin receiver: it belongs to the "thinwall" agent's CSM work, not to this item.
+The corpus rig puts the sun on the camera side, so a sun-lit back-lit receiver cannot be built from a generated glTF; `subsurface-thin-sun` uses SPHERES (their geometric terminator is a real
+shadow: RT and CSM both darken the camera side to 0.17 / 0.14 of the unshadowed image, which proves nothing about a thin quad).  Fixture written instead (`tools/f15_transport_check.py thin-backlit`):
+a thin diffuse-transmission quad lit only by a sampled emitter BEHIND it (ReSTIR DI): sum(D, `--rt on`) / sum(D, `--rt off`) in [0.95, 1.05] (D = capture - capture with the emitter off), control = an opaque
+occluder between emitter and receiver must take the ratio below 0.45.  NOT RUN: the GPU batch was stopped by the owner's battery rule (27 % below 40 %); the fixture and its pure-Python
+geometry tests are in the tree.  Status: PARTIAL - no code change is justified without a failing fixture; the code reading says RT is already correct.  Command for the orchestrator:
+`python3 -I tools/f15_transport_check.py thin-backlit --binary <phosphor> --out DIR` (takes the GPU lock per capture; 4 captures).
