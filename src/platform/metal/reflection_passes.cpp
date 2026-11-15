@@ -467,7 +467,8 @@ u64 ReflectionPasses::version()const{const std::pair<u64,u64> components{impl_->
 bool ReflectionPasses::check(u32 slot)const{const auto& f=impl_->slots.at(slot);const auto* errors=static_cast<const u32*>(f.errors->contents());
     if(impl_->options.debugLighting&&errors[15])std::printf("REFLECTION probe HDR slot %u | raw_above_half %u | raw_max %.9g %.9g %.9g | format %s\n",slot,errors[15],
         double(std::bit_cast<float>(errors[12])),double(std::bit_cast<float>(errors[13])),double(std::bit_cast<float>(errors[14])),
-        impl_->probeFormat==MTL::PixelFormatRGBA32Float?"RGBA32Float":"RGBA16Float");if(impl_->options.debugLighting&&errors[16])std::printf("REFLECTION back-face continuations slot %u | culled single-sided back faces passed %u | bound exhausted %u\n",slot,errors[16],errors[17]);
+        impl_->probeFormat==MTL::PixelFormatRGBA32Float?"RGBA32Float":"RGBA16Float");
+    if(impl_->options.debugLighting&&errors[16])std::printf("REFLECTION back-face continuations slot %u | culled single-sided back faces passed %u | bound exhausted %u\n",slot,errors[16],errors[17]);
     bool okay=!impl_->options.debugLighting||errors[0]==f.expected;for(u32 i=1;i<8;++i)okay=okay&&!errors[i];if(!okay){std::fprintf(stderr,"REFLECTION check slot %u expected %u counts %u %u %u %u %u %u %u %u\n",slot,f.expected,errors[0],errors[1],errors[2],errors[3],errors[4],errors[5],errors[6],errors[7]);
     if(errors[8])std::fprintf(stderr,"REFLECTION motion raw slot %u count %u first_tid %u bits %08x %08x\n",slot,errors[8],errors[9],errors[10],errors[11]);return false;}return !f.customUsed||impl_->denoise.check(slot);}
 bool ReflectionPasses::ready()const{const auto& i=*impl_;const auto& o=i.options;
