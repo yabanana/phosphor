@@ -234,3 +234,12 @@ Open: direction-texture fixture; declared-environment fit 6.4-7.0 % gap on metal
   environment, 0 when the scenario sets none), the legacy two-colour hemisphere is only reachable through the legacy bench scenes, not through `--material-scenario`; a fixture
   needs a host option that switches a material scenario to the hemisphere environment plus a reference for the hemisphere fetch (exact quadrature of the anisotropic lobe against a
   non-constant radiance, ~300 M lobe evaluations). Not attempted; the engine's bent-normal fetch stays unexercised.
+
+### 2026-11-15 (3) — bent-normal fixture on the legacy hemisphere (agent `tex`, round 3)
+
+- Host option `--legacy-environment` (`src/core/launch_options.{h,cpp}`, `src/app/engine.cpp`): a material scenario keeps the resolve on the legacy two-colour hemisphere (sky 0.30 0.36 0.45 above,
+  ground 0.10 0.09 0.08 below) instead of its declared constant environment; requires `--material-scenario` and `--reflections off`. Without the option nothing changes.
+- Reference (`tools/f15_reference.py --legacy-environment`): the declared split-sum weights (anisotropic effective roughness) times hemisphere(N) for the diffuse and hemisphere(specularDir) for the
+  specular, specularDir = normalize(mix(reflect(-V, N'), N', roughness^2)), N' the README bent normal written from its GLSL (`aniso_bent_normal`; hand value in the unit test). Control
+  `declared-aniso-bent-normal-ignored` fetches along N and must FAIL; `declared-aniso-ignored` too. Fixture key `aniso-bent-env` (scene `aniso-grid-env-resolve`, thresholds of the declared kind).
+- Status: reference and unit test done (the bent-normal control moves a glancing metal pixel by > 2 %); the capture and the gate were NOT run (battery hold): UNVERIFIED on the GPU.

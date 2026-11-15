@@ -1880,6 +1880,31 @@ class AnisotropyModel(unittest.TestCase):
         finally:
             ref.EXACT_ANISO_DISK, ref.EXACT_DISK_RINGS, ref.EXACT_DISK_AZIMUTHS, ref.EXACT_DISK_COUNT = saved
 
+    def test_bent_normal_and_the_legacy_hemisphere_reference(self):
+        # ticket 11 (F15.3 closure): the README's bent normal and the legacy two-colour hemisphere.  Hand value: N = +Z, V = (0, .6, .8), bitangent +X:
+        # cross(cross(B, V), B) = V, a = ((1 - s (1 - r))^2)^2 = 0.0081 at s = 1, r = 0.3, so N' = normalize(0.9919 V + 0.0081 N).
+        n, v = np.array([[0.0, 0.0, 1.0]]), np.array([[0.0, 0.6, 0.8]])
+        bent = ref.aniso_bent_normal(n, v, np.array([[1.0, 0.0, 0.0]]), np.array([0.3]), np.array([1.0]))
+        expected = 0.9919 * v + 0.0081 * n
+        np.testing.assert_allclose(bent, expected / np.linalg.norm(expected), atol=1e-12)
+        np.testing.assert_allclose(ref.aniso_bent_normal(n, v, np.array([[1.0, 0.0, 0.0]]), np.array([0.3]), np.array([0.0])), n, atol=1e-12)  # strength 0
+        # the hemisphere: y = +1 is the sky, y = -1 the ground
+        np.testing.assert_allclose(ref.hemisphere_radiance(np.array([[0.0, 1.0, 0.0], [0.0, -1.0, 0.0]])),
+                                   [ref.HEMISPHERE_SKY, ref.HEMISPHERE_GROUND], atol=1e-12)
+        # a strongly anisotropic metal seen at a glancing angle fetches a different part of the hemisphere along the bent normal: the control must move it
+        base = np.array([[0.8, 0.35, 0.15]])
+        aniso = aniso_pixels(1.0, 0.0, tangent=(0.0, 1.0, 0.0), count=1)  # comb along +Y: the bitangent lies in the surface plane, perpendicular to it
+        nn = np.array([[0.0, 0.6, 0.8]])
+        vv = np.array([[0.0, 0.0, 1.0]])
+        good = ref.legacy_hemisphere_radiance(base, np.ones(1), np.full(1, 0.3), nn, vv, aniso, ref.DECLARED)
+        wrong = ref.legacy_hemisphere_radiance(base, np.ones(1), np.full(1, 0.3), nn, vv, aniso, ref.ANISO_DECLARED_CONTROLS["declared-aniso-bent-normal-ignored"])
+        self.assertGreater(float(np.abs(good - wrong).max() / good.max()), 0.02)
+        # strength 0 is the isotropic legacy model for both
+        flat = aniso_pixels(0.0, 0.0, count=1)
+        np.testing.assert_allclose(ref.legacy_hemisphere_radiance(base, np.ones(1), np.full(1, 0.3), nn, vv, flat, ref.DECLARED),
+                                   ref.legacy_hemisphere_radiance(base, np.ones(1), np.full(1, 0.3), nn, vv, flat,
+                                                                  ref.ANISO_DECLARED_CONTROLS["declared-aniso-bent-normal-ignored"]), rtol=1e-12)
+
     def test_record_word_decoding_texture_refusal_and_combinations(self):
         f = lambda x: int.from_bytes(struct.pack("<f", x), "little")  # noqa: E731
 
@@ -1931,7 +1956,7 @@ class AnisotropyModel(unittest.TestCase):
         self.assertEqual(sorted(ref.ANISO_CONTROLS), ["aniso-alpha-swapped", "aniso-bitangent-flipped",
                                                       "aniso-d-normalised-by-ab", "aniso-ignored",
                                                       "aniso-mirror-unaware", "aniso-rotation-flipped"])
-        self.assertEqual(sorted(ref.ANISO_DECLARED_CONTROLS), ["declared-aniso-alpha-t", "declared-aniso-ignored"])
+        self.assertEqual(sorted(ref.ANISO_DECLARED_CONTROLS), ["declared-aniso-alpha-t", "declared-aniso-bent-normal-ignored", "declared-aniso-ignored"])
         self.assertIn("anisotropy", ref.MODEL)
 
 
@@ -3288,6 +3313,32 @@ class CombinationModel(unittest.TestCase):
         self.assertTrue(np.all(ref.thin_transmitted(thin, np.zeros(2), n, v, l, ref.SPECULAR_EXT, high) < plain - 1e-3))
         # a metal transmits nothing
         self.assertEqual(float(ref.thin_transmitted(thin, np.ones(2), n, v, l, ref.SPECULAR_EXT, high).max()), 0.0)
+
+    def test_exact_transmitted_albedo_tables_per_ior_and_per_film(self):
+        # F15.3 closure (ticket 16): the exact environment of a thin material under ior/specular or a film uses its own transmitted albedo.
+        # The generic quadrature reproduces the default table (f0 0.04, weight 1 + 1e-7 so that the shortcut is not taken) within 3e-4, a high
+        # index lowers T (more reflected: 1 - max F smaller), a film changes it and strength 0 is the plain dielectric.
+        mus, default = ref.thin_transmission_table()
+        mus2, near = ref.thin_transmission_table_for([0.04] * 3, 1.0 + 1e-7)
+        np.testing.assert_allclose(np.interp(mus, mus2, near), default, atol=3e-4)
+        _, high = ref.thin_transmission_table_for(ref.specular_f0(2.4, [1, 1, 1]), 1.0)
+        self.assertTrue(np.all(np.interp(mus, mus2, high) < default - 1e-3))
+        film = (1.3, 400.0, 1.0, [0.04] * 3)
+        _, filmed = ref.thin_transmission_table_for([0.04] * 3, 1.0, film)
+        self.assertGreater(float(np.abs(np.interp(mus, mus2, filmed) - default).max()), 5e-3)
+        _, off = ref.thin_transmission_table_for([0.04] * 3, 1.0, (1.3, 400.0, 0.0, [0.04] * 3))
+        np.testing.assert_allclose(off, near if False else ref.thin_transmission_table_for([0.04] * 3, 1.0 + 1e-7)[1], atol=3e-4)
+        # the exact environment takes it: a high-index dielectric under a thin lobe transmits less than the default one
+        mu = np.array([0.5])
+        thin = {"weight": np.ones(1), "color": np.ones((1, 3)), "variant": "spec"}
+        dielectric = {"f0": np.array([ref.specular_f0(2.4, [1, 1, 1])]), "weight": np.ones(1), "variant": "extension"}
+        high_env = ref.environment_radiance(np.ones((1, 3)), np.zeros(1), np.full(1, 0.5), mu, 1.0, ref.SPECULAR_EXT, dielectric, thin_env=thin)
+        plain_dielectric = {"f0": np.full((1, 3), ref.DIELECTRIC_F0), "weight": np.ones(1), "variant": "extension"}
+        default_env = ref.environment_radiance(np.ones((1, 3)), np.zeros(1), np.full(1, 0.5), mu, 1.0, ref.SPECULAR_EXT, plain_dielectric, thin_env=thin)
+        self.assertLess(float(high_env[0, 0]), float(default_env[0, 0]) + 0.5)  # both are finite and ordered with the extra specular share
+        controlled = ref.environment_radiance(np.ones((1, 3)), np.zeros(1), np.full(1, 0.5), mu, 1.0, ref.SPECULAR_EXT, dielectric,
+                                              thin_env={**thin, "variant": "default-fresnel"})
+        self.assertGreater(abs(float(controlled[0, 0] - high_env[0, 0])), 1e-3)  # the control (default 0.04 weight) differs
 
     def test_sheen_scales_the_transmitted_lobe_of_a_back_light_with_the_smallest_n_dot_l(self):
         # the glTF Sample Renderer scales the whole base by min(1 - m E(N.V), 1 - m E(N.L)) with N.L = 0 behind the surface: E at the table minimum

@@ -308,6 +308,8 @@ COMBO_THIN_COAT_DECLARED = ["declared-transmission-ignored", "declared-coat-igno
 # of the combination has no per-ior transmitted-albedo table yet (the key is gated by the declared model, like iridescence + anisotropy was).
 COMBO_THIN_LOBES_CONTROLS = ["transmission-ignored", "sheen-ignored", "aniso-ignored", "iridescence-ignored", "specular-ignored",
                              "transmission-default-fresnel", "transmission-sheen-unscaled"]
+COMBO_THIN_LOBES_ENV_CONTROLS = ["transmission-ignored", "sheen-ignored", "aniso-ignored", "iridescence-ignored", "specular-ignored",
+                                 "transmission-default-fresnel"]
 COMBO_THIN_LOBES_DECLARED = ["declared-transmission-ignored", "declared-sheen-ignored", "declared-aniso-ignored", "declared-iridescence-ignored",
                              "declared-specular-ignored", "declared-transmission-default-weight"]
 # The exact-environment keys integrate over the whole sphere: a rotation of the lobe by the sign of the angle moves the sphere mean by less
@@ -533,6 +535,12 @@ SCENARIOS = {
                                "reflections": "off", "controls": ["declared-aniso-ignored", "declared-aniso-alpha-t"],
                                "terms": "constant environment only (radiance 0.5, no sun) on the anisotropy grid, deterministic "
                                         "resolve terms (--reflections off --lighting-denoise custom)"},
+    # ticket 11 (F15.3 closure): the legacy two-colour hemisphere environment (--legacy-environment, --reflections off, legacy lighting) is NOT constant, so the README's
+    # bent-normal fetch direction is visible.  Reference: the declared split-sum weights times hemisphere(N) / hemisphere(specularDir) with the README bent normal.
+    "aniso-bent-env": {"kind": "declared", "scene": "aniso-grid-env-resolve", "reflections": "off", "legacy_environment": True,
+                       "reference_args": ["--legacy-environment"],
+                       "controls": ["declared-aniso-bent-normal-ignored", "declared-aniso-ignored"],
+                       "terms": "legacy hemisphere environment (sky 0.30 0.36 0.45 above, ground 0.10 0.09 0.08 below), no sun, resolve-owned, on the anisotropy grid"},
     "aniso-grid-env": {"kind": "environment",
                        "controls": ANISO_DIRECT_CONTROLS,
                        "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport (anisotropic VNDF "
@@ -671,6 +679,9 @@ SCENARIOS = {
                                       "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport, on the anisotropy panels (yaw 50, roll 20 degrees)"},
     "combo-thin-lobes-sun": {"kind": "direct", "controls": COMBO_THIN_LOBES_CONTROLS,
                              "terms": "sun disk only (environment 0, no shadows, no GI) from the side on the thin subsurface under sheen / anisotropy / iridescence / ior grid"},
+    "combo-thin-lobes-env": {"kind": "environment", "controls": COMBO_THIN_LOBES_ENV_CONTROLS,
+                             "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport, EXACT environment (per-ior / per-film transmitted albedo "
+                                      "tables) on the thin subsurface under sheen / anisotropy / iridescence / ior grid"},
     "combo-thin-lobes-env@resolve": {"kind": "declared", "reflections": "off", "controls": COMBO_THIN_LOBES_DECLARED,
                                      "reference_args": ["--no-exact-environment"],
                                      "terms": "constant environment only (radiance 0.5, no sun) on the thin subsurface under sheen / anisotropy / iridescence / ior grid, "
@@ -1208,6 +1219,7 @@ def capture_command(binary, name, folder, seed=1):
             "--capture-linear-signal", "hdr",
             *(["--export-reference", str(folder / "snapshot"), "--export-reference-frame", last] if SCENARIOS[name].get("snapshot", True) else []),
             *(["--terrain-textures", str(terrain_materials_dir() or "build/terrain-materials")] if SCENARIOS[name].get("cc0") else []),
+            *(["--legacy-environment"] if SCENARIOS[name].get("legacy_environment") else []),
             *(["--reflection-probe", str(write_constant_probe(folder / "probe", SCENARIOS[name]["probe_constant"]))] if SCENARIOS[name].get("probe_constant") else []),
             "--report", str(folder / "report.json")]
 

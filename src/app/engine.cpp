@@ -1786,7 +1786,7 @@ bool Engine::frame(float dt) {
                         (options_.reflections!=ReflectionMode::Off && reflections_&&reflections_->ready()?8u:0u) | (reflections_&&reflections_->ready()?16u|RESOLVE_EXTERNAL_DIFFUSE:0u) |
                         // F15.3: a material scenario without the reflection composite has the
                         // resolve evaluate its declared environment (deterministic furnace).
-                        ((!options_.materialScene.empty()||options_.corpusRig) && !(reflections_&&reflections_->ready())?16u:0u);
+                        ((!options_.materialScene.empty()||options_.corpusRig) && !(reflections_&&reflections_->ready()) && !options_.legacyEnvironment?16u:0u); // F15.3: --legacy-environment keeps the resolve on the hemisphere
         visibility_->prepareLighting(flags,shadows_->sunIndex(),environment.skyRadiance,environment.sunAngularRadius);
     }
     if(referenceSnapshot_) {

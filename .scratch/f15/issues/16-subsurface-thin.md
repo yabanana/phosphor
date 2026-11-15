@@ -267,3 +267,11 @@ Result (round 2, `build/f15-check/tex11`, `tex12`, `tex17`; the thin + coat, thi
 - Touched engine functions (shaders/material_shading.h: new `thinSheenBackScale`, `thinLayerLight`, `sunThinLayer`, and in `shadeSurface` ONLY the thin branch `if (thinResolved) {...}`;
   shaders/materials/bsdf.h: new `bsdfThinTransmittedSpec`). `bsdfThinTransmitted` and every other statement are untouched; a thin-only material still takes the old statements.
   Featureless: the five F13 exactness PFMs are byte-identical (`build/tex-exact4`).
+
+### 2026-11-15 (3) — exact environment per ior / per film (agent `tex`, round 3)
+
+- `thin_transmission_table_for(f0, weight, film)` (tools/f15_reference.py): T(mu) = integral over the back hemisphere of W(V.H) |N.L| / pi with W the diffuse weight of the reflected lobe
+  (extension Fresnel, or (1 - s) extension + s film Fresnel at V.H); `environment_radiance` adds (1 - m) (w color T - (1 - reflect scale) base Dint) to the thin-free radiance (Dint = the material's
+  diffuse integral). The neutral dielectric still returns the original table bit for bit. Unit test: the generic quadrature reproduces the default table to 3e-4, ior 2.4 lowers T by > 1e-3,
+  a film changes it by > 5e-3. New key `combo-thin-lobes-env` (exact environment, controls transmission-ignored, sheen-ignored, aniso-ignored, iridescence-ignored, specular-ignored,
+  transmission-default-fresnel): the capture and gate were NOT run (battery hold): UNVERIFIED on the GPU.

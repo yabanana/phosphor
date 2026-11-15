@@ -1688,7 +1688,7 @@ class BenchMirror(unittest.TestCase):
 
     def test_every_combination_key_is_planned_with_valid_controls_and_coherent_pending_fields(self):
         keys = [k for k in check.SCENARIOS if k.startswith("combo-") or k.startswith("furnace-combinations")]
-        self.assertEqual(len(keys), 36)
+        self.assertEqual(len(keys), 37)
         with tempfile.TemporaryDirectory() as tmp:
             with contextlib.redirect_stdout(io.StringIO()):
                 args = ["--out", tmp, "--binary", "build/release/phosphor"]

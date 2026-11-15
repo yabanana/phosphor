@@ -1236,6 +1236,51 @@ def thin_ratio(mu):
     return 1.0 - THIN_RATIO_SLOPE * np.clip(np.asarray(mu, dtype=np.float64), 0.0, 1.0)
 
 
+def hemisphere_radiance(direction):
+    """The legacy environment: mix(ground, sky, d.y 0.5 + 0.5) per unit direction (n, 3) -> (n, 3)."""
+    t = (np.asarray(direction, dtype=np.float64)[:, 1:2] * 0.5 + 0.5)
+    return np.asarray(HEMISPHERE_GROUND) * (1.0 - t) + np.asarray(HEMISPHERE_SKY) * t
+
+
+def aniso_bent_normal(n, v, bitangent, roughness, strength):
+    """The README's bent normal (research/khr-materials.md section 4), written from its GLSL:
+    bent = normalize(cross(cross(B, V), B)); a = (1 - strength (1 - roughness))^4; N' = normalize(mix(bent, N, a))."""
+    bent = np.cross(np.cross(bitangent, v), bitangent)
+    length = np.linalg.norm(bent, axis=-1, keepdims=True)
+    bent = np.where(length > 1e-6, bent / np.maximum(length, 1e-12), n)
+    a = ((1.0 - strength * (1.0 - roughness)) ** 2) ** 2
+    mixed = bent * (1.0 - a)[:, None] + n * a[:, None]
+    norm = np.linalg.norm(mixed, axis=-1, keepdims=True)
+    return np.where(norm > 1e-6, mixed / np.maximum(norm, 1e-12), n)
+
+
+def legacy_hemisphere_radiance(base, metallic, roughness, n, v, aniso, variant):
+    """Declared radiance of the engine's LEGACY environment (no declared constant one): the declared split-sum weights of the material (the anisotropic
+    effective roughness of `declared_aniso_alpha`) times hemisphere(N) for the diffuse and hemisphere(specularDir) for the specular, with
+    specularDir = normalize(mix(reflect(-V, N'), N', roughness^2)) and N' the README bent normal of an anisotropic pixel (the control
+    `bent-normal-ignored` fetches along N)."""
+    n_dot_v = np.maximum(dot(n, v), MIN_NDOTV)
+    effective = np.asarray(roughness, dtype=np.float64)
+    env_normal = n
+    kind = variant.get("aniso", "spec")
+    if aniso is not None:
+        at, ab = aniso_alphas(effective_alpha(roughness), aniso["strength"])
+        alpha_eff = declared_aniso_alpha(at, ab, "spec" if kind == "bent-normal-ignored" else kind)
+        effective = np.where(alpha_eff == ab, effective, np.sqrt(alpha_eff))
+        if kind != "bent-normal-ignored":
+            _, b_axis = aniso_axes(aniso, n)
+            env_normal = np.where((aniso["strength"] > 0)[:, None], aniso_bent_normal(n, v, b_axis, np.asarray(roughness, dtype=np.float64), aniso["strength"]), n)
+    a, b = dfg_lookup(n_dot_v, clamp_roughness(effective))
+    m = np.asarray(metallic, dtype=np.float64)[:, None]
+    f0 = DIELECTRIC_F0 * (1 - m) + base * m
+    spec_w = np.clip(f0 * a[:, None] + b[:, None], 0.0, 1.0)
+    diffuse_w = 1.0 - np.clip(DIELECTRIC_F0 * a + b, 0.0, 1.0)[:, None]
+    reflected = 2.0 * dot(env_normal, v)[:, None] * env_normal - v
+    mix_k = (np.asarray(roughness, dtype=np.float64) ** 2)[:, None]
+    direction = normalize(reflected * (1.0 - mix_k) + env_normal * mix_k)
+    return (1 - m) * base * diffuse_w * hemisphere_radiance(n) + spec_w * hemisphere_radiance(direction)
+
+
 def declared_extension_diffuse_weight(metallic, roughness, n_dot_v, variant, dielectric, irid):
     """The declared diffuse weight 1 - max3 E of the underlying dielectric (n, 1): the extension (ior/specular) and/or the film, exactly the weights
     `_declared_material_radiance` and `declared_irid_environment` apply to the diffuse term (F15.3 closure, thin + ior / iridescence)."""
@@ -1362,6 +1407,8 @@ def sun_quadrature(n, v, l, roughness, radius, model=APPENDIX_B):
 # polar midpoint grid (EXACT_DISK_RINGS rings equal in cos(theta) x EXACT_DISK_AZIMUTHS azimuths: uniform in solid angle, a different
 # quadrature family) and drops those pixels from the quadrature mask.
 EXACT_ANISO_DISK = False
+LEGACY_ENVIRONMENT = False  # `--legacy-environment`: the declared image is the engine's legacy two-colour hemisphere environment (ticket 11, bent normal)
+HEMISPHERE_SKY, HEMISPHERE_GROUND = (0.30, 0.36, 0.45), (0.10, 0.09, 0.08)  # shaders/material_shading.h hemisphere(): sky above, ground below
 THIN_BACK_NDOTL = 1e-3  # N.L at which the sheen albedo scaling of a light BEHIND a thin surface is read (see thinSheenBackScale in shaders/material_shading.h)
 # `--sky-override R`: the environment radiance of the SPECULAR / SHEEN terms is R instead of the snapshot sky (a captured probe of constant radiance R
 # lights them; ticket 10).  Only valid for a black base (no diffuse term, which keeps the declared environment): the fixture's contract.
@@ -1730,8 +1777,82 @@ def layered_environment(material, n_dot_v, coat, sheen, radiance, swapped=False)
     return material
 
 
+_THIN_EXT_TABLE = {}
+THIN_EXT_NODES, THIN_EXT_QUADRATURE = 65, (96, 96)
+
+
+def thin_transmission_table_for(f0, weight, film=None, variant="extension"):
+    """(mu grid, T) of the exact transmitted albedo under an extended dielectric and/or a thin film (F15.3 closure, ticket 16):
+    T(mu) = integral over the BACK hemisphere of W(V.H) |N.L| / pi dL with W = 1 - max3 F_ext(V.H) (ior/specular, `dielectric_fresnel`), or, with a
+    film (ior, thickness nm, strength s, film base f0 (3,)), W = (1 - s) (1 - max3 F_ext) + s (1 - max3 F_film(V.H)) (the weight of the reflected diffuse,
+    `irid_lobe_weights`).  `thin_transmission_table()` is the special case f0 0.04, weight 1, no film."""
+    f0 = np.asarray(f0, dtype=np.float64)
+    if film is None and variant == "extension" and float(weight) == 1.0 and np.allclose(f0, DIELECTRIC_F0, rtol=0, atol=1e-12):
+        return thin_transmission_table()  # the neutral dielectric: the default table of ticket 16 (bit for bit)
+    key = (tuple(np.round(f0, 12)), round(float(weight), 12), None if film is None else tuple(np.round(np.append(film[:3], film[3]), 12)), variant)
+    if key not in _THIN_EXT_TABLE:
+        mus = np.linspace(MIN_NDOTV, 1.0, THIN_EXT_NODES)
+        x, wgt = np.polynomial.legendre.leggauss(THIN_EXT_QUADRATURE[0])
+        cos_l, wgt = 0.5 * (x + 1.0), 0.5 * wgt
+        phi = (np.arange(THIN_EXT_QUADRATURE[1]) + 0.5) * (2 * math.pi / THIN_EXT_QUADRATURE[1])
+        sin_l = np.sqrt(1 - cos_l ** 2)
+        values = np.empty(THIN_EXT_NODES)
+        for i, mu in enumerate(mus):
+            v_dot_l = sin_l[:, None] * np.cos(phi)[None, :] * math.sqrt(max(0.0, 1 - mu * mu)) - cos_l[:, None] * mu
+            vh = np.sqrt(np.clip((1 + v_dot_l) / 2, 0.0, 1.0)).reshape(-1)
+            count = vh.size
+            _, max_f = dielectric_fresnel(np.tile(f0, (count, 1)), np.full(count, float(weight)), (1.0 - vh)[:, None] ** 5, variant)
+            w_dielectric = (1.0 - max_f[:, 0])
+            if film is not None:
+                ior, thickness, strength, f0_film = film[0], film[1], film[2], np.asarray(film[3], dtype=np.float64)
+                f_film = thin_film_fresnel(vh, np.full(count, ior), np.full(count, thickness), np.tile(f0_film, (count, 1)))
+                w_dielectric = (1.0 - strength) * w_dielectric + strength * (1.0 - f_film.max(axis=-1))
+            values[i] = float(np.sum((w_dielectric.reshape(cos_l.size, -1) * cos_l[:, None] / math.pi).mean(axis=1) * 2 * math.pi * wgt))
+        _THIN_EXT_TABLE[key] = (mus, values)
+    return _THIN_EXT_TABLE[key]
+
+
 def environment_radiance(base, metallic, roughness, n_dot_v, radiance, model=APPENDIX_B, dielectric=None, aniso_env=None,
                          irid_env=None, thin_env=None):
+    """Exact environment radiance; a thin subsurface on top of an extended dielectric and/or a film takes the exact transmitted albedo of that
+    material (`thin_transmission_table_for`) instead of the default 0.04 one (F15.3 closure, ticket 16):
+        result = R0 + (1 - m) (w color T - (1 - reflect scale) base Dint)
+    with R0 the thin-free radiance, Dint the diffuse integral of the material (R0(base 1) - R0(base 0) of the dielectric, m = 0) and T the table."""
+    if thin_env is not None and (dielectric is not None or irid_env is not None) and thin_env["variant"] != "default-fresnel":
+        n = len(n_dot_v)
+        r0 = _environment_radiance_core(base, metallic, roughness, n_dot_v, radiance, model, dielectric, aniso_env, irid_env, None)
+        zero_m = np.zeros(n)
+        d1 = _environment_radiance_core(np.ones((n, 3)), zero_m, roughness, n_dot_v, 1.0, model, dielectric, aniso_env, irid_env, None)
+        d0 = _environment_radiance_core(np.zeros((n, 3)), zero_m, roughness, n_dot_v, 1.0, model, dielectric, aniso_env, irid_env, None)
+        dint = (d1 - d0)[:, 0:1]
+        mu = np.clip(np.asarray(n_dot_v, dtype=np.float64), MIN_NDOTV, 1.0)
+        f0 = np.full((n, 3), DIELECTRIC_F0) if dielectric is None else np.asarray(dielectric["f0"], dtype=np.float64)
+        weight = np.ones(n) if dielectric is None else np.asarray(dielectric["weight"], dtype=np.float64)
+        dvariant = "extension" if dielectric is None else dielectric["variant"]
+        film_f0 = irid_base_f0(base, dielectric) if irid_env is not None else None
+        strength = np.zeros(n) if irid_env is None else irid_strength(irid_env)
+        albedo = np.empty((n, 1))
+        keys = np.concatenate([f0, weight[:, None], strength[:, None],
+                               np.zeros((n, 2)) if irid_env is None else np.stack([irid_film_ior(irid_env), irid_thickness(irid_env)], axis=1),
+                               np.zeros((n, 3)) if film_f0 is None else film_f0], axis=1)
+        for key in np.unique(np.round(keys, 9), axis=0):
+            pick = np.flatnonzero(np.all(np.round(keys, 9) == key, axis=1))
+            film = None if key[4] <= 0.0 else (key[5], key[6], key[4], key[7:10])
+            mus, table = thin_transmission_table_for(key[0:3], key[3], film, dvariant)
+            albedo[pick, 0] = np.interp(mu[pick], mus, table)
+        if thin_env["variant"] == "front-only":
+            albedo = dint
+        elif thin_env["variant"] == "fresnel-ignored":
+            albedo = np.ones_like(dint)
+        m = np.asarray(metallic, dtype=np.float64)[:, None]
+        w = thin_weight(thin_env)[:, None]
+        removed = (1.0 - thin_reflect_scale(thin_env))[:, None] * base * dint
+        return r0 + (1.0 - m) * (w * thin_color(thin_env) * albedo - removed) * radiance
+    return _environment_radiance_core(base, metallic, roughness, n_dot_v, radiance, model, dielectric, aniso_env, irid_env, thin_env)
+
+
+def _environment_radiance_core(base, metallic, roughness, n_dot_v, radiance, model=APPENDIX_B, dielectric=None, aniso_env=None,
+                               irid_env=None, thin_env=None):
     """Outgoing radiance (n, 3) under a constant isotropic environment of radiance `radiance`.
 
     `dielectric` (F15.1, per-pixel {"f0", "weight", "variant"} of KHR_materials_ior/specular): the exact quadrature of
@@ -1862,6 +1983,7 @@ SHEEN_DECLARED_CONTROLS = {
 ANISO_DECLARED_CONTROLS = {
     "declared-aniso-ignored": {**DECLARED, "aniso": "ignored"},      # alpha_eff = alpha_b: the engine before ticket 11
     "declared-aniso-alpha-t": {**DECLARED, "aniso": "alpha-t"},      # alpha_eff = alpha_t: the stretched axis only
+    "declared-aniso-bent-normal-ignored": {**DECLARED, "aniso": "bent-normal-ignored"},  # legacy hemisphere: fetch along N, not the README's bent normal
 }
 # F15.3 (ticket 12): negative controls of the iridescence grids of the deterministic resolve.  The split-sum model evaluates
 # the film at N.V by construction (decision 06), so `at-nv` has no declared counterpart.
@@ -2940,8 +3062,13 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
                 radiance += layered_environment(material, dot(n, v), coat, sheen, sky, model.get("order") == "swapped")
             terms.append("environment-quadrature")
         else:
-            radiance += declared_environment_radiance(base, metallic, roughness, dot(n, v), sky, environment,
-                                                      env_dielectric, env_coat, env_sheen, env_aniso, env_irid, env_thin)
+            if LEGACY_ENVIRONMENT:
+                if any(x is not None for x in (env_dielectric, env_coat, env_sheen, env_irid, env_thin)):
+                    raise ValueError("the legacy-environment reference models the base and anisotropy only")
+                radiance += legacy_hemisphere_radiance(base, metallic, roughness, n, v, env_aniso, environment)
+            else:
+                radiance += declared_environment_radiance(base, metallic, roughness, dot(n, v), sky, environment,
+                                                          env_dielectric, env_coat, env_sheen, env_aniso, env_irid, env_thin)
             terms.append("environment-declared")
     image = np.full((height * width, 3), sky, dtype=np.float64)  # pixels without geometry show the environment
     image[pick] = radiance
@@ -2981,8 +3108,9 @@ def point_light_visibility(root, data, cast, threads):
 
 
 def command_render(args):
-    global EXACT_ANISO_DISK, SKY_OVERRIDE
+    global EXACT_ANISO_DISK, SKY_OVERRIDE, LEGACY_ENVIRONMENT
     EXACT_ANISO_DISK = bool(getattr(args, "exact_aniso_disk", False))
+    LEGACY_ENVIRONMENT = bool(getattr(args, "legacy_environment", False))
     SKY_OVERRIDE = getattr(args, "sky_override", None)
     global SKY_RATIO_CONTROL
     SKY_RATIO_CONTROL = 1.0
@@ -3051,6 +3179,8 @@ def main(argv=None):
                    help="skip the exact environment quadrature of the literal image (combinations without one: declared model only)")
     p.add_argument("--exact-aniso-disk", action="store_true",
                    help="integrate the sun disk of narrow anisotropic lobes on a polar grid instead of the engine's spiral rule (no quadrature mask there)")
+    p.add_argument("--legacy-environment", action="store_true",
+                   help="the declared image is the engine's legacy two-colour hemisphere environment (base and anisotropy only)")
     p.add_argument("--sky-override", type=float, default=None,
                    help="radiance of the environment terms instead of the snapshot sky (a cooked constant probe; black base only)")
     p.add_argument("--textures", action="store_true",

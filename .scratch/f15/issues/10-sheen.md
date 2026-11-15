@@ -219,3 +219,16 @@ Open: captured-probe sheen fixture; sheen texture numeric fixture; reference qua
   owns the ambient and the sheen term there still uses the declared environment (decision 06 is met on the F13 composite path only).
 - visual_check (`BENCH8_ARGS="--instances 100000"`, reference-f15-appB): benches 1-5, 7, 8 are 0 px; bench 6 differs by 9 px, max delta 1 (the known 1-LSB shader-validation codegen effect of tickets 10/74ff194, the
   references of benches 5/6 were retaken then). It was NOT re-checked under API validation only (battery hold); the five F13 exactness PFMs are byte-identical. Owner/orchestrator: rerun bench 6 without shader validation.
+
+### 2026-11-15 (3) — sheen term on the resolve path, and the denoiser deviation (agent `tex`, round 3)
+
+- Which configurations own the sheen term in the RESOLVE with a probe present? None is reachable. The resolve evaluates the declared environment itself only where no reflection composite exists
+  (`flags 16u` without `RESOLVE_EXTERNAL_DIFFUSE`: legacy lighting / `--reflections off`), and there NO probe is consulted for anything: with legacy lighting the cooked probe is ignored by the
+  specular lobe too (measured: a 0.8 probe and a 0.2 probe gave bit-identical images, max difference 0.0, `build/f15-check/diag-0.8`). Whenever a probe is consulted (`--reflections probes`
+  with F13 lighting) the reflection composite exists, the resolve strips its external diffuse and sheen term (`RESOLVE_EXTERNAL_DIFFUSE`) and the probe kernel / composite own S E L(N): that
+  path is the one fixed and gated (`sheen-probe-env`, with `--lighting-denoise off` AND the composite on). There is no resolve-owned sheen term with a probe to fix.
+- Boundary-sphere deviation under the custom denoiser: the SAME scene, probe and engine build with only `--lighting-denoise` changed gives (sphere-pixel relative error against the reference)
+  custom: -1.9 % on the dim rim pixels of the boundary row/column, interior -0.42 % (2..6 px from the silhouette), +0.14 % (6..15 px), +0.30 % (> 15 px): a sign-changing profile that depends on the
+  distance to the silhouette; off: +0.01 % rim, +0.03 / +0.02 / +0.00 % in the same bands, i.e. exact (worst sphere mean 0.018 %). The probe-lit specular signal goes through the denoiser's spatial
+  filter, which mixes the sphere pixels with the neighbouring background pixels (0.5 against 0.04-0.2): that is the denoiser's declared silhouette behaviour, not the probe lookup. It is covered (not re-run here) by the
+  F13 denoiser variants raw / custom / rt8-control in `tools/f13_f14_check.py` (same scene, same radiance, denoiser on and off, compared) and kept out of this fixture by running it unfiltered.
