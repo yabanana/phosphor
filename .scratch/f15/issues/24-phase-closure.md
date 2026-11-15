@@ -135,6 +135,14 @@ section "Defects found during F15"; integrated by fast-forward to 6b6bf04; orche
   pre-reflection lighting, DDGI indirect irradiance, denoise 3 atrous 1).  Whether the median p95 delta now meets 0.10 ms needs the orchestrator's quiet-machine A/B/A.
   Carried: the archive keeps the earlier `ao_rtao` / `fog_inject_rt` entries linking `rt_alpha_generic` (unrequested); lobe kernels (scenes with any feature, no glass) still trace
   with the full payload.
+  Orchestrator integration (2026-11-15, 8fbda9c + d124f2b on the branch): ctest 33/33, F13 exactness 5 cases 0 px and PFM bit-identical against 94da95c,
+  visual_check 0 px on 8 benches, archive_check all scenarios pass. A/B/A after the fix, sky sentinel 0.81 on every binary of the day:
+  - against 75924b2 (`build/d2-ab-f15-closure-fix`): GPU p95 15.49 / 15.70, 15.51 / 15.60, 15.52 / 15.67 (median delta +0.15), p50 median +0.07;
+  - against the ticket-03 baseline 2e1057a, which is the cost baseline of the plan ("after ticket 03 the scenes without features stay identical to the new
+    baseline in images and cost", docs/plans/F15.md; built in worktree f15-t03-baseline, `build/d2-ab-t03-fix`): GPU p95 15.40 / 15.66, 15.35 / 15.70,
+    15.60 / 15.68 (A/B/A deltas +0.29 / +0.23 / +0.08, median +0.23 against 0.10), p50 median +0.03; per pass the residual is only `F13 reflection
+    sample 0` (p50 +0.04, p95 +0.42 / +0.51 / +0.18 on a 3.53 ms base), every other pass within +-0.07 p95 with mixed signs. STILL OPEN: the D2 agent
+    is attributing the reflection tail and specialising the pass.
 - Declared (owner noted, no objection): single-sided planes cast sun shadows from both sides in CSM (two-sided by contract) and RT.
 - CLOSED, not a defect (eac5233, ticket 13 "C22-D3 follow-up"): the 67 IORTestGrid "dark ring" pixels are a metric artefact. With
   reflections off a white transmissive sphere reads albedo 1 x environment 0.5 = the clear colour, so the ring set of the off image
