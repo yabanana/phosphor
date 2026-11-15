@@ -221,3 +221,16 @@ Open item: "8 background compiler calls in restir/clustered captures never expla
 2026-11-15 — F15 closure, agent "thinwall": the carried "GI at -N" item is closed for every GI mode and for the legacy resolve (details and numbers in ticket 19, same date): E(-N) is the
 probe-grid lookup of the back normal for DDGI, the radiance cache and ReSTIR GI, read by the reflection composite and by the legacy visibility/forward resolve; `--thin-gi-back off` (the old E(N)
 stand-in) fails the declared check in all six mode x consumer combinations, `on` is within 4.7-6.7 % of the independent expectation (gate 25 %, indicative).
+
+### 2026-11-15 — weight / colour textures and encoding equality (agent `tex`, branch f15c-tex-2)
+
+- Thin weight (A) and colour (sRGB RGB) textures: `texture-thin-sun` and `texture-thin-env-resolve` GREEN (`build/f15-check/tex4`): sun worst p99 0.18 %, max outside mask
+  2.5 % (one dielectric sphere, below the 3 % bound), env-resolve worst mean 0.053 %, p99 0.12 %. Controls texture-v-flipped, thin-weight-ignored, thin-color-ignored,
+  thin-color-srgb-encoded FAIL (sun and declared twins). Closes the "textures have no reference" carry.
+- Encoding equality (box 2, was orphaned): `tools/f15_encoding_check.py` renders one generated scene (two spheres with `KHR_materials_diffuse_transmission`, one with the draft
+  `KHR_materials_scatter` + `KHR_materials_transmission`) and the same glTF with plain materials plus `--material-overrides` (the description file, schema
+  phosphor-material-overrides) holding the blocks the loader maps the encodings to. Result (`build/f15-encoding`, corpus rig, 1280 x 720 PNG): **0 pixels differ** between
+  the glTF encodings and the description file; the repeat capture of the glTF scene differs by 0 pixels (the capture is deterministic, so the equality is meaningful);
+  negative controls differ as they must: weight +0.02 on one sphere 21 523 pixels (max delta 3), blue channel +0.02 on one sphere 14 479 pixels (max delta 2).
+  Unit tests: `tools/test_f15_encoding_check.py` (scene, override mapping, pixel counting). Run: `F15_GPU_LOCK_HELD=1 python3 gpulock.py uv run ... tools/f15_encoding_check.py
+  --binary build/release/phosphor` (or alone: the capture takes the lock itself).

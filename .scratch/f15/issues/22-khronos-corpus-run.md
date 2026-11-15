@@ -254,3 +254,14 @@ Open: numeric texture fixtures (coat normal, anisotropy direction, iridescence t
   view of it: the gate is the sign and a measured threshold, not a magnitude).
 - Final checks of this round (build with the fog field): ctest 35 / 35 (phosphor_tests included), `f15_exact.sh` 5 PFMs byte-identical (cmp) to build/litefix/exact-new, `visual_check` with
   `EXTRA_ARGS=--pipeline-sync` and BENCH8_ARGS 0 px on 8 benches, the five-slot primary fixture 1.0 with all controls failing, all eight secondary cases green under validation.
+
+### 2026-11-15 — numeric texture fixtures (agent `tex`, branch f15c-tex-2)
+
+- The texture carried item of this ticket is closed with ten generated fixtures instead of corpus models (the corpus assets keep their qualitative
+  side-by-side role): `texture-{coat,aniso,irid,sheen,thin}-{sun,env-resolve}`, `tools/f15_check.py`, details and numbers in tickets 09 (coat normal, factor,
+  roughness), 10 (sheen colour, roughness), 11 (anisotropy direction, strength), 12 (iridescence thickness, factor) and 16 (thin weight, colour). All GREEN with
+  every control failing. The reference refuses a texture word only without `--textures`; with it, the reference samples the exported texels (level 0 bilinear, repeat,
+  binary16) and drops pixels whose UV footprint exceeds half a texel. Mip selection and per-slot `KHR_texture_transform` stay unmodelled (the fixtures magnify; a
+  non-uniform transform is refused at load, GlamVelvetSofa).
+- Still open here: the DiffuseTransmissionTest corpus model stays refused (needs KHR_materials_unlit and punctual lights); the texture word handling of the corpus itself is
+  exercised by the fixtures, not by the model.
