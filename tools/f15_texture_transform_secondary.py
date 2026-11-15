@@ -53,6 +53,8 @@ CASES = {
     "gi": {"shadows": ["--shadows", "rt"], "kind": "gi", "pitch": 40.0, "th": 0.008, "model_min": 0.3, "gi": ["--gi", "ddgi", "--gi-grid", "16x8x16", "--gi-rays", "64"]},
     "probe": {"shadows": ["--shadows", "rt"], "kind": "probe", "pitch": 40.0, "th": 0.03, "model_min": 0.3, "reflections": "probes", "extra": ["--reflection-capture-probe"]},
     "glass": {"shadows": ["--shadows", "rt"], "kind": "glass", "pitch": 0.0, "th": 0.03, "model_min": 0.3},
+    # orchestrator (ticket 24): the CSM transmittance-map tint of the same pane (shadow_depth transmit path), same threshold, fixed before the run.
+    "glass-csm": {"shadows": ["--shadows", "csm"], "kind": "glass", "pitch": 0.0, "th": 0.03, "model_min": 0.3},
     "rt-shadow": {"shadows": ["--shadows", "rt"], "agreement": 0.99, "kind": "shadow"},
     "csm-shadow": {"shadows": ["--shadows", "csm"], "agreement": 0.97, "kind": "shadow"},
     "cache-shadow": {"shadows": ["--shadows", "csm", "--shadow-cache", "on"], "agreement": 0.97, "kind": "shadow"},
