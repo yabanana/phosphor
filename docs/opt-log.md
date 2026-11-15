@@ -2294,7 +2294,7 @@ feature bit 0..7 is discriminated by at least 4 scenes); the overflow bin (class
 **Decision (provisional):** binning stays opt-in (`--material-binning on`) and the default resolve stays the generic/union one; the class table makes the bins
 possible, whether they are worth their dispatches is open until the A/B/A on the chess fixture (ticket 24) and the terrain (ticket 23).
 
-## 2026-11-14 — F15.4 (ticket 23): layer stack resolve and the binning decision on the terrain (OPEN, no timing taken)
+## 2026-11-14 — F15.4 (ticket 23): layer stack resolve and the binning decision on the terrain (timing taken 2026-11-15, see the update at the end of this entry)
 
 **What changed in the resolve:** a material whose description carries a layer stack (feature bit 8, `MATERIAL_FEATURE_LAYERS`) is resolved by `resolveLayerStack`
 (`shaders/material_shading.h`, rules in `src/renderer/layer_blend.h`): mask sample, optional height-contrast reweighting, per-layer base-parameter samples only
@@ -2306,6 +2306,21 @@ height texture), parameter-space blend, surface-gradient normal, then the ONE ba
 (arms single, layers-1..4, full; A/B/A, 3 replicas, 320 frames with warmup 64, saturated clocks `--no-vsync --gpu-timing-serial`, refuses to start while another GPU
 process runs; results land in `results.json` / `summary.md` for perf-log.md). Until it runs, binning stays opt-in and the default resolve stays the union one (the
 provisional decision of ticket 21 is unchanged). The terrain has two feature classes (layers; layers + coat), so its bins are 2 (the budget run shows `bins 2`).
+
+**Update 2026-11-15 (orchestrator, quiet machine, A/B/A x 3 replicas, 90 runs each, 1920x1080; `build/f15-layers-timing*`, perf-log entry
+"F15 ticket 24: quiet-machine cost of the F15 features"):** resolve mean GPU ms per frame (binning = resolve + classification).
+| arm | procedural union | procedural binning | CC0 union | CC0 binning |
+|---|---|---|---|---|
+| single material | 0.089 | 0.106 | 0.087 | 0.104 |
+| layers-1 | 0.136 | 0.143 | 0.136 | 0.144 |
+| layers-2 | 0.162 | 0.160 | 0.159 | 0.161 |
+| layers-3 | 0.183 | 0.182 | 0.183 | 0.184 |
+| layers-4 | 0.208 | 0.216 | 0.217 | 0.218 |
+| full (generated mask, height contrast, coat finish) | 0.204 | 0.206 | 0.201 | 0.208 |
+The CC0 run uses the four owner-approved ambientCG sets (`--terrain-textures build/terrain-materials`, added to the script by b7beed9, as decision 12
+requires); the first run used the procedural stand-ins.  Each active layer adds about 0.025-0.034 ms at 1080p on this view; the full mix costs
++130 % of the single material (0.20 vs 0.09 ms).  Binning never lowers the resolve by >= 5 % (CC0: full +3.5 %, layers-4 +0.5 %, layers-2 +1.3 %):
+the union pipeline stays the default, binning stays opt-in (with the chess result of ticket 24, entry below).
 
 ## 2026-11-15 — F13.4 / F11.5: energy-preserving a-trous (`--lighting-denoise-energy on`), timeboxed experiment (verdict: rejected for cost, owner option B)
 

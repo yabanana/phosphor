@@ -1449,3 +1449,18 @@ Memory +7.25 MiB (aliased heap 128.8 -> 136.4 MB).
 Decision rule (decision 05/08): binning adopted only if it lowers the resolve by at least 5 % beyond noise. It does not on any rig (the per-class resolve is cheaper by 0.006-0.031 ms but the
 classification costs 0.014-0.028 ms, net -1.8 % to +9.8 %); frame GPU p50 deltas -0.047 / +0.076 / +0.080 ms are inside the A-A spread. With the terrain result (union never worse than +4 %,
 binning never wins) the union pipeline stays the default and binning stays opt-in (`docs/opt-log.md`).
+
+### Terrain layer stack resolve (ticket 23; orchestrator, same day, binaries cfb9e11 / b7beed9 script)
+
+`python3 -I tools/f15_layers_timing.py run --binning [--terrain-textures build/terrain-materials]`: the terrain patch at 1920x1080, visibility
+resolve, `--rt off`, saturated clocks, 64 warm-up + 256 measured frames, A/B/A x 3 replicas per arm (90 runs per texture set), 1-minute load
+2.0 at the start, 0 GPU allocations.  Resolve mean GPU ms per frame ("Material resolve", plus "Material classification" with binning):
+
+| arm | procedural union | procedural binning | CC0 union | CC0 binning |
+|---|---|---|---|---|
+| single material | 0.089 | 0.106 | 0.087 | 0.104 |
+| layers-1 / 2 / 3 / 4 | 0.136 / 0.162 / 0.183 / 0.208 | 0.143 / 0.160 / 0.182 / 0.216 | 0.136 / 0.159 / 0.183 / 0.217 | 0.144 / 0.161 / 0.184 / 0.218 |
+| full (generated mask, height contrast, coat) | 0.204 | 0.206 | 0.201 | 0.208 |
+
+Per-replica effects (B / mean(A) - 1, median and range) are in `build/f15-layers-timing{,-cc0}/summary.md`.  The CC0 sets are the decision-12
+measurement; the procedural run is kept as the earlier stand-in.  Binning never lowers the resolve by >= 5 %: union stays the default.
