@@ -97,3 +97,6 @@ The roughness 0.15 knot has no fixture (its Mitsuba reference is the noisiest ca
 2048 spp / 64 walks read 0.1275 / 0.3365: reference residual noise of its own 7.5-8.8 % and the engine's, both reduced by sampling, the bound untouched.
 Colours above the largest albedo the boundary lets through (A_max) saturate (alpha = 1) in the engine exactly as in the reference (both read the same plateau): the observed albedo
 is then below the requested colour (declared).
+
+## 2026-11-15 product output
+The albedo table (roughness 0.15..0.7, g 0..0.3) feeds the product output unchanged; the `-product` keys and the moving-camera clip are recorded in ticket 17 (same date).

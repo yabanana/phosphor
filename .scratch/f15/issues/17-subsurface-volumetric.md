@@ -284,3 +284,20 @@ diffuse; stochastic (default 4 walks per pixel is noisy; converges over frames);
 Needs a quiet-machine timing (orchestrator): `python3 gpulock.py build/release/phosphor --scene procedural --bench 2 --material-scenario subsurface-volumetric-sun --render-path visibility
 --geometry-path mesh --rt on --shadows off --lighting legacy --reflections off --post --upscaler native --resolution 1280x720 --frames 300 --warmup 64 --no-ui --no-vsync --gpu-timing-serial
 --subsurface-mode rt-walk --subsurface-samples N --report r.json` for N = 4 / 16 / 64 against `--subsurface-mode diffusion` (pass "Subsurface RT walk" / "Subsurface diffusion").
+
+## 2026-11-15 product output of the RT tier (owner criterion: the walk meets the bound when enabled, as a user runs it)
+
+Pooling criterion: UNCHANGED from decision 11 / this ticket for the bias keys (bound 10 % mean / 25 % p95, floor 5 %, same pixel sets; the runner pools the noisy
+term over the reference's own 5x5 interior window).  The new `-product` keys use NO pooling and NO noise twin: default settings, static camera, the engine's own warm-up,
+one capture.
+- Default: 16 walks per pixel (`--subsurface-samples`), accumulation on (`--subsurface-accumulate on`): 9x9 edge-aware prefilter (material code, view depth 10 %,
+  normal cos 0.9) + reprojected exponential history (motion vectors, alpha max(1/(n+1), 1/64), RGBA32F ping-pong, reset on cut / resize / first frame / light change).
+  Raising walks alone was measured insufficient (~15k walks per frame; 64 walks with a 15x15 filter still 0.170).
+- Product keys (`*-product`), GREEN: sun 0.0621 / 0.1681, back-lit 0.0919 / 0.2193 (2x bound), point legacy / ReSTIR / clustered 0.0740 / 0.2132, composite ambient
+  0.0411 / 0.0625, hemi 0.0409 / 0.0626.  The converged-estimator keys stay as the bias check.
+- Moving camera: `tools/f15_walk_clip_check.py --run --out build/f15-walk-clip` (strafe +-1.5 m `--material-motion`, 96 frames, 1280x720; control = 128 independent
+  64-walk runs pooled 9x9, self-test 0.0258 / 0.0734 <= 1/3 of the bound; gates every frame >= 24, worst mean / p95, ghost ratio reported).  Product 0.0703 / 0.1902 MET;
+  `--debug-subsurface-history reject-never` (history never rejected, no reprojection) 0.1400 / 0.4482 FAILS.  Attempts: depth tolerance 2 % -> product 0.1974 / 0.7343 (history
+  rejected under parallax; windows 8, 16, 64 identical; accumulation off 1.158 / 2.641); a +-0.5 m stimulus did not discriminate (negative 0.0755 / 0.2303).
+- Declared: the depth tolerance is 10 % (prefilter and history); history is nearest-texel; only the 64-frame bound limits lag.
+Needs quiet-machine timing (orchestrator): the command above with `--subsurface-accumulate off` vs on (`Subsurface accumulate` pass) at 16 walks.
