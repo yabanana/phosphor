@@ -1361,3 +1361,91 @@ window, so only same-window comparisons are reported.
 Images are bit-identical to the identity-slot build on Sponza, mirror,
 rough-emitter, probe RT capture, RTAO, fog moving light and day/night. The F9
 matrix passes 60/60.
+
+## F15 ticket 24: quiet-machine cost of the F15 features (2026-11-15, M5 Max, binary cfb9e11)
+
+**Setup.** Orchestrator Release binary of cfb9e11 (archive up to date, read only), `tools/f15_costs.py run` (129 runs, one phosphor process at a time under the
+shared GPU lock, nothing else running: no build, no agent, no solver). A/B/A per replica, 3 replicas, 256 measured frames after 64 warm-up,
+`--fixed-timestep --offscreen --no-ui --no-vsync --gpu-timing-serial`, effect = B minus the mean of the two A runs per replica, shown as median (min..max).
+Load average (1 min) at run start 1.3-2.9 over the session (the 3 minute figure at the start: 2.91 / 2.48 / 2.79; this process alone is about 1).
+Contention sentinel = p95 of `Display tone map` (constant work per resolution): per scenario it stayed within 3 % between the replicas of an item (0.0174-0.0188 ms at
+1280x720 back-light, 0.0299-0.0320 ms at 1080p chess side-light, 0.0160-0.0171 ms panes); the absolute value depends on the scenario (iridescence grids 0.041 /
+0.130 ms, clustered and ReSTIR variants read 0.13 on every replica: post chain after heavy RT work, not contention). 0 GPU allocations and 0 fallback draws in all 129 runs.
+Raw data: `build/f15-costs/run/{results.json,summary.md}` (not versioned). These are costs to record, not gates.
+
+**1. Transmission RT** (chess back-light rig, 1280x720, `--rt on --reflections rt`, 574k-triangle scene; A = pawn tops `transmission=0`, B = `transmission=1`;
+there is no opaque-glass switch on the procedural fixtures):
+
+| metric | A | B | B - A |
+|---|---:|---:|---:|
+| frame GPU p50 | 37.71 | 48.40 | +10.67 (+9.38..+10.85) |
+| frame GPU p95 | 38.37 | 49.30 | +10.85 (+9.50..+11.11) |
+| `Local clustered RT shading` p50 | 26.06 | 35.17 | +9.18 (+8.15..+9.29) |
+| `F13 reflection sample 0..7` p50 (each) | 1.05-1.10 | 1.22-1.29 | +0.17..+0.18 each (about +1.4 ms for the 8) |
+| `Solar temporal moments` p50 | 0.219 | 0.258 | +0.038 |
+| `Material resolve` p50 | 0.075 | 0.085 | +0.010 |
+
+Absolute (procedural glass fixtures at 1280x720, median of 3): `transmission-glass-behind-glass` frame p50 14.84 ms (`Local clustered RT shading` 8.40),
+`transmission-roughness-ior` 17.36 ms (8.90), declared `--rt off` model `transmission-rtoff` 4.18 ms. The A-A spread of the back-light frame p50 reached 3.1 ms in one
+replica (the first set; the effect range reflects it).
+
+**2. Transmissive shadows.**
+
+| item | A | B | frame p50 B - A | passes (p50, B - A) |
+|---|---|---|---|---|
+| 2a RT sun, chess shadow rig 1080p: pawn tops opaque vs glass | 4.50 | 4.66 | +0.148 (+0.071..+0.177; A-A spread 0.167: within noise) | `Solar temporal moments` +0.099 (+0.096..+0.102, RGB history), `Solar RT visibility` +0.027, `Material resolve` +0.023 |
+| 2b CSM 8192 map, same rig: opaque vs glass | 5.33 | 6.36 | +1.033 (+0.908..+1.033) | `CSM transmittance 0..3` +0.198 / +0.194 / +0.193 / +0.193 (0.78 ms), `CSM PCSS visibility` +0.128, `Solar temporal moments` +0.097, `Material resolve` +0.023 |
+| 2d CSM 2048 map, pane-sun@csm 720p: receiver ignores the map (`--debug-transmittance-map off`) vs on | 2.42 | 2.49 | +0.070 (+0.048..+0.083) | `CSM PCSS visibility` +0.075 (the receiver-side cost); the transmittance passes run in both arms |
+| 2e same on volume-pane@csm | 2.42 | 2.50 | +0.082 (+0.036..+0.103) | `CSM PCSS visibility` +0.075 |
+
+Absolute RT sun through glass at 1280x720 (`--shadows rt`, median of 3): pane-sun frame p50 2.20 ms (`Solar RT visibility` 0.108), volume-pane 2.21 (0.110), water-sun 2.21 (0.108).
+The "lite" sun kernel serves scenes without transmission; the A arm of 2a (factor 0 tops) runs it, and the delta above is the whole price of the glass kernel.
+Absolute map cost at the default 2048 (pane-sun@csm): `CSM transmittance 0..3` 0.025 / 0.021 / 0.021 / 0.021 ms (about 0.09 ms for four cascades).
+Memory (graph report `heap_bytes`, aliased): chess shadow rig with `--shadow-map-size 8192` 1 144.6 MiB (tops opaque) -> 2 172.9 MiB (glass), +1 028 MiB = four cascades of a
+256 MiB (8192^2 x 4 B) transmittance map; the default 2048 map is 1/16 of that (64 MiB for four cascades, derived, not measured here). In 2d the off arm still creates
+the maps (heap_bytes 179.88 MiB in both arms), so the map memory is isolated only by the chess A/B.
+
+**3. Subsurface diffusion** (chess side-light rig 1080p, A = `sss=off` no subsurface block, B = overrides applied: kings and queens volumetric screen-space diffusion):
+
+| metric | A | B | B - A |
+|---|---:|---:|---:|
+| frame GPU p50 | 4.302 | 4.713 | +0.411 (+0.352..+0.620) |
+| frame GPU p95 | 4.527 | 4.979 | +0.452 (+0.423..+0.554) |
+| `Subsurface diffusion` p50 | 0 | 0.431 | +0.431 (+0.429..+0.435) |
+| `Subsurface clear` p50 | 0 | 0.025 | +0.025 |
+| `Material resolve` p50 | 0.208 | 0.226 | +0.018 |
+
+Per pixel: the mask capture (`chess-sidelight/mask=1`, luminance > 0.2) has 71 152 subsurface pixels (3.4 % of 1920x1080), so the diffusion pass is 6.1 ns per subsurface pixel
+(6.4 ns with the clear), as a whole-frame figure: the pass is dispatched over the screen and the diffusion scales with the pixels it gathers for, which this A/B does not
+separate (one pixel count only). Memory: unaliased heap +64.3 MiB (537.8 -> 605.2 MB), aliased heap unchanged. Procedural side-lit spheres (`subsurface-volumetric-sun`, 1080p, absolute):
+frame p50 3.94 ms, `Subsurface diffusion` 0.515 ms (no matched no-block twin; `subsurface-volumetric-subpixel-off` is a different scene: 2.87 ms).
+
+**4. Iridescence per light** (ticket 12 static estimate: 187 flops per `bsdfThinFilm`): NO clean A/B exists. The iridescence grid has no film-off arm (its rows are factor 0.5 / 1)
+and material scenarios have no light-count option, so only absolute values are recorded (1080p, median of 3, sentinels 0.041-0.043 sun/legacy, 0.13 restir/clustered): `iridescence-grid-sun`
+frame p50 18.00 ms, `Pre-resolve material lighting guides` 0.772, `Material resolve` 0.250; `-point` (legacy) 18.58 ms, 0.773, 0.229; `-point@restir` 19.92 ms, 0.794, 0.208
+(DI candidates 1.043, temporal 0.948, spatial 0.857); `-point@clustered` 15.98 ms, 0.791, 0.203 (`Local clustered RT shading` 0.570). The frames are dominated by the 8 RT
+reflection samples (about 1 ms each) and the denoiser, so the per-light film cost is below what these absolute values can show. Not measured: GPU per-light cost (needs a
+film-off twin of the grid or a light-count option; neither exists in the current options, and none was invented).
+
+**5. GI-back lookup** (`subsurface-thin-gi-back`, DDGI + ReSTIR + RT, 1280x720, A = `--thin-gi-back off`, B = on):
+
+| metric | A | B | B - A |
+|---|---:|---:|---:|
+| `DDGI back irradiance (thin subsurface)` p50 | 0 | 0.175 | +0.175 (+0.174..+0.175) |
+| frame GPU p50 | 8.427 | 8.728 | +0.344 (-0.094..+0.429; A-A spread 0.376: not significant) |
+| frame GPU p95 | 9.378 | 9.599 | +0.200 (+0.052..+0.263) |
+
+The dedicated pass is the robust cost; the frame delta is dominated by run-to-run drift of `F13 denoise 2 atrous 0` (+0.127, range -0.074..+0.169) and cannot be attributed to the lookup.
+Memory +7.25 MiB (aliased heap 128.8 -> 136.4 MB).
+
+**6. Binning vs union on the chess fixture** (A = union, `--material-binning off`; B = binning on; resolve = `Material resolve` + `Material classification`, mean ms):
+
+| rig | union ms | binning ms | relative (median, min..max) | A-A noise | `Material resolve` p50 | `Material classification` p50 |
+|---|---:|---:|---|---:|---:|---:|
+| side-light 1080p | 0.230 | 0.226 | -1.8 % (-4.9..-0.4) | 2.6 % | -0.031 | +0.026 |
+| shadow rig (RT sun) 1080p | 0.266 | 0.283 | +6.7 % (+5.2..+7.6) | 0.9 % | -0.011 | +0.028 |
+| back-light (RT glass) 720p | 0.089 | 0.098 | +9.8 % (+8.2..+11.7) | 4.3 % | -0.006 | +0.014 |
+
+Decision rule (decision 05/08): binning adopted only if it lowers the resolve by at least 5 % beyond noise. It does not on any rig (the per-class resolve is cheaper by 0.006-0.031 ms but the
+classification costs 0.014-0.028 ms, net -1.8 % to +9.8 %); frame GPU p50 deltas -0.047 / +0.076 / +0.080 ms are inside the A-A spread. With the terrain result (union never worse than +4 %,
+binning never wins) the union pipeline stays the default and binning stays opt-in (`docs/opt-log.md`).
