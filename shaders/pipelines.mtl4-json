@@ -2790,6 +2790,11 @@
         "label": "B3FAB7D7317E78CDDCBB82228E7566B8135DB23378C507CE8B9DE07237092653",
         "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
         "name": "fog_inject_rt"
+      },
+      {
+        "label": "ED63329EF0B61B66C45FE1038B720C6219ACF9CBAE2EDDE2F0632B06645D3D4F",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "reflection_rt"
       }
     ],
     "specialized_function_descriptors": [
@@ -33463,6 +33468,19 @@
       },
       {
         "compute_function_descriptor": "fnd:B3FAB7D7317E78CDDCBB82228E7566B8135DB23378C507CE8B9DE07237092653",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ],
+        "static_linking_descriptor": {
+          "function_descriptors": [
+            "fnd:3C1E2F8541DEAA68456C2623C26D529BE8EC86472A8361D4314BCBF69CC5CB4F"
+          ]
+        }
+      },
+      {
+        "compute_function_descriptor": "fnd:ED63329EF0B61B66C45FE1038B720C6219ACF9CBAE2EDDE2F0632B06645D3D4F",
         "required_threads_per_threadgroup": [
           0,
           0,

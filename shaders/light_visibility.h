@@ -8,6 +8,8 @@
 // is linked from rt_scene.metal; its LOD is fixed at 0 for shadow rays.
 // F15.1 (ticket 14): the result is the RGB TRANSMITTANCE of the straight segment to the endpoint: 0 when an opaque or alpha-masked caster (or an
 // invalid ray) blocks it, 1 when nothing is in the way, the product of the crossed transmissive casters' factors otherwise (ADR-0004).
+// F15 ticket 24: `Payload` = RtPayloadLite in a pipeline that links rt_alpha_lite (a scene without transmissive materials: transmittance 1, exact).
+template <typename Payload = RtPayload>
 inline float3 diEndpointTransmittance(GPUDISurface surface, DISample sample,
                                instance_acceleration_structure tlas,
                                intersection_function_table<triangle_data, instancing> ift,
@@ -32,7 +34,7 @@ inline float3 diEndpointTransmittance(GPUDISurface surface, DISample sample,
     ray.dx = direction.x; ray.dy = direction.y; ray.dz = direction.z;
     ray.tmin = 0; ray.tmax = nextafter(distance, 0.0f);
     ray.mask = RT_MASK_SHADOW; ray.type = RT_PROBE_SHADOW_TRANSMITTED; ray.coneWidth = 0;
-    RtPayload payload{};
+    Payload payload{};
     const GPURtHit hit = rtTrace(ray, tlas, ift, instances, slotCount, payload);
     return (hit.hit == 0u && hit.t != -2.0f) ? rtShadowTransmittance(payload) : float3(0);
 }

@@ -190,9 +190,10 @@ inline GPURtHit rtRefineSurfaceHit(const GPURtRay r,GPURtHit hit,
     return hit;
 }
 
+template<typename Payload>
 inline GPURtHit rtTraceSurface(const GPURtRay r, instance_acceleration_structure as,
     intersection_function_table<triangle_data,instancing> ift,
-    const device GPUInstance* instances,uint slotCount,thread RtPayload& payload,
+    const device GPUInstance* instances,uint slotCount,thread Payload& payload,
     const device GPURtMesh* meshes,const device GPUVertex* vertices,const device uint* indices,uint meshCount) {
     return rtRefineSurfaceHit(r,rtTrace(r,as,ift,instances,slotCount,payload),
                              instances,slotCount,meshes,vertices,indices,meshCount);
