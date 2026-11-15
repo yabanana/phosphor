@@ -1,5 +1,6 @@
 #include "platform/metal/shadow_passes.h"
 #include "platform/metal/lighting_dispatch.h"
+#include "platform/metal/feature_pipelines.h"
 #include "platform/metal/acceleration_structures.h"
 #include "platform/metal/scene_renderer.h"
 #include "platform/metal/mesh_renderer.h"
@@ -88,6 +89,8 @@ struct ShadowPasses::Impl {
     rg::TextureRef dummyTransmitRef{};
     MTL::Texture* dummyTransmit=nullptr;
     bool hasTransmissive=false, warnedCacheTransmissive=false, dummyTransmitZeroed=false;
+    // F15 ticket 24: kernels[Sun] is the lite RT pipeline; sunServed is what the scene's feature union selects (full while it has transmission).
+    TransmissionPipelines transmitPipes; pipe::PipelineHandle sunServed{},temporalServed{}; bool temporalGlass=false;
     std::array<rg::BufferRef,4> tileRefs{},expectedRefs{};
     rg::BufferRef classificationRef{};
     Impl(MetalContext& context,PipelineCache& p,SceneRenderer& s,MeshRenderer& m,VisibilityRenderer& v,
@@ -102,7 +105,7 @@ struct ShadowPasses::Impl {
                              "shadow_csm_pcss","shadow_sun_rt","shadow_temporal","shadow_filter","shadow_contact"};
         for (u32 i=0;i<PassCount;++i) {
             if (i==Sun && o.shadows!=ShadowMode::RT) continue;
-            kernels[i]=p.request(lighting::kernel(names[i],i==Sun));
+            kernels[i]=p.request(i==Sun?lighting::kernel("shadow_sun_rt_lite",true,true):i==Temporal?lighting::kernel("shadow_temporal_scalar"):lighting::kernel(names[i]));
         }
         pipe::PipelineDesc d; d.kind=pipe::PipelineKind::Render;d.label="CSM indexed casters";
         d.functions={"shadow_depth_vertex","shadow_depth_fragment",""}; indexed=p.request(d);
@@ -345,6 +348,12 @@ struct ShadowPasses::Impl {
         if(hash!=previousLightHash){++lightRevision;previousLightHash=hash;}
         const Signal signal{f.scene,casterRevision,materialRevision,lightRevision,rt?rt->geometryRevision():0};
         if(!(signal==lastSignal)){++signalEpoch;lastSignal=signal;}const u64 signalRevision=signalEpoch;
+        // F15 ticket 24: the temporal kernel and its history record layout follow the feature union (see shadows.metal); a change of layout
+        // (a material edit that adds or removes glass) restarts every history, whatever the kernel that serves the transition frame.
+        const bool glassScene=(store.featureUnion()&MATERIAL_FEATURE_TRANSMISSION)!=0u;
+        temporalServed=transmitPipes.serve(pipelines,1,kernels[Temporal],glassScene,[&]{return lighting::kernel("shadow_temporal");});
+        const bool glassServed=temporalServed!=kernels[Temporal];
+        if(glassServed!=temporalGlass){temporalGlass=glassServed;for(u32 v=0;v<views.size();++v)history.invalidate(v,"history layout");}
         auto decision=history.begin(f.view,{f.width,f.height,f.backingWidth,f.backingHeight},signalRevision,f.cut,f.reset);
         params={};
         const auto inverse=glm::inverse(glm::make_mat4(f.constants.viewProjection));
@@ -396,7 +405,10 @@ struct ShadowPasses::Impl {
             }
         }
         if(settings.staticCache)planCache();
-        if(sunConsumer)sunConsumer->prepare(f.slot,kernels[Sun]);
+        if(sunConsumer){
+            sunServed=transmitPipes.serve(pipelines,0,kernels[Sun],(store.featureUnion()&MATERIAL_FEATURE_TRANSMISSION)!=0u,[&]{return lighting::kernel("shadow_sun_rt",true);});
+            sunConsumer->prepare(f.slot,sunServed);
+        }
     }
     void common(MTL4::ArgumentTable* t,rg::PassContext& ctx) {
         auto& f=slots[frame.slot];t->setAddress(paramsAddress,SB_PARAMS);t->setAddress(f.surfaces->gpuAddress(),SB_SURFACE);
@@ -580,13 +592,13 @@ struct ShadowPasses::Impl {
             b.read(counterRef,Usage::ShaderRead,StageDispatch);counterRef=b.write(counterRef,Usage::ShaderWrite,StageDispatch);
             rawMask=b.createTexture("Sun visibility raw",{Format::RGBA16Float,frame.width,frame.height});rawMask=b.write(rawMask,Usage::ShaderWrite,StageDispatch);
             b.setProfileShaders(ray?"shadow_sun_rt":"shadow_csm_pcss");
-        },[this,ray](PassContext& ctx){auto* t=slots[frame.slot].tables[ray?Sun:Pcss];common(t,ctx);texture(t,ctx,rawMask,4);if(ray)sunConsumer->bind(t,0,4);else for(u32 i=0;i<4;++i){texture(t,ctx,maps[i],i?6+i:2);texture(t,ctx,hasTransmissive?transmitMaps[i]:dummyTransmitRef,ST_TRANSMIT+i);}lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[ray?Sun:Pcss],t,frame.width,frame.height);});
+        },[this,ray](PassContext& ctx){auto* t=slots[frame.slot].tables[ray?Sun:Pcss];common(t,ctx);texture(t,ctx,rawMask,4);if(ray)sunConsumer->bind(t,0,4);else for(u32 i=0;i<4;++i){texture(t,ctx,maps[i],i?6+i:2);texture(t,ctx,hasTransmissive?transmitMaps[i]:dummyTransmitRef,ST_TRANSMIT+i);}lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,ray?sunServed:kernels[Pcss],t,frame.width,frame.height);});
         previousRef=g.importBuffer("Solar history previous per view",{capacity*sizeof(GPUShadowHistory)},ImportContentsDefined|ImportOutput);
         nextRef=g.importBuffer("Solar history next per view",{capacity*sizeof(GPUShadowHistory)},ImportOutput);
         auto raw=rawMask;
         g.addPass("Solar temporal moments",PassType::Compute,[&](PassBuilder& b){b.read(surfaceRef,Usage::ShaderRead,StageDispatch);b.read(raw,Usage::ShaderRead,StageDispatch);b.read(previousRef,Usage::ShaderRead,StageDispatch);nextRef=b.write(nextRef,Usage::ShaderWrite,StageDispatch);
             b.read(counterRef,Usage::ShaderRead,StageDispatch);counterRef=b.write(counterRef,Usage::ShaderWrite,StageDispatch);temporalOutput=b.createTexture("Sun temporal visibility",{Format::RGBA16Float,frame.width,frame.height});temporalOutput=b.write(temporalOutput,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("shadow_temporal");
-        },[this,raw](PassContext& ctx){auto* t=slots[frame.slot].tables[Temporal];common(t,ctx);auto& view=views[frame.view];t->setAddress(view.previous->gpuAddress(),12);t->setAddress(view.next->gpuAddress(),13);texture(t,ctx,raw,3);texture(t,ctx,temporalOutput,4);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[Temporal],t,frame.width,frame.height);history.read(frame.view,frame.index+1);history.write(frame.view,frame.index+1,params.viewProjection);});
+        },[this,raw](PassContext& ctx){auto* t=slots[frame.slot].tables[Temporal];common(t,ctx);auto& view=views[frame.view];t->setAddress(view.previous->gpuAddress(),12);t->setAddress(view.next->gpuAddress(),13);texture(t,ctx,raw,3);texture(t,ctx,temporalOutput,4);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,temporalServed,t,frame.width,frame.height);history.read(frame.view,frame.index+1);history.write(frame.view,frame.index+1,params.viewProjection);});
         auto temporalMask=temporalOutput;
         g.addPass("Solar spatial filter",PassType::Compute,[&](PassBuilder& b){b.read(surfaceRef,Usage::ShaderRead,StageDispatch);b.read(temporalMask,Usage::ShaderRead,StageDispatch);b.read(nextRef,Usage::ShaderRead,StageDispatch);filterOutput=b.createTexture("Sun filtered visibility",{Format::RGBA16Float,frame.width,frame.height});filterOutput=b.write(filterOutput,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("shadow_filter");
         },[this,temporalMask](PassContext& ctx){auto* t=slots[frame.slot].tables[Filter];common(t,ctx);t->setAddress(views[frame.view].next->gpuAddress(),13);texture(t,ctx,temporalMask,3);texture(t,ctx,filterOutput,4);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[Filter],t,frame.width,frame.height);});

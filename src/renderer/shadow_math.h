@@ -51,8 +51,9 @@ SHADOW_FN bool shadowCasterIntersects(const SHADOW_AS GPUShadowCascade& c,
 // The same exact identity and geometric rejection contract is used by CPU
 // oracle tests and the GPU. World-point rejection safely discards deforming
 // surfaces when prior object transforms are unavailable.
+template <typename History>
 SHADOW_FN bool shadowHistoryMatches(const SHADOW_AS GPUShadowParams& p,
-                                   GPUShadowSurface s, GPUShadowHistory h) {
+                                   GPUShadowSurface s, History h) {
     if (!s.valid || !h.valid || !(p.flags & SHADOW_FLAG_HISTORY_VALID) ||
         s.slot != h.slot || s.generation != h.generation || p.viewID != h.viewID ||
         p.lightID != h.lightID || p.lightRevision != h.lightRevision || p.sceneRevision != h.sceneRevision)

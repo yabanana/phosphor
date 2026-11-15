@@ -5,6 +5,8 @@
 #include "renderer/gpu_scene.h"
 #include "renderer/visibility_math.h"
 #include <cmath>
+#include <cstring>
+#include <cstddef>
 #include <limits>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -39,6 +41,25 @@ GPUShadowHistory historyOf(const GPUShadowParams& p,const GPUShadowSurface& s) {
     return h;
 }
 }
+TEST_CASE("F15 ticket 24: the scalar shadow history is the 64-byte prefix of the RGB record and matches like it") {
+    static_assert(sizeof(GPUShadowHistoryScalar) == 64 && sizeof(GPUShadowHistory) == 80);
+    CHECK(offsetof(GPUShadowHistoryScalar, position) == offsetof(GPUShadowHistory, position));
+    CHECK(offsetof(GPUShadowHistoryScalar, visibility) == offsetof(GPUShadowHistory, visibility));
+    CHECK(offsetof(GPUShadowHistoryScalar, geometricNormal) == offsetof(GPUShadowHistory, geometricNormal));
+    CHECK(offsetof(GPUShadowHistoryScalar, secondMoment) == offsetof(GPUShadowHistory, secondMoment));
+    CHECK(offsetof(GPUShadowHistoryScalar, slot) == offsetof(GPUShadowHistory, slot));
+    CHECK(offsetof(GPUShadowHistoryScalar, valid) == offsetof(GPUShadowHistory, valid));
+    const GPUShadowParams p = historyParams();
+    const GPUShadowSurface s = historySurface();
+    GPUShadowHistory rgb = historyOf(p, s);
+    GPUShadowHistoryScalar scalar{};
+    std::memcpy(&scalar, &rgb, sizeof(scalar));
+    CHECK(shadowHistoryMatches(p, s, rgb));
+    CHECK(shadowHistoryMatches(p, s, scalar) == shadowHistoryMatches(p, s, rgb));
+    rgb.generation ^= 1u; std::memcpy(&scalar, &rgb, sizeof(scalar));
+    CHECK(!shadowHistoryMatches(p, s, scalar));
+}
+
 TEST_CASE("F10 shadow settings are opt-in and reject nonfinite or unbounded work") {
     ShadowSettings s;
     CHECK(s.mode==ShadowTechnique::Off); CHECK_FALSE(s.contact); CHECK_FALSE(s.staticCache);

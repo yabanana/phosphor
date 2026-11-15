@@ -275,11 +275,22 @@ TEST_CASE("pipelines script: retains F10-F14 lighting, depth-only and physical H
         CHECK(script.compute.count(kernel)==0); // An unset constant cannot be lowered by metal-tt.
     }
     for (const char* kernel : {"shadow_sun_rt", "restir_di_shade_rt", "ddgi_trace", "gi_candidates", "gi_temporal",
-                              "gi_spatial", "reflection_rt", "ao_rtao", "fog_inject_rt"}) {
+                              "gi_spatial", "reflection_rt"}) {
         CAPTURE(kernel);
         REQUIRE(script.computeLinked.count(kernel) == 1);
         CHECK(script.computeLinked.at(kernel) == std::set<std::string>{"rt_alpha_generic"});
     }
+    // F15 ticket 24: the kernels that never need the transmittance of a ray trace with the 16-byte payload and link rt_alpha_lite (the
+    // earlier rt_alpha_generic entries of the same kernels stay in the archive, unrequested); the sun visibility and the temporal moments
+    // have a cheap twin kernel for scenes without transmissive materials.
+    for (const char* kernel : {"ao_rtao", "fog_inject_rt"}) {
+        CAPTURE(kernel);
+        REQUIRE(script.computeLinked.count(kernel) == 1);
+        CHECK(script.computeLinked.at(kernel).count("rt_alpha_lite") == 1);
+    }
+    REQUIRE(script.computeLinked.count("shadow_sun_rt_lite") == 1);
+    CHECK(script.computeLinked.at("shadow_sun_rt_lite") == std::set<std::string>{"rt_alpha_lite"});
+    CHECK(script.compute.count("shadow_temporal_scalar") == 1);
     CHECK(script.render.count("shadow_depth_vertex|shadow_depth_fragment|DepthOnly|Disabled") == 1);
     CHECK(script.render.count("shadow_cache_depth_vertex|shadow_cache_depth_fragment|DepthOnly|Disabled") == 1);
     CHECK(script.render.count("forward_surface_vs|forward_surface_lit_fs|RGBA32Float|Disabled") == 1);

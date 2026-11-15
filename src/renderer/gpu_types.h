@@ -729,6 +729,16 @@ struct GPUShadowHistory {
     float transmittance[3], pad;          // F15.1 (ticket 14): the temporal mean of the RGB transmittance (= visibility on each channel without glass)
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowHistory) == 80, "GPUShadowHistory layout");
+// F15 ticket 24: the history of a scene without transmissive materials: the 64-byte record of the pre-ticket-14 layout (the first 64 bytes of
+// GPUShadowHistory).  The 80-byte stride cost `shadow_temporal` 0.06 ms on Sponza D2 (docs/opt-log.md): `shadow_temporal_scalar` reads and
+// writes this layout in the same buffers (allocated for GPUShadowHistory), `shadow_temporal` keeps the RGB record of a scene with glass.
+struct GPUShadowHistoryScalar {
+    float position[3], visibility;
+    float geometricNormal[3], secondMoment;
+    u32 slot, generation, lightID, lightRevision;
+    u32 sceneRevision, viewID, samples, valid;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowHistoryScalar) == 64, "GPUShadowHistoryScalar layout");
 
 struct GPUShadowParams {
     float inverseViewProjection[16], viewProjection[16];

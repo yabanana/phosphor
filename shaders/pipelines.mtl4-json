@@ -2765,6 +2765,31 @@
         "label": "0729515A91707B15D39DC3C309AC5D1CB1462743D3B837A3DD877279730B7B84",
         "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
         "name": "reflection_ssr_lobe"
+      },
+      {
+        "label": "0E032707AAD9125CD30C510BF2E9BF4BB09B799FEC0A9CD3D3B0EECCB94AF3D1",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "ao_rtao"
+      },
+      {
+        "label": "3C1E2F8541DEAA68456C2623C26D529BE8EC86472A8361D4314BCBF69CC5CB4F",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "rt_alpha_lite"
+      },
+      {
+        "label": "3ACAF7BB789A59B08034E41A303E0BA5ED8243E42F73517CA088F62AFD369ABD",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "shadow_sun_rt_lite"
+      },
+      {
+        "label": "2B90206EB4622D9BE640C02AA01C49A02E5E72E6C1F41F9AC1677516B754C522",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "shadow_temporal_scalar"
+      },
+      {
+        "label": "B3FAB7D7317E78CDDCBB82228E7566B8135DB23378C507CE8B9DE07237092653",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "fog_inject_rt"
       }
     ],
     "specialized_function_descriptors": [
@@ -33401,6 +33426,53 @@
           0,
           0
         ]
+      },
+      {
+        "compute_function_descriptor": "fnd:3ACAF7BB789A59B08034E41A303E0BA5ED8243E42F73517CA088F62AFD369ABD",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ],
+        "static_linking_descriptor": {
+          "function_descriptors": [
+            "fnd:3C1E2F8541DEAA68456C2623C26D529BE8EC86472A8361D4314BCBF69CC5CB4F"
+          ]
+        }
+      },
+      {
+        "compute_function_descriptor": "fnd:2B90206EB4622D9BE640C02AA01C49A02E5E72E6C1F41F9AC1677516B754C522",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:0E032707AAD9125CD30C510BF2E9BF4BB09B799FEC0A9CD3D3B0EECCB94AF3D1",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ],
+        "static_linking_descriptor": {
+          "function_descriptors": [
+            "fnd:3C1E2F8541DEAA68456C2623C26D529BE8EC86472A8361D4314BCBF69CC5CB4F"
+          ]
+        }
+      },
+      {
+        "compute_function_descriptor": "fnd:B3FAB7D7317E78CDDCBB82228E7566B8135DB23378C507CE8B9DE07237092653",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ],
+        "static_linking_descriptor": {
+          "function_descriptors": [
+            "fnd:3C1E2F8541DEAA68456C2623C26D529BE8EC86472A8361D4314BCBF69CC5CB4F"
+          ]
+        }
       }
     ],
     "mesh_render_pipeline_descriptors": [

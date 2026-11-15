@@ -40,6 +40,21 @@ struct RtPayload {
     float direction[3];                 // the world ray direction (set by rtTrace for the intersection function)
 };
 
+// F15 ticket 24: the payload of a kernel that never needs the transmittance of a ray (no transmittance, no dedup list, no direction): the
+// pre-ticket-14 16 bytes.  The payload size alone slows every traversal of the pipeline (RTAO +0.43 ms on Sponza D2, docs/opt-log.md), so a
+// kernel that traces such rays with RtPayloadLite links `rt_alpha_lite` (the same alpha test) instead of `rt_alpha_generic`; the payload type
+// is part of the intersection function's signature, so ALL traces of one pipeline use the same one.  A RT_PROBE_SHADOW_TRANSMITTED ray traced
+// with it is a plain any-hit shadow ray (transmittance 1: exact for a scene without transmissive materials).
+struct RtPayloadLite {
+    float coneWidth;
+    uint type;
+    uint alphaTests;
+    uint opaqueAlphaTests;
+};
+inline void rtSetPayloadDirection(thread RtPayload& payload, float3 d) { payload.direction[0] = d.x; payload.direction[1] = d.y; payload.direction[2] = d.z; }
+inline void rtSetPayloadDirection(thread RtPayloadLite&, float3) {}
+inline float3 rtShadowTransmittance(thread const RtPayloadLite&) { return float3(1.0f); }
+
 inline float3 rtPosition(const device GPUVertex& v) { return float3(v.px, v.py, v.pz); }
 inline float3 rtWorldPoint(const device GPUInstance& i, float3 p) {
     const device float* m = i.modelMatrix;
@@ -90,10 +105,11 @@ constexpr sampler kRtAlphaSampler(filter::linear, mip_filter::linear, address::r
 // All triangles use the generic alpha function at IFT slot 0. Hardware opacity
 // on an instance bypasses it entirely. Explicit instance Opaque/NonOpaque
 // overrides allow a mesh to be shared by opaque and MASK materials dynamically.
+template<typename Payload>
 inline GPURtHit rtTrace(const GPURtRay r, instance_acceleration_structure as,
                         intersection_function_table<triangle_data, instancing> ift,
                         const device GPUInstance* instances, uint slotCount,
-                        thread RtPayload& payload) {
+                        thread Payload& payload) {
     if (!(r.tmax >= r.tmin && r.tmin >= 0.0f) || r.mask == 0u) return rtMiss(-2.0f);
     const float3 origin(r.ox, r.oy, r.oz), direction(r.dx, r.dy, r.dz);
     if (!all(isfinite(origin)) || !all(isfinite(direction)) || dot(direction, direction) <= 0.0f)
@@ -104,7 +120,7 @@ inline GPURtHit rtTrace(const GPURtRay r, instance_acceleration_structure as,
     if (r.type == RT_PROBE_SHADOW || r.type == RT_PROBE_SHADOW_TRANSMITTED) traversal.accept_any_intersection(true);
     payload.coneWidth = r.coneWidth;
     payload.type = r.type;
-    payload.direction[0] = direction.x; payload.direction[1] = direction.y; payload.direction[2] = direction.z;
+    rtSetPayloadDirection(payload, direction);
     const auto result = traversal.intersect(ray(origin, direction, r.tmin, r.tmax), as, r.mask, ift, payload);
     if (result.type != intersection_type::triangle || result.user_instance_id >= slotCount) return rtMiss();
     GPURtHit hit{};

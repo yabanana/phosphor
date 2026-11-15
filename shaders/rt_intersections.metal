@@ -59,6 +59,32 @@ inline void rtAccumulateTransmittance(uint primitive, uint slot, float2 bary, fl
     payload.lnTransmittance[0] += ln0; payload.lnTransmittance[1] += ln1; payload.lnTransmittance[2] += ln2;
 }
 
+// The alpha-masked (alphaCutoff > 0) test shared by both linked entries.
+template<typename Payload>
+inline bool rtAlphaMaskedTest(uint primitive, float2 bary, float distance, ray_data Payload& payload, const device GPUMaterial& m,
+                              const device GPUInstance& instance, const device GPURtMesh* meshes, const device RtTextureHandle* textures,
+                              const device GPUVertex* vertices, const device uint* indices) {
+    const device GPURtMesh& mesh = meshes[instance.meshIndex];
+    if (primitive >= mesh.indexCount / 3u) return false;
+    if (m.baseColorTex == INVALID_TEXTURE_INDEX) return m.baseColor[3] >= m.alphaCutoff;
+    const uint base = mesh.indexOffset + 3u * primitive;
+    const device GPUVertex& v0 = vertices[mesh.vertexOffset + indices[base]];
+    const device GPUVertex& v1 = vertices[mesh.vertexOffset + indices[base + 1u]];
+    const device GPUVertex& v2 = vertices[mesh.vertexOffset + indices[base + 2u]];
+    const float2 uv0(v0.u, v0.v), uv1(v1.u, v1.v), uv2(v2.u, v2.v);
+    const float2 uv = uv0 * (1.0f - bary.x - bary.y) + uv1 * bary.x + uv2 * bary.y;
+    const auto texture = textures[m.baseColorTex].tex;
+    float lod = 0.0f;
+    if (payload.type == RT_PROBE_PRIMARY && payload.coneWidth > 0.0f) {
+        lod = rtConeLod(payload.coneWidth, distance,
+                        rtWorldPoint(instance, rtPosition(v0)), rtWorldPoint(instance, rtPosition(v1)),
+                        rtWorldPoint(instance, rtPosition(v2)), uv0, uv1, uv2,
+                        uint2(texture.get_width(), texture.get_height()));
+    }
+    const float alpha = m.baseColor[3] * float(half(texture.sample(kRtAlphaSampler, uv, level(lod)).a));
+    return alpha >= m.alphaCutoff;
+}
+
 [[intersection(triangle, triangle_data, instancing)]]
 bool rt_alpha_generic(uint primitive [[primitive_id]], uint slot [[user_instance_id]],
                        float2 bary [[barycentric_coord]], float distance [[distance]],
@@ -96,23 +122,32 @@ bool rt_alpha_generic(uint primitive [[primitive_id]], uint slot [[user_instance
         if (!transmissive) ++payload.opaqueAlphaTests;
         return true;
     }
-    const device GPURtMesh& mesh = meshes[instance.meshIndex];
-    if (primitive >= mesh.indexCount / 3u) return false;
-    if (m.baseColorTex == INVALID_TEXTURE_INDEX) return m.baseColor[3] >= m.alphaCutoff;
-    const uint base = mesh.indexOffset + 3u * primitive;
-    const device GPUVertex& v0 = vertices[mesh.vertexOffset + indices[base]];
-    const device GPUVertex& v1 = vertices[mesh.vertexOffset + indices[base + 1u]];
-    const device GPUVertex& v2 = vertices[mesh.vertexOffset + indices[base + 2u]];
-    const float2 uv0(v0.u, v0.v), uv1(v1.u, v1.v), uv2(v2.u, v2.v);
-    const float2 uv = uv0 * (1.0f - bary.x - bary.y) + uv1 * bary.x + uv2 * bary.y;
-    const auto texture = textures[m.baseColorTex].tex;
-    float lod = 0.0f;
-    if (payload.type == RT_PROBE_PRIMARY && payload.coneWidth > 0.0f) {
-        lod = rtConeLod(payload.coneWidth, distance,
-                        rtWorldPoint(instance, rtPosition(v0)), rtWorldPoint(instance, rtPosition(v1)),
-                        rtWorldPoint(instance, rtPosition(v2)), uv0, uv1, uv2,
-                        uint2(texture.get_width(), texture.get_height()));
+    return rtAlphaMaskedTest(primitive, bary, distance, payload, m, instance, meshes, textures, vertices, indices);
+}
+
+// F15 ticket 24: the entry of every pipeline that never traces a RT_PROBE_SHADOW_TRANSMITTED ray.  The payload is the 16-byte
+// RtPayloadLite and a transmissive instance behaves as for any non-transmittance ray of rt_alpha_generic (an accepted hit).
+[[intersection(triangle, triangle_data, instancing)]]
+bool rt_alpha_lite(uint primitive [[primitive_id]], uint slot [[user_instance_id]],
+                    float2 bary [[barycentric_coord]], float distance [[distance]],
+                    ray_data RtPayloadLite& payload [[payload]],
+                    const device GPUMaterial* materials [[buffer(0)]],
+                    const device RtTextureHandle* textures [[buffer(1)]],
+                    const device GPUVertex* vertices [[buffer(2)]],
+                    const device uint* indices [[buffer(3)]],
+                    const device GPUInstance* instances [[buffer(4)]],
+                    const device GPURtMesh* meshes [[buffer(5)]],
+                    constant GPURtParams& params [[buffer(6)]]) {
+    ++payload.alphaTests;
+    if (slot >= params.slotCount) return false;
+    const device GPUInstance& instance = instances[slot];
+    if (instance.meshIndex >= params.meshCount || instance.materialIndex >= params.materialCount) return false;
+    const device GPUMaterial& m = materials[instance.materialIndex];
+    if (m.alphaCutoff <= 0.0f) {
+        const bool transmissive = (m.flags & (MATERIAL_FEATURE_TRANSMISSION << MATERIAL_FEATURE_SHIFT)) != 0u &&
+                                  m.extensionIndex != MATERIAL_EXTENSION_INVALID;
+        if (!transmissive) ++payload.opaqueAlphaTests;
+        return true;
     }
-    const float alpha = m.baseColor[3] * float(half(texture.sample(kRtAlphaSampler, uv, level(lod)).a));
-    return alpha >= m.alphaCutoff;
+    return rtAlphaMaskedTest(primitive, bary, distance, payload, m, instance, meshes, textures, vertices, indices);
 }

@@ -421,12 +421,21 @@ static float3 shadowSolarSample(float3 light,float angularRadius,float u,float v
     const float z=1-u*(1-cos(angularRadius)),r=sqrt(max(0.0f,1-z*z)),a=6.283185307f*v;
     return normalize(light*z+(right*cos(a)+up*sin(a))*r);
 }
-kernel void shadow_sun_rt(instance_acceleration_structure as [[buffer(0)]],
-    constant GPUShadowParams& p [[buffer(1)]],const device GPUShadowSurface* surfaces [[buffer(2)]],
-    const device GPUInstance* instances [[buffer(3)]],
-    intersection_function_table<triangle_data,instancing> ift [[buffer(4)]],
-    device atomic_uint* counters [[buffer(15)]],texture2d<float,access::write> mask [[texture(4)]],
-    uint2 pixel [[thread_position_in_grid]]) {
+static void shadowSunCounters(device atomic_uint* counters,thread const RtPayload& payload) {
+    shadowCount(counters,8,payload.ifInvocations?1u:0u); shadowCount(counters,9,payload.ifInvocations);
+    shadowCount(counters,10,payload.ifDistinct); shadowCount(counters,11,payload.listOverflows);
+}
+static void shadowSunCounters(device atomic_uint*,thread const RtPayloadLite&) {}
+// F15 ticket 24: one body, two kernels.  `shadow_sun_rt` (RtPayload, rt_alpha_generic) traces the transmittance of the coloured casters;
+// `shadow_sun_rt_lite` (RtPayloadLite, rt_alpha_lite) is for a scene without transmissive materials and traces the same any-hit ray with
+// the 16-byte payload (the 124-byte one alone costs 0.06 ms on Sponza D2, docs/opt-log.md): its transmittance is 1, and the spike counters stay 0.
+template<typename Payload>
+static void shadowSunRt(instance_acceleration_structure as,
+    constant GPUShadowParams& p,const device GPUShadowSurface* surfaces,
+    const device GPUInstance* instances,
+    intersection_function_table<triangle_data,instancing> ift,
+    device atomic_uint* counters,texture2d<float,access::write> mask,
+    uint2 pixel) {
     if(pixel.x>=p.width || pixel.y>=p.height) return;
     const uint index=pixel.y*p.width+pixel.x;
     const GPUShadowSurface s=surfaces[index];
@@ -443,23 +452,51 @@ kernel void shadow_sun_rt(instance_acceleration_structure as [[buffer(0)]],
         ray.ox=origin.x; ray.oy=origin.y; ray.oz=origin.z;
         ray.dx=direction.x; ray.dy=direction.y; ray.dz=direction.z; ray.tmax=p.maxTraceDistance;
         ray.mask=RT_MASK_SHADOW; ray.type=RT_PROBE_SHADOW_TRANSMITTED; ray.coneWidth=0;
-        RtPayload payload{};
+        Payload payload{};
         const GPURtHit hit=rtTrace(ray,as,ift,instances,p.slotCount,payload);
         // F15.1 (ticket 14): an opaque or alpha-masked caster blocks the ray; transmissive casters multiplied their RGB factor into the payload.
         visible=hit.hit?float3(0):rtShadowTransmittance(payload);
         shadowCount(counters,1,1); shadowCount(counters,2,hit.hit);
         if(hit.t==-2.0f) shadowCount(counters,7,1);
-        shadowCount(counters,8,payload.ifInvocations?1u:0u); shadowCount(counters,9,payload.ifInvocations);
-        shadowCount(counters,10,payload.ifDistinct); shadowCount(counters,11,payload.listOverflows);
+        shadowSunCounters(counters,payload);
     }
     mask.write(float4(visible,1),pixel);
 }
-
-kernel void shadow_temporal(constant GPUShadowParams& p [[buffer(1)]],
-    const device GPUShadowSurface* surfaces [[buffer(2)]],const device GPUShadowHistory* previous [[buffer(12)]],
-    device GPUShadowHistory* next [[buffer(13)]],device atomic_uint* counters [[buffer(15)]],
-    texture2d<float,access::read> raw [[texture(3)]],texture2d<float,access::write> mask [[texture(4)]],
+kernel void shadow_sun_rt(instance_acceleration_structure as [[buffer(0)]],
+    constant GPUShadowParams& p [[buffer(1)]],const device GPUShadowSurface* surfaces [[buffer(2)]],
+    const device GPUInstance* instances [[buffer(3)]],
+    intersection_function_table<triangle_data,instancing> ift [[buffer(4)]],
+    device atomic_uint* counters [[buffer(15)]],texture2d<float,access::write> mask [[texture(4)]],
     uint2 pixel [[thread_position_in_grid]]) {
+    shadowSunRt<RtPayload>(as,p,surfaces,instances,ift,counters,mask,pixel);
+}
+kernel void shadow_sun_rt_lite(instance_acceleration_structure as [[buffer(0)]],
+    constant GPUShadowParams& p [[buffer(1)]],const device GPUShadowSurface* surfaces [[buffer(2)]],
+    const device GPUInstance* instances [[buffer(3)]],
+    intersection_function_table<triangle_data,instancing> ift [[buffer(4)]],
+    device atomic_uint* counters [[buffer(15)]],texture2d<float,access::write> mask [[texture(4)]],
+    uint2 pixel [[thread_position_in_grid]]) {
+    shadowSunRt<RtPayloadLite>(as,p,surfaces,instances,ift,counters,mask,pixel);
+}
+
+// F15 ticket 24: one body, two kernels.  `shadow_temporal` keeps the 80-byte GPUShadowHistory with the temporal mean of the RGB transmittance
+// (scenes with transmissive materials); `shadow_temporal_scalar` keeps the 64-byte GPUShadowHistoryScalar and treats the raw mask as the grey
+// scalar it is without glass: for grey input every channel of the RGB record equals the visibility bit for bit (same input, same recurrence),
+// so both write the same mask.
+inline void shadowHistoryTransmittance(thread GPUShadowHistory& h,float3 raw3) { h.transmittance[0]=raw3.x; h.transmittance[1]=raw3.y; h.transmittance[2]=raw3.z; }
+inline void shadowHistoryTransmittance(thread GPUShadowHistoryScalar&,float3) {}
+inline void shadowHistoryTransmittanceMean(thread GPUShadowHistory& h,const thread GPUShadowHistory& prev,float3 raw3,uint samples) {
+    for(uint k=0;k<3;++k) h.transmittance[k]=shadowTemporalMean(prev.transmittance[k],raw3[k],samples);
+}
+inline void shadowHistoryTransmittanceMean(thread GPUShadowHistoryScalar&,const thread GPUShadowHistoryScalar&,float3,uint) {}
+inline float4 shadowHistoryMask(const thread GPUShadowHistory& h,float variance) { return float4(h.transmittance[0],h.transmittance[1],h.transmittance[2],variance); }
+inline float4 shadowHistoryMask(const thread GPUShadowHistoryScalar& h,float variance) { return float4(h.visibility,h.visibility,h.visibility,variance); }
+template<typename History>
+static void shadowTemporalImpl(constant GPUShadowParams& p,
+    const device GPUShadowSurface* surfaces,const device History* previous,
+    device History* next,device atomic_uint* counters,
+    texture2d<float,access::read> raw,texture2d<float,access::write> mask,
+    uint2 pixel) {
     if(pixel.x>=p.width || pixel.y>=p.height) return;
     const uint index=pixel.y*p.width+pixel.x;
     const GPUShadowSurface s=surfaces[index];
@@ -467,7 +504,7 @@ kernel void shadow_temporal(constant GPUShadowParams& p [[buffer(1)]],
     // while the three channels are equal, which they are without transmissive casters).
     const float3 raw3=saturate(raw.read(pixel).xyz);
     const float value=(raw3.x==raw3.y&&raw3.y==raw3.z)?raw3.x:dot(raw3,float3(0.2126f,0.7152f,0.0722f));
-    GPUShadowHistory h{}; h.visibility=value; h.secondMoment=value*value; h.transmittance[0]=raw3.x; h.transmittance[1]=raw3.y; h.transmittance[2]=raw3.z;
+    History h{}; h.visibility=value; h.secondMoment=value*value; shadowHistoryTransmittance(h,raw3);
     h.slot=s.slot; h.generation=s.generation; h.lightID=p.lightID; h.lightRevision=p.lightRevision;
     h.sceneRevision=p.sceneRevision; h.viewID=p.viewID; h.samples=1; h.valid=s.valid && (p.flags&SHADOW_FLAG_LIGHT_VALID);
     for(uint k=0;k<3;++k) { h.position[k]=s.position[k]; h.geometricNormal[k]=s.geometricNormal[k]; }
@@ -478,7 +515,7 @@ kernel void shadow_temporal(constant GPUShadowParams& p [[buffer(1)]],
             const float2 old=(clip.xy/clip.w*float2(0.5f,-0.5f)+0.5f)*float2(p.width,p.height);
             if(all(old>=0) && all(old<float2(p.width,p.height))) {
                 const uint2 q=uint2(old);
-                GPUShadowHistory prev=previous[q.y*p.width+q.x];
+                History prev=previous[q.y*p.width+q.x];
                 if(p.corruption==SHADOW_CORRUPT_HISTORY) prev.generation^=1u;
                 accepted=shadowHistoryMatches(p,s,prev) && isfinite(prev.visibility) && isfinite(prev.secondMoment);
                 if(accepted) {
@@ -489,14 +526,29 @@ kernel void shadow_temporal(constant GPUShadowParams& p [[buffer(1)]],
                     h.samples=min(prev.samples+1u,clamp(p.historyMaxSamples,1u,64u));
                     h.visibility=shadowTemporalMean(prev.visibility,value,h.samples);
                     h.secondMoment=shadowTemporalMean(prev.secondMoment,value*value,h.samples);
-                    for(uint k=0;k<3;++k) h.transmittance[k]=shadowTemporalMean(prev.transmittance[k],raw3[k],h.samples);
+                    shadowHistoryTransmittanceMean(h,prev,raw3,h.samples);
                 }
             }
         }
         shadowCount(counters,accepted?3u:4u,1u);
     }
     next[index]=h;
-    mask.write(float4(h.transmittance[0],h.transmittance[1],h.transmittance[2],max(0.0f,h.secondMoment-h.visibility*h.visibility)),pixel);
+    mask.write(shadowHistoryMask(h,max(0.0f,h.secondMoment-h.visibility*h.visibility)),pixel);
+}
+
+kernel void shadow_temporal(constant GPUShadowParams& p [[buffer(1)]],
+    const device GPUShadowSurface* surfaces [[buffer(2)]],const device GPUShadowHistory* previous [[buffer(12)]],
+    device GPUShadowHistory* next [[buffer(13)]],device atomic_uint* counters [[buffer(15)]],
+    texture2d<float,access::read> raw [[texture(3)]],texture2d<float,access::write> mask [[texture(4)]],
+    uint2 pixel [[thread_position_in_grid]]) {
+    shadowTemporalImpl<GPUShadowHistory>(p,surfaces,previous,next,counters,raw,mask,pixel);
+}
+kernel void shadow_temporal_scalar(constant GPUShadowParams& p [[buffer(1)]],
+    const device GPUShadowSurface* surfaces [[buffer(2)]],const device GPUShadowHistoryScalar* previous [[buffer(12)]],
+    device GPUShadowHistoryScalar* next [[buffer(13)]],device atomic_uint* counters [[buffer(15)]],
+    texture2d<float,access::read> raw [[texture(3)]],texture2d<float,access::write> mask [[texture(4)]],
+    uint2 pixel [[thread_position_in_grid]]) {
+    shadowTemporalImpl<GPUShadowHistoryScalar>(p,surfaces,previous,next,counters,raw,mask,pixel);
 }
 
 // Bilateral 3x3 moment-aware mask filter; history remains the unfiltered

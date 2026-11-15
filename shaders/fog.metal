@@ -25,7 +25,7 @@ static float fogRtVisibility(float3 point,float3 wi,float distance,instance_acce
     // A froxel is a volume point, NOT a geometric surface: do not invent a
     // normal for W&B. Full world origin and metre segment endpoints are used.
     ray.tmin=0;ray.tmax=max(0.0f,distance-1e-4f);ray.mask=RT_MASK_SHADOW;ray.type=RT_PROBE_SHADOW;ray.coneWidth=0;
-    RtPayload payload{};const auto hit=rtTrace(ray,as,ift,instances,p.slotCount,payload);volumeCount(counters,3,1);
+    RtPayloadLite payload{};const auto hit=rtTrace(ray,as,ift,instances,p.slotCount,payload);volumeCount(counters,3,1); // F15 ticket 24: no transmittance here
     if(hit.t==-2)volumeCount(counters,0,1);return hit.hit?0.0f:1.0f;
 }
 static float3 fogGi(float3 point,float3 ray,float anisotropy,constant GPUProbeGridParams& p,const device GPUProbeState* states,texture2d<float> irradiance,texture2d<float> moments) {

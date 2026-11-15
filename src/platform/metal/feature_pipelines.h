@@ -70,4 +70,28 @@ private:
     std::unordered_map<u64, pipe::PipelineHandle> handles_;
 };
 
+// ---------------------------------------------------------------------------
+// TransmissionPipelines (F15 ticket 24): the kernels that carry the transmittance of glass (the sun RT visibility with its 124-byte payload,
+// the temporal moments with their RGB history) are requested in their cheap form (shadow_sun_rt_lite, shadow_temporal_scalar); a scene whose
+// feature union has a transmissive material (MATERIAL_FEATURE_TRANSMISSION) is served by the ticket-14/15 kernel, requested on first use.
+// While that pipeline is not available the cheap one serves (no coloured transmittance, counted as a fallback use): transient after
+// loading such a scene, never in a scene without transmission.
+// ---------------------------------------------------------------------------
+class TransmissionPipelines {
+public:
+    template <typename MakeFull>
+    pipe::PipelineHandle serve(PipelineCache& cache, u32 slot, pipe::PipelineHandle cheap, bool transmissive, MakeFull&& makeFull) {
+        if (!transmissive) return cheap;
+        auto it = full_.find(slot);
+        if (it == full_.end()) it = full_.emplace(slot, cache.request(makeFull())).first;
+        if (cache.isFinal(it->second) || cache.available(it->second)) return it->second;
+        cache.noteFallbackUse();
+        return cheap;
+    }
+    [[nodiscard]] size_t requests() const { return full_.size(); }
+
+private:
+    std::unordered_map<u32, pipe::PipelineHandle> full_;
+};
+
 } // namespace phosphor
