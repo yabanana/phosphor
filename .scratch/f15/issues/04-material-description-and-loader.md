@@ -85,3 +85,7 @@ My earlier statement that ReSTIR's falloff is linear came from reading `restir_c
 Measured (tools/f15_spot_falloff_check.py, one spot 0.3/0.6 rad, ratio to the on-axis panel, analytic smoothstep(cosOuter, cosInner) x geometry): legacy, ReSTIR and clustered all within 0.7-2.2 % at 0.38 / 0.5 / 0.55 rad, outside the cone 0.00000; the linear falloff misses by 10.6 / 12.4 / 47 % and
 the informative t^2 by 39 / 118 / 153 %, so both negative controls fail as required.  No path differs: nothing to fix.  RT reflection secondary lighting, probes and GI were not captured separately (shared evaluators, argued from the code).  The deviation from the specification's informative t^2 is declared in the
 support table (`punctualLights`, Approximated, `spot_falloff_smoothstep_not_informative_t2`, logged by the loader when a spot is imported; doctest).
+
+## 2026-11-15 — COLOR_0 support level
+
+`KHR_materials_unlit` is now `SupportLevel::Implemented` (the vertex colour factor is applied); COLOR_0 loading, stream and sites: see ticket 22, same date.

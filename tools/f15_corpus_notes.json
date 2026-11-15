@@ -192,8 +192,7 @@
     ],
     "approximations": [
       "KHR_lights_punctual: the file's directional light (intensity 1) is NOT imported under the declared rig (every model of the corpus is lit by the same 3 W/m2 sun and the 0.5 environment), so the brightness differs from the Khronos image; without the rig the loader does import it (tests/test_gltf_unlit_lights.cpp, tools/f15_unlit_lights_check.py).",
-      "The 'textbehind' material is alphaMode BLEND: the engine renders it opaque until F16 (loader warning).",
-      "The vertex colour factor of KHR_materials_unlit is not applied (the engine has no COLOR_0 stream; the model has none)."
+      "The 'textbehind' material is alphaMode BLEND: the engine renders it opaque until F16 (loader warning)."
     ],
     "defects": [
       {
