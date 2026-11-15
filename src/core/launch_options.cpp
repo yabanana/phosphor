@@ -1311,7 +1311,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(out.metalfxNativeDiagnostic&&(out.lightingDenoise!=LightingDenoiseMode::MetalFX||!out.denoisedFixture.empty()||!out.benchmark())){
         error="--metalfx-native-diagnostic requires --lighting-denoise metalfx, a benchmark run and no SDK fixture";return false;}
     if((!out.reflectionProbePath.empty() || out.reflectionCaptureProbe) && out.reflections==ReflectionMode::Off){error="Probe controls require --reflections";return false;}
-    if(out.legacyEnvironment&&(out.materialScene.empty()||out.reflections!=ReflectionMode::Off)){error="--legacy-environment requires --material-scenario and --reflections off";return false;}
+    if(out.legacyEnvironment&&(out.materialScene.empty()||out.reflections!=ReflectionMode::Off||out.lightingDenoise!=LightingDenoiseMode::Off||out.ao!=AoMode::Off)){error="--legacy-environment requires --material-scenario, --reflections off, --ao off and --lighting-denoise off (a reflection composite would own the declared environment)";return false;}
     if(out.debugProbeNoParallax&&(out.reflectionProbePath.empty()&&!out.reflectionCaptureProbe)){error="--debug-probe-no-parallax requires a captured or cooked probe";return false;}
     if ((out.shadows == ShadowMode::RT || out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off) && !out.rtEnabled) {
         error = "RT sun, local visibility and GI require --rt on"; return false;
@@ -1333,7 +1333,7 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     // probes: no captured probe, so the environment weight; F15.1 ticket 08) or, with reflections off, through the
     // resolve's own deterministic environment terms.  A scenario without environment (sun/point lights only) has nothing the plain resolve would miss: it runs with
     // --reflections off --lighting-denoise off (F15.1 ticket 08: --adaptive-shading compares two plain-resolve renders).
-    if(!out.materialScene.empty() && out.reflections==ReflectionMode::Off && out.lightingDenoise==LightingDenoiseMode::Off && MaterialValidation::environmentRadiance(out.materialScene)>0.0f){error="--material-scenario with --reflections off requires --lighting-denoise custom (lit resolve)";return false;}
+    if(!out.legacyEnvironment && !out.materialScene.empty() && out.reflections==ReflectionMode::Off && out.lightingDenoise==LightingDenoiseMode::Off && MaterialValidation::environmentRadiance(out.materialScene)>0.0f){error="--material-scenario with --reflections off requires --lighting-denoise custom (lit resolve)";return false;}
     if(!out.lightingScene.empty() && (!out.bench || *out.bench!=5)){error="--lighting-scene requires --bench 6";return false;}
     if(!out.captureLinear.empty() && !out.captureLinearSequence.empty()){error="Choose single linear capture or linear sequence";return false;}
     if(out.captureLinearAccumulate>0 && (out.captureLinear.empty() || out.captureLinearFrame+1<out.captureLinearAccumulate)){

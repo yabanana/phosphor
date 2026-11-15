@@ -2990,6 +2990,16 @@
         "label": "5D2BBF8FED2D568B6BD0033ED89552391EE10F5F4B293895C0080215C9D3A012",
         "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
         "name": "visibility_tile"
+      },
+      {
+        "label": "F6E095FD1F4C09C1C046FF9F68F633C1CC528524875830A81F631DFC9949B48B",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "visibility_resolve"
+      },
+      {
+        "label": "86EE92BE380CCA858FDCF5D3A07EA704C75B50D1FCA47B705EF3BD6442A5A3FA",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "forward_surface_fs"
       }
     ],
     "specialized_function_descriptors": [
@@ -30726,6 +30736,142 @@
         ],
         "function_descriptor": "fnd:D05C4B44CE9BC1DEA4516239DAD391AF5F0F91FE82AAD2A4B2D8384B961E2B3E",
         "label": "951293D4203DA1545C1685FF2F36CEFA2506E505B8576384A28939EB14FA66CD"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 8
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:86EE92BE380CCA858FDCF5D3A07EA704C75B50D1FCA47B705EF3BD6442A5A3FA",
+        "label": "2AD3A160CB5D42994DAB3848F2298B15404E90A12648B4BD71D8C642E2CA9920"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 8
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:F6E095FD1F4C09C1C046FF9F68F633C1CC528524875830A81F631DFC9949B48B",
+        "label": "70A7773015F425B0B9AECBDBA5B32F4F7F1497DCD7383535B4C8D59118A129FE"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 21
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 1
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 8
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:F6E095FD1F4C09C1C046FF9F68F633C1CC528524875830A81F631DFC9949B48B",
+        "label": "929FC5B1D65CAE09904D42435207C3625F1E7E747C2A1D37EEF66BEAD4D2F195"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 21
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 2
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 8
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:F6E095FD1F4C09C1C046FF9F68F633C1CC528524875830A81F631DFC9949B48B",
+        "label": "D3EE9F7FB3B4292311C6B4B539FFCA265376147DA732C1E166EDC3A4EFB58FAC"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 21
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 0
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 8
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:F6E095FD1F4C09C1C046FF9F68F633C1CC528524875830A81F631DFC9949B48B",
+        "label": "33A3E61188A74840C210B6AABDEB73607D9916A66790C2A3BBE555AA0FAB1E6D"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 21
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 3
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 8
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:F6E095FD1F4C09C1C046FF9F68F633C1CC528524875830A81F631DFC9949B48B",
+        "label": "C7734AF6EAE19607F3D0DDBE6094DA0C71847A2C67ADD94B36E4C2471A84EE28"
       }
     ]
   },
@@ -39683,6 +39829,46 @@
           0,
           0
         ]
+      },
+      {
+        "compute_function_descriptor": "fnd:33A3E61188A74840C210B6AABDEB73607D9916A66790C2A3BBE555AA0FAB1E6D",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:929FC5B1D65CAE09904D42435207C3625F1E7E747C2A1D37EEF66BEAD4D2F195",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:D3EE9F7FB3B4292311C6B4B539FFCA265376147DA732C1E166EDC3A4EFB58FAC",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:C7734AF6EAE19607F3D0DDBE6094DA0C71847A2C67ADD94B36E4C2471A84EE28",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:70A7773015F425B0B9AECBDBA5B32F4F7F1497DCD7383535B4C8D59118A129FE",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
       }
     ],
     "mesh_render_pipeline_descriptors": [
@@ -47630,6 +47816,31 @@
           }
         ],
         "fragment_function_descriptor": "fnd:951293D4203DA1545C1685FF2F36CEFA2506E505B8576384A28939EB14FA66CD",
+        "support_indirect_command_buffers": "Enabled",
+        "vertex_function_descriptor": "fnd:6C0ABC6D1C65B09BBF0042B49854994C93810703B3B70D728BDF735AF89B0A4B"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RGBA16Float"
+          },
+          {
+            "pixel_format": "RG16Float"
+          },
+          {
+            "pixel_format": "R8Unorm"
+          }
+        ],
+        "fragment_function_descriptor": "fnd:2AD3A160CB5D42994DAB3848F2298B15404E90A12648B4BD71D8C642E2CA9920",
         "support_indirect_command_buffers": "Enabled",
         "vertex_function_descriptor": "fnd:6C0ABC6D1C65B09BBF0042B49854994C93810703B3B70D728BDF735AF89B0A4B"
       }

@@ -243,3 +243,8 @@ Open: direction-texture fixture; declared-environment fit 6.4-7.0 % gap on metal
   specular, specularDir = normalize(mix(reflect(-V, N'), N', roughness^2)), N' the README bent normal written from its GLSL (`aniso_bent_normal`; hand value in the unit test). Control
   `declared-aniso-bent-normal-ignored` fetches along N and must FAIL; `declared-aniso-ignored` too. Fixture key `aniso-bent-env` (scene `aniso-grid-env-resolve`, thresholds of the declared kind).
 - Status: reference and unit test done (the bent-normal control moves a glancing metal pixel by > 2 %); the capture and the gate were NOT run (battery hold): UNVERIFIED on the GPU.
+Result (round 3, `build/f15-check/tex22`): `aniso-bent-env` GREEN: worst sphere mean 0.059 %, p99 0.094 % against the legacy-hemisphere reference (declared kind, thresholds 0.5 % / 1 %);
+controls `declared-aniso-bent-normal-ignored` (fetch along N) and `declared-aniso-ignored` FAIL. The capture runs the plain (non-lit) resolve with `--legacy-environment --reflections off --lighting-denoise off
+--ao off` (no `--debug-lighting`, which needs F10-F12 lighting); the first attempt with the custom denoiser still used the declared constant environment (the reflection composite owns it there:
+engine = the constant-sky image, 230 % off the hemisphere reference), hence the launch-option rule. Archive: +5 resolve class descriptors (plan update, `perm-harvest2`) and +6 constant-22
+descriptors (`.scratch/f15/harvest/tex-5.json`).

@@ -415,7 +415,7 @@ struct LaunchOptions {
     // diagnostic domain (measurement only, never production qualification).
     bool metalfxNativeDiagnostic=false;
     bool debugProbeNoParallax=false; // F13.5 negative control: direction-only probe lookup
-    bool legacyEnvironment=false;    // F15.3 (ticket 11): a material scenario shades with the legacy two-colour hemisphere environment instead of its declared constant one (requires --reflections off)
+    bool legacyEnvironment=false;    // F15.3 (ticket 11): a material scenario shades with the legacy two-colour hemisphere environment instead of its declared constant one (requires --reflections off, --ao off, --lighting-denoise off)
     std::string denoisedFixture,denoisedFixtureOutput;bool denoisedFixturePreExposed=false,denoisedFixtureAutoExposure=false,denoisedFixtureManualExposureControl=false;u32 denoisedFixturePrewarmMs=120000;
     ReflectionMode reflections=ReflectionMode::Off;
     AoMode ao=AoMode::Off;

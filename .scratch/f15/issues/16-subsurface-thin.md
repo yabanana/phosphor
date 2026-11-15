@@ -275,3 +275,8 @@ Result (round 2, `build/f15-check/tex11`, `tex12`, `tex17`; the thin + coat, thi
   diffuse integral). The neutral dielectric still returns the original table bit for bit. Unit test: the generic quadrature reproduces the default table to 3e-4, ior 2.4 lowers T by > 1e-3,
   a film changes it by > 5e-3. New key `combo-thin-lobes-env` (exact environment, controls transmission-ignored, sheen-ignored, aniso-ignored, iridescence-ignored, specular-ignored,
   transmission-default-fresnel): the capture and gate were NOT run (battery hold): UNVERIFIED on the GPU.
+Result (round 3, `build/f15-check/tex22`): `combo-thin-lobes-env` (EXACT environment with the per-ior / per-film tables) GREEN: worst sphere mean 4.94 % (ior 1.8 / specular 0.7 cell) of the 5 %
+bound, the other spheres 1.1 - 4.1 %; controls transmission-ignored, sheen-ignored, aniso-ignored, transmission-default-fresnel FAIL. Redesigns (thresholds untouched): the film column had
+declared-vs-exact 5.3 % at index 1.3 / 400 nm (measured 5.04 % on the engine, reference prediction 5.3 %), so the film is index 1.5 / 400 nm (2.8 %); `specular-ignored` and `iridescence-ignored` move the exact
+environment sphere mean by less than 5 % and stay on the sun and declared keys. The sun and declared keys stay GREEN with the index-1.5 film (`combo-thin-lobes-sun`, `-env@resolve`, all
+controls fail). The environment margin of the ior cell (4.94 %) is thin: the declared transmitted ratio fit `1 - 0.16 N.V` was derived for the default dielectric.

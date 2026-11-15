@@ -232,3 +232,5 @@ Open: captured-probe sheen fixture; sheen texture numeric fixture; reference qua
   distance to the silhouette; off: +0.01 % rim, +0.03 / +0.02 / +0.00 % in the same bands, i.e. exact (worst sphere mean 0.018 %). The probe-lit specular signal goes through the denoiser's spatial
   filter, which mixes the sphere pixels with the neighbouring background pixels (0.5 against 0.04-0.2): that is the denoiser's declared silhouette behaviour, not the probe lookup. It is covered (not re-run here) by the
   F13 denoiser variants raw / custom / rt8-control in `tools/f13_f14_check.py` (same scene, same radiance, denoiser on and off, compared) and kept out of this fixture by running it unfiltered.
+- visual_check re-run with the timing trap neutralised (`EXTRA_ARGS=--pipeline-sync BENCH8_ARGS="--instances 100000"`, build of the round-3 tip before the last fixture edits): all 8 benches 0 px
+  (`build/visual2.log`), bench 6 included.

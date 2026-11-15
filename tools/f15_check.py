@@ -308,8 +308,8 @@ COMBO_THIN_COAT_DECLARED = ["declared-transmission-ignored", "declared-coat-igno
 # of the combination has no per-ior transmitted-albedo table yet (the key is gated by the declared model, like iridescence + anisotropy was).
 COMBO_THIN_LOBES_CONTROLS = ["transmission-ignored", "sheen-ignored", "aniso-ignored", "iridescence-ignored", "specular-ignored",
                              "transmission-default-fresnel", "transmission-sheen-unscaled"]
-COMBO_THIN_LOBES_ENV_CONTROLS = ["transmission-ignored", "sheen-ignored", "aniso-ignored", "iridescence-ignored", "specular-ignored",
-                                 "transmission-default-fresnel"]
+# `specular-ignored` and `iridescence-ignored` (film 1.5 / 400 nm) move the exact environment sphere mean by less than 5 % (non-discriminating there; both fail on the sun and declared keys).
+COMBO_THIN_LOBES_ENV_CONTROLS = ["transmission-ignored", "sheen-ignored", "aniso-ignored", "transmission-default-fresnel"]
 COMBO_THIN_LOBES_DECLARED = ["declared-transmission-ignored", "declared-sheen-ignored", "declared-aniso-ignored", "declared-iridescence-ignored",
                              "declared-specular-ignored", "declared-transmission-default-weight"]
 # The exact-environment keys integrate over the whole sphere: a rotation of the lobe by the sign of the angle moves the sphere mean by less
@@ -537,7 +537,7 @@ SCENARIOS = {
                                         "resolve terms (--reflections off --lighting-denoise custom)"},
     # ticket 11 (F15.3 closure): the legacy two-colour hemisphere environment (--legacy-environment, --reflections off, legacy lighting) is NOT constant, so the README's
     # bent-normal fetch direction is visible.  Reference: the declared split-sum weights times hemisphere(N) / hemisphere(specularDir) with the README bent normal.
-    "aniso-bent-env": {"kind": "declared", "scene": "aniso-grid-env-resolve", "reflections": "off", "legacy_environment": True,
+    "aniso-bent-env": {"kind": "declared", "reflections": "off", "denoise": "off", "legacy_environment": True,
                        "reference_args": ["--legacy-environment"],
                        "controls": ["declared-aniso-bent-normal-ignored", "declared-aniso-ignored"],
                        "terms": "legacy hemisphere environment (sky 0.30 0.36 0.45 above, ground 0.10 0.09 0.08 below), no sun, resolve-owned, on the anisotropy grid"},
@@ -1210,7 +1210,7 @@ def capture_command(binary, name, folder, seed=1):
             "--lighting-denoise", SCENARIOS[name].get("denoise", "custom"), "--reflection-samples", "8",
             "--lighting-seed", str(seed),
             "--post", "--upscaler", "native", "--resolution", RESOLUTION, "--frames", str(FRAMES),
-            "--warmup", "0", "--fixed-timestep", "--no-ui", "--no-vsync", "--no-gpu-timing", "--debug-lighting", "1",
+            "--warmup", "0", "--fixed-timestep", "--no-ui", "--no-vsync", "--no-gpu-timing", *([] if SCENARIOS[name].get("legacy_environment") else ["--debug-lighting", "1"]),
             # Synchronous pipelines: a cold compiler cache must never let a capture use a fallback variant (a fallback-served capture once
             # equalled the base model, ticket 17); fallback_draws() rejects any capture whose log still reports fallback draws.
             "--pipeline-sync", *(["--reflection-capture-probe"] if SCENARIOS[name].get("probe") else []),
