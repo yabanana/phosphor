@@ -208,10 +208,11 @@ class Layers(unittest.TestCase):
         model = {**ref.APPENDIX_B}
         value = ref.bsdf(base, metallic, rough, n, v, l, model, None, aniso=None) - ref.bsdf(base, metallic, rough, n, v, l, {**model, "ms": "off"}, None, aniso=None)
         self.assertGreater(float(value[0, 0]), 0.0)  # the isotropic lobe of the same pixel carries it
-        # the declared environment of the anisotropic pixels equals the one without the lobe
-        env = ref.declared_environment_radiance(base, metallic, rough, np.full(3, 0.7), 1.0, ref.DECLARED, None, None, None, {"strength": aniso["strength"], "rotation": np.zeros(3)})
+        # the declared environment of the anisotropic pixels equals the one without the lobe (round 3: the anisotropic albedo table needs the azimuth of V
+        # in the lobe frame, any fixed value here)
+        env = ref.declared_environment_radiance(base, metallic, rough, np.full(3, 0.7), 1.0, ref.DECLARED, None, None, None, {"strength": aniso["strength"], "rotation": np.zeros(3), "phi": np.full(3, 0.3)})
         off = ref.declared_environment_radiance(base, metallic, rough, np.full(3, 0.7), 1.0, {**ref.DECLARED, "ms": "off"}, None, None, None,
-                                                {"strength": aniso["strength"], "rotation": np.zeros(3)})
+                                                {"strength": aniso["strength"], "rotation": np.zeros(3), "phi": np.full(3, 0.3)})
         np.testing.assert_allclose(env[1:], off[1:], rtol=1e-12)
         self.assertGreater(float(env[0, 0] - off[0, 0]), 0.0)
 
