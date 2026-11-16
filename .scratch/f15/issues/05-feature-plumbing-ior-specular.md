@@ -6,7 +6,7 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 03, 04
 
-**Status:** resolved (2026-11-13; furnace, recovery and 2x2 sub-clauses delivered and verified by ticket 08b; D2 band open: not met at HEAD, ticket 24)
+**Status:** resolved (2026-11-13; furnace, recovery and 2x2 sub-clauses delivered and verified by ticket 08b; D2 band met under the owner's option A, ticket 24)
 
 - [x] Extension records (layouts for all features frozen in `gpu_types.h`, `GPUMaterial::pad` retyped to `u32` with the same size) reach the GPU only through SceneStore deltas; `--debug-gpu-scene` and `verifyAgainstEcs` cover the extension buffer, with a corruption control that must FAIL
 - [x] Reserved constant semantics fixed: undefined ⇒ no extension lobes (scenes without features keep byte-identical pipeline descriptors and archive keys, visual_check 0 px); the compile fallback uses an explicit all-lobes value; ADR-0003 wording matches (deviation for compute pipelines recorded there)
@@ -15,7 +15,7 @@ Roadmap: F15.1, F15.3
 - [x] Parameter edits change the next frame; turning a feature on/off at runtime is a counted structure change with fixed per-material record capacity, the all-lobes fallback serves until the specialisation compiles, and a hitch test toggling a feature shows 0 GPU allocations in measured frames (O7/O9)
 - [x] Extension-record deltas bump every material-revision consumer (`gi_passes.cpp:91`, `reflection_passes.cpp:254`, `shadow_passes.cpp:298`, `direct_lighting_passes.cpp:108`, `engine.cpp:1718`, `acceleration_structures.cpp:620`); indirect/denoised signals recover within the F13.6 recovery criterion after an edit — revision bumps done; the F13.6 recovery measurement after an edit → carried to ticket 08
 - [x] Adaptive 2×2 shading reuse excludes materials with feature bits; offline-reference snapshots versioned and extended with extension records — snapshot done; the 2×2 exclusion is in `visibility_resolve.metal` but not yet exercised on the GPU → carried to ticket 08
-- [ ] Sponza D2 within the decision-11 band (A/B/A) → carried to ticket 24 (quiet machine) — D2 band not met at HEAD (median p95 +0.23 ms vs 2e1057a; owner decision on the 26fe229 continuation cost pending, ticket 24)
+- [x] Sponza D2 within the decision-11 band (A/B/A) → carried to ticket 24 (quiet machine) — D2 band MET under the owner's option A (ticket 24: 2026-11-15 median -0.038 ms against ticket 03 + 26fe229, 0 GPU allocations; round-2 quiet rotation t03 -> final -0.059 ms; the final binary's rotation is recorded in ticket 24 and the handoff)
 - [x] Pipelines added or specialised by this ticket enter the archive by a targeted update; `tools/archive_check.sh` and `tools/hitch_check.sh` green; 0 render-thread compiles and 0 GPU allocations in measured frames
 
 ## Comments
