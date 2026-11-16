@@ -203,7 +203,7 @@ def grid(half, n):
     return [(-half + 2 * half * (i + 0.5) / n, -half + 2 * half * (j + 0.5) / n) for i in range(n) for j in range(n)]
 
 
-def model_value(arm, tilt, falloff):
+def arm_model_value(arm, tilt, falloff):
     """The model's unnormalised response of the arm's measurement for one tilt."""
     cfg = ARMS[arm]
     if cfg["wall"] != "diffuse":
@@ -225,8 +225,9 @@ def model_value(arm, tilt, falloff):
     return total / 25.0
 
 
-def model_ratio(arm, tilt, falloff):
-    return model_value(arm, tilt, falloff) / model_value(arm, 0.0, falloff)
+def arm_model_ratio(arm, tilt, falloff):
+    # Named apart from the DI paths' model_ratio(x, angle, falloff) above: one name for both shadowed the DI model (KeyError in verify).
+    return arm_model_value(arm, tilt, falloff) / arm_model_value(arm, 0.0, falloff)
 
 
 def arm_capture(binary, folder, arm, name, gltf):
@@ -328,11 +329,11 @@ def arms_verify(out, arms):
         worst = {name: 0.0 for name in MODELS}
         for t in TILTS[1:]:
             r = deltas[tilt_name(t)] / d0
-            errs = {name: abs(r - model_ratio(arm, t, f)) / model_ratio(arm, t, f) for name, f in MODELS.items()}
+            errs = {name: abs(r - arm_model_ratio(arm, t, f)) / arm_model_ratio(arm, t, f) for name, f in MODELS.items()}
             for name in MODELS:
                 worst[name] = max(worst[name], errs[name])
-            lines.append(f"{arm} tilt {t}: ratio {r:.4f}  smoothstep {model_ratio(arm, t, smoothstep):.4f} (err {errs['smoothstep']*100:.2f} %)  "
-                         f"linear {model_ratio(arm, t, MODELS['linear']):.4f} ({errs['linear']*100:.1f} %)  t^2 {model_ratio(arm, t, MODELS['t2']):.4f} ({errs['t2']*100:.1f} %)")
+            lines.append(f"{arm} tilt {t}: ratio {r:.4f}  smoothstep {arm_model_ratio(arm, t, smoothstep):.4f} (err {errs['smoothstep']*100:.2f} %)  "
+                         f"linear {arm_model_ratio(arm, t, MODELS['linear']):.4f} ({errs['linear']*100:.1f} %)  t^2 {arm_model_ratio(arm, t, MODELS['t2']):.4f} ({errs['t2']*100:.1f} %)")
         outside = deltas[tilt_name(OUTSIDE_TILT)] / d0
         arm_ok = worst["smoothstep"] <= TOL_ARM and abs(outside) <= 0.01
         discr = {n: worst[n] > TOL_ARM for n in ("linear", "t2")}
@@ -449,13 +450,13 @@ def selftest():
     for arm in ARMS:
         worst = {n: 0.0 for n in ("linear", "t2")}
         for t in TILTS[1:]:
-            ref = model_ratio(arm, t, smoothstep)
+            ref = arm_model_ratio(arm, t, smoothstep)
             for n in worst:
-                worst[n] = max(worst[n], abs(model_ratio(arm, t, MODELS[n]) - ref) / ref)
+                worst[n] = max(worst[n], abs(arm_model_ratio(arm, t, MODELS[n]) - ref) / ref)
         print(f"{arm}: model control miss linear {worst['linear']*100:.1f} %, t^2 {worst['t2']*100:.1f} %; "
-              + " ".join(f"{t}: {model_ratio(arm, t, smoothstep):.4f}" for t in TILTS[1:]))
+              + " ".join(f"{t}: {arm_model_ratio(arm, t, smoothstep):.4f}" for t in TILTS[1:]))
         miss_all.append(min(worst.values()))
-        assert model_ratio(arm, OUTSIDE_TILT, smoothstep) < 0.01, arm
+        assert arm_model_ratio(arm, OUTSIDE_TILT, smoothstep) < 0.01, arm
     assert min(miss_all) > 2 * TOL_ARM, (min(miss_all), TOL_ARM)
     print("selftest ok")
 
