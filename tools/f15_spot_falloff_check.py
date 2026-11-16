@@ -344,12 +344,14 @@ def arms_verify(out, arms):
     return ok, lines
 
 
-# --- GI hit shading, kernel-agnostic: the same wall response for an EMISSIVE panel whose texture encodes the analytic lit pattern ----------------
-# The DDGI arm above weights the panel with the probe grid's own kernel, which the form-factor model does not know.  Here the kernel cancels: the spot-lit
-# panel (A, GI only: the spot never lights the wall) and an emissive panel of the same size whose emission texture is the ANALYTIC lit radiance of the
-# panel at that tilt (B, pattern = smoothstep; control B' = linear falloff) go through the same GI machinery, and the GI part of the wall response
-# (B: gi on - gi off, which removes the direct emitter lighting) must follow the same ratio to tilt 0.  Threshold fixed beforehand: B / A ratio within
-# TOL_ARM of 1 at every tilt; the control B' must miss it by more than TOL_ARM at some tilt.  8-bit sRGB texture, 48 x 48.
+# --- GI hit shading, kernel-agnostic: the same wall response for a PATTERNED-ALBEDO panel under a POINT light ----------------------------------
+# The DDGI arm above weights the panel with the probe atlas' own kernel, which the form-factor model does not know.  Here the kernel cancels: the spot-lit
+# panel (A: spot tilted by `tilt`, GI only, the spot never lights the wall) and a panel of the same size lit by a POINT light at the same place (no cone) whose
+# base colour texture is the analytic falloff pattern f(alpha(point)) x BASE at that tilt (B, pattern = smoothstep; control B' = linear falloff) have the same
+# radiance field; both are lit diffuse hits stored by the same GI, so the wall's GI response must follow the same ratio to tilt 0.  B's GI part = gi on - gi off
+# (removes the point light's direct lighting of the wall); the zero baseline is the same scene with a black panel.  (An EMISSIVE pattern is not usable: the
+# atlas removes Le at the first segment, ddgi.metal, and the emitter is sampled directly, which bypasses the atlas kernel.)  Threshold fixed beforehand:
+# B / A within TOL_ARM of 1 at every tilt, the control B' must miss it by more than TOL_ARM at some tilt.  8-bit sRGB texture, 48 x 48.
 
 ARMS["giemit"] = dict(ARMS["gi"])
 ARMS["giemit-off"] = dict(ARMS["gi"], args=["--rt", "on", "--gi", "off", "--reflections", "off"])
@@ -361,27 +363,32 @@ def srgb_encode(v):
     return 12.92 * v if v <= 0.0031308 else 1.055 * v ** (1 / 2.4) - 0.055
 
 
-def emit_pattern_scene(tilt, pattern):
+def emit_pattern_scene(tilt, pattern, black=False):
     cfg = ARMS["gi"]
     s_ = cfg["panel_half"]
     falloff = smoothstep if pattern == "s" else MODELS["linear"]
-    peak = base.BASE / math.pi * cfg["intensity"] * lit_value(0.0, 0.0, LIGHT[1], smoothstep)
 
     def pixel(x, y):
         u, v = (x + .5) / EMIT_N, (y + .5) / EMIT_N
         wx, wy = s_ - u * 2 * s_, LIGHT[1] + s_ - v * 2 * s_
-        radiance = base.BASE / math.pi * cfg["intensity"] * lit_value(tilt, wx, wy, falloff)
-        c = int(round(255 * srgb_encode(radiance / peak)))
+        w = (wx - LIGHT[0], wy - LIGHT[1], PANEL_Z - LIGHT[2])
+        d = math.sqrt(sum(c * c for c in w))
+        cos_a = (w[1] * math.sin(tilt) + w[2] * math.cos(tilt)) / d
+        f = falloff(t_of(math.acos(max(-1.0, min(1.0, cos_a)))))
+        c = 0 if black else int(round(255 * srgb_encode(f)))
         return (c, c, c)
 
     png = vcs.base.png_bytes(EMIT_N, EMIT_N, pixel)
-    panel = {"name": "panel", "pbrMetallicRoughness": {"baseColorFactor": [base.BASE, base.BASE, base.BASE, 1], "metallicFactor": 0.0, "roughnessFactor": 1.0},
-             "emissiveFactor": [1, 1, 1], "emissiveTexture": {"index": 0}, "extensions": {"KHR_materials_emissive_strength": {"emissiveStrength": peak}}}
+    panel = {"name": "panel", "pbrMetallicRoughness": {"baseColorFactor": [base.BASE, base.BASE, base.BASE, 1], "baseColorTexture": {"index": 0},
+                                                       "metallicFactor": 0.0, "roughnessFactor": 1.0}}
     wall = {"name": "wall", "pbrMetallicRoughness": {"baseColorFactor": [0.9, 0.9, 0.9, 1], "metallicFactor": 0.0, "roughnessFactor": 1.0}}
     quads = [vcs.quad(wall, (-2.0, 5.0, WALL_Z), (4.0, 0, 0), (0, -4.0, 0)), vcs.quad(panel, (s_, LIGHT[1] + s_, PANEL_Z), (-2 * s_, 0, 0), (0, -2 * s_, 0))]
+    node = {"translation": list(LIGHT), "extensions": {"KHR_lights_punctual": {"light": 0}}}
     extra = {"textures": [{"source": 0, "sampler": 0}], "images": [{"uri": vcs.base.data_uri(png)}],
-             "samplers": [{"magFilter": 9729, "minFilter": 9729, "wrapS": 33071, "wrapT": 33071}]}
-    return quads, [], extra
+             "samplers": [{"magFilter": 9729, "minFilter": 9729, "wrapS": 33071, "wrapT": 33071}],
+             "extensionsUsed": ["KHR_lights_punctual"], "extensionsRequired": ["KHR_lights_punctual"],
+             "extensions": {"KHR_lights_punctual": {"lights": [{"type": "point", "intensity": cfg["intensity"]}]}}}
+    return quads, [node], extra
 
 
 def giemit_run(out, binary, parts):
@@ -393,10 +400,7 @@ def giemit_run(out, binary, parts):
             arm = "giemit" if mode == "on" else "giemit-off"
             jobs = [(arm, f"{pattern}-{tilt_name(t)}", t, pattern, False) for t in TILTS]
         for arm, name, tilt, pattern, dark in jobs:
-            quads, nodes, extra = emit_pattern_scene(tilt, pattern)
-            if dark:  # the baseline: the same panel with zero emission
-                quads[1][0]["extensions"]["KHR_materials_emissive_strength"]["emissiveStrength"] = 1.0
-                quads[1][0]["emissiveFactor"] = [0, 0, 0]
+            quads, nodes, extra = emit_pattern_scene(tilt, pattern, black=dark)
             folder = out / arm
             folder.mkdir(parents=True, exist_ok=True)
             vcs.write_gltf(folder / f"{name}.gltf", quads, nodes, extra)
