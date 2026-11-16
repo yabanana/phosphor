@@ -11,7 +11,7 @@ Roadmap: F15.1 (prefactor)
 - [x] The three GPU copies call the shared module; no second GGX/Fresnel implementation remains in resolve, DI or reflections (the secondary-hit base reduction may keep its reduced form, documented)
 - [x] `tools/visual_check.sh` 0 pixels against references taken before the change on every bench, API + shader validation clean
 - [ ] F13/F14 corpus subset touching DI/reflections green with unchanged numbers; any FP-contraction difference is explained and removed, not tolerated — PARTIAL (audit 2026-11-15): argued by five byte-identical F13 captures (base vs t01), literal corpus subset not run
-- [x] Sponza D2 preset GPU p95 within the decision-11 band of the parent commit (A/B/A, quiet machine) — D2 band MET under the owner's option A (ticket 24: 2026-11-15 median -0.038 ms against ticket 03 + 26fe229, 0 GPU allocations; round-2 quiet rotation t03 -> final -0.059 ms; the final binary's rotation is recorded in ticket 24 and the handoff)
+- [x] Sponza D2 preset GPU p95 within the decision-11 band of the parent commit (A/B/A, quiet machine) — D2 band MET under the owner's option A (ticket 24: 2026-11-15 median -0.038 ms against ticket 03 + 26fe229, 0 GPU allocations; round-2 quiet rotation t03 -> final -0.059 ms; the final binary's rotation is pending the final battery (ticket 24))
 - [ ] `ctest` and `metal_syntax_check` green — PARTIAL (audit 2026-11-15): ctest 13/13 recorded, metal_syntax_check not recorded
 
 ## Comments
