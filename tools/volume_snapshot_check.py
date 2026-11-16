@@ -20,6 +20,12 @@ VOLUME_GATES={"transmittance":{"absolute":0.02,"relative":0.05},
 CELESTIAL_RAYS={"solar_disk":3,"lunar_disk":3,"star_field":64}
 
 def numeric(x):return isinstance(x,(int,float)) and not isinstance(x,bool) and math.isfinite(x)
+# GPUFogParams (src/renderer/gpu_types.h, static_assert 464 bytes): 112 scalar u32/f32 words, then two u64 GPU addresses appended in F15
+# (materialExtensions, vertexColors).  The snapshot holds the whole struct; the oracle reads the scalar prefix only.
+FOG_WORDS,FOG_SCALAR_WORDS=116,112
+def fog_words(block):
+    if not isinstance(block,list) or len(block)!=FOG_WORDS:raise ValueError("complete scalar u32 ABI parameter block missing")
+    return volume_words(block[:FOG_SCALAR_WORDS],FOG_SCALAR_WORDS)
 def volume_words(block,count):
     if not isinstance(block,list) or len(block)!=count or any(not isinstance(v,int) or isinstance(v,bool) or v<0 or v>0xffffffff for v in block):
         raise ValueError("complete scalar u32 ABI parameter block missing")
@@ -44,7 +50,7 @@ def analytic_component(row,blocks,settings):
         flux_to_radiance=lambert/(phase*(2/3)*math.pi*math.sin(radius)**2)
         return [irradiance*flux_to_radiance for irradiance in p[36:39]]+[1]
     if row["kind"]!="homogeneous_fog":return None
-    p=volume_words(blocks["fog"],112);words=blocks["fog"];gx,gy,gz=words[64:67]
+    p=fog_words(blocks["fog"]);words=blocks["fog"];gx,gy,gz=words[64:67]
     if min(gx,gy,gz)<=0 or p[75]!=0:raise ValueError("actual fog parameters are not homogeneous")
     index=row["index"];x=index%gx;y=(index//gx)%gy;z=index//(gx*gy)
     if index<0 or z>=gz:raise ValueError("fog prefix index outside actual grid")
@@ -72,7 +78,7 @@ def check_record(record,provenance,negative=False,require_fog=False):
     if not isinstance(supplied.get("shader_generation"),int) or not supplied.get("source_hash_at_prepare") or supplied.get("source_hash_at_prepare")=="unavailable":
         raise ValueError("actual producer generation/source hash unavailable")
     if blocks.get("encoding")!="little-endian-u32-shared-scalar-ABI":raise ValueError("missing actual parameter ABI encoding")
-    volume_words(blocks.get("expected_atmosphere"),96);volume_words(blocks.get("submitted_atmosphere"),96);volume_words(blocks.get("fog"),112)
+    volume_words(blocks.get("expected_atmosphere"),96);volume_words(blocks.get("submitted_atmosphere"),96);fog_words(blocks.get("fog"))
     if not negative and blocks["expected_atmosphere"]!=blocks["submitted_atmosphere"]:raise ValueError("uncorrupted consumer received different atmosphere parameters")
     rows=record.get("cases",[])
     if not isinstance(rows,list) or not rows:raise ValueError("zero actual F14 numerical sample rows")
@@ -236,7 +242,7 @@ def fog_slicing_evidence(paths,falloff):
     for path in paths:
         record=json.loads(Path(path).read_text());probe=record.get("fog_apply")
         if not probe or probe.get("schema")!="phosphor.fog-apply-probe.v1":raise ValueError(path.name+": missing fog composition probe")
-        words=record["parameter_blocks"]["fog"];f=volume_words(words,112)
+        words=record["parameter_blocks"]["fog"];f=fog_words(words)
         if abs(probe.get("fixture_height_falloff_m_inv",-1)-falloff)>1e-9 or abs(f[75]-falloff)>1e-9 or f[80]!=0:
             raise ValueError(path.name+": fixture falloff differs from the declared case")
         settings=record["settings"];sigma0=settings["fixture_extinction_m_inv"];source=settings["fixture_source"]
