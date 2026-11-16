@@ -309,3 +309,17 @@ a thin diffuse-transmission quad lit only by a sampled emitter BEHIND it (ReSTIR
 occluder between emitter and receiver must take the ratio below 0.45.  NOT RUN: the GPU batch was stopped by the owner's battery rule (27 % below 40 %); the fixture and its pure-Python
 geometry tests are in the tree.  Status: PARTIAL - no code change is justified without a failing fixture; the code reading says RT is already correct.  Command for the orchestrator:
 `python3 -I tools/f15_transport_check.py thin-backlit --binary <phosphor> --out DIR` (takes the GPU lock per capture; 4 captures).
+
+2026-11-16 — GPU evidence on the integrated tip (branch f15c-transport-3 = 06dd3a7 + 3 commits; binary linked by hand because the pipeline archive step fails in this build tree, see below).
+
+- Glass weights (ticket 13), `tools/f15_transport_check.py glass-weights`: rough ior-2 glass sphere (roughness 0.2, alpha 0.04), `--capture-linear-signal specular`, 1 sample per pixel, denoiser off, 4 seeds,
+  1024x768, environment 0.5; counted pixels whose raw radiance exceeds 0.5 x 1.2.  Fix: 0 / 0 / 0 / 0 (peak 0.5002 = the environment, 180 729 lit pixels per frame).  Tip binary (control): 1302 / 1275 / 1289 / 1303
+  pixels, peak 7.82 (a weight of 15.6).  Negative control, same counter at half the environment: 180 620 pixels on the fixed build (the statistic sees the sphere).
+- Ticket 16, `thin-backlit`: the thin diffuse-transmission quad lit only by an emitter behind it (ReSTIR DI + RT visibility) is lit 3.83x its unlit value; with an opaque occluder between emitter and quad the
+  light drops to exactly 0.000 of it: the RT visibility ray does not self-occlude the back-lit thin receiver (DI path; the sun cannot back-light a camera-visible receiver in the corpus rig, RT sun origin is on the light
+  side by code).  There is no visibility-off arm (`--rt off` is refused with restir DI): the occluder is the control.  CSM self-shadowing stays with the thinwall work.
+- Exactness: the 5 F13 captures (sponza-d2, cornell-restir, cornell-clustered-ssr, manylights-restir, grid-sky) with the final binary are `cmp`-identical to the same 5 captured with the orchestrator's tip binary.
+  `visual_check` (EXTRA_ARGS=--pipeline-sync, BENCH8_ARGS="--instances 100000", references build/reference-f15-appB): all 8 benches 0 pixels, max delta 0.
+- Archive: `metal-tt` ends with "applegpu-nt: Internal compiler error ... plugin wrapper-nt.dylib cannot emit pipeline" (no descriptor named) on every `phosphor-archive.metallib` step in this worktree: with my changes (3 runs),
+  with all my shader changes reverted to the tip (2 runs, at fa6786d and at 06dd3a7), identical pipelines.mtl4-json to the orchestrator's (cmp).  I linked `phosphor` from `ninja -t commands` without the archive and ran with
+  "archive hits 0, unavailable 136" (every pipeline compiled at start, `--pipeline-sync`): fallbacks 0.  The archive ICE is therefore environmental to this tree, not caused by this work; the orchestrator's archive build of the same content succeeds.

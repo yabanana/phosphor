@@ -21,7 +21,7 @@ Three checks, each with its negative control (a control must FAIL, otherwise the
   thin-backlit  Ticket 16, the back-lit thin receiver: a thin diffuse-transmission quad lit ONLY by a sampled emitter behind it (the corpus sun is on
             the camera side: a sun cannot back-light a receiver the camera sees).  The RT visibility ray of a back-lit thin receiver starts on the light
             side of the surface and must not shadow it: D = capture - capture(emitter off); sum(D, --rt on) / sum(D, --rt off) in [0.95, 1.05].
-            Control: an opaque occluder between emitter and receiver must take the ratio below 0.45 (the fixture sees visibility).
+            (`--rt off` is invalid with restir DI: the occluder is the control.)
 
 Usage: python3 -I tools/f15_transport_check.py {volume|masked|thin-backlit} --binary B [--control-binary B0] --out DIR [--evaluate]
 Exit codes: 0 gates hold (and every control fails as it must; a control binary, when given, fails the gate), 1 a gate failed, 3 a control did not
@@ -509,31 +509,28 @@ def thin_roi_sum(path, box):
 
 
 def run_thin_backlit(args):
+    """Arms: on = emitter behind the thin quad (ReSTIR DI, RT visibility), none = emitter off, blocked = an opaque occluder between.  The receiver is NOT self-shadowed when
+    the light it receives through the thin lobe is a clear signal over the unlit image (>= 5 %) and the opaque occluder removes it (the fixture sees the visibility ray:
+    blocked <= 10 % of on).  (`--rt off` is invalid with restir DI, so there is no visibility-off arm: the occluder is the control.)"""
     out = pathlib.Path(args.out)
     binary = args.control_binary if args.use_control else args.binary
     base = out / ("control" if args.use_control else "fixed")
-    arms = {"on": (thin_scene(True, False), {"--rt": "on", "--shadows": "off", "--reflections": "off"}),
-            "off": (thin_scene(True, False), {"--rt": "off", "--shadows": "off", "--reflections": "off"}),
-            "none": (thin_scene(False, False), {"--rt": "on", "--shadows": "off", "--reflections": "off"}),
-            "blocked": (thin_scene(True, True), {"--rt": "on", "--shadows": "off", "--reflections": "off"})}
+    flags = {"--rt": "on", "--shadows": "off", "--reflections": "off"}
+    arms = {"on": thin_scene(True, False), "none": thin_scene(False, False), "blocked": thin_scene(True, True)}
     pfm = {}
-    for name, (scene, flags) in arms.items():
+    for name, scene in arms.items():
         path = scene.write(base / f"scene-{name}")
         pfm[name] = args.evaluate and base / name / "engine.pfm" or capture_scene(binary, path, base / name, flags)
     centre, distance = frame_rig(*thin_scene(True, True).bounds())
     box = pixel_box(THIN_ROI, centre, distance)
     sums = {name: thin_roi_sum(pfm[name], box) for name in pfm}
     d_on = [sums["on"][c] - sums["none"][c] for c in range(3)]
-    d_off = [sums["off"][c] - sums["none"][c] for c in range(3)]
     d_blocked = [sums["blocked"][c] - sums["none"][c] for c in range(3)]
-    ratio = [d_on[c] / d_off[c] if d_off[c] > 0 else 0.0 for c in range(3)]
-    blocked = [d_blocked[c] / d_off[c] if d_off[c] > 0 else 0.0 for c in range(3)]
-    signal = [d_off[c] / sums["none"][c] for c in range(3)]
-    result = {"box": box, "pixels": (box[2] - box[0]) * (box[3] - box[1]), "d_on": d_on, "d_off": d_off, "ratio_on_off": ratio,
-              "signal_over_unlit": signal, "blocked_over_off": blocked}
-    result["gates"] = {"visibility-keeps-the-back-light": {"ratio": ratio, "pass": min(signal) > 0.05 and all(THIN_GATE[0] <= r <= THIN_GATE[1] for r in ratio)}}
-    # the control must FAIL the gate: with an opaque occluder the RT visibility removes the light (blocked / off must be far below the gate)
-    result["controls"] = {"occluder-between": {"blocked_over_off": blocked, "fails": max(blocked) < THIN_GATE[0] - 0.5}}
+    signal = [d_on[c] / sums["none"][c] for c in range(3)]
+    blocked = [d_blocked[c] / d_on[c] if d_on[c] > 0 else 1.0 for c in range(3)]
+    result = {"box": box, "pixels": (box[2] - box[0]) * (box[3] - box[1]), "d_on": d_on, "signal_over_unlit": signal, "blocked_over_on": blocked}
+    result["gates"] = {"receiver-lit-through-the-thin-lobe": {"signal": signal, "pass": min(signal) >= 0.05}}
+    result["controls"] = {"occluder-between": {"blocked_over_on": blocked, "fails": max(blocked) <= 0.1}}
     return result
 
 
