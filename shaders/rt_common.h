@@ -35,6 +35,7 @@ struct RtPayload {
     float lnTransmittance[3];
     float openSigma[3];                 // net open sigma_t of the media entered and not left (ticket 14 closure: a segment that ends inside a volume)
     uint listCount;
+    uint payloadPad;                    // padding: sizeof(RtPayload) must stay a multiple of 8 (132 bytes makes metal-tt/applegpu-nt fail with an internal compiler error on reflection_rt_lobe + rt_alpha_generic, constant 22 = 1)
     uint ifInvocations, ifDistinct, listOverflows;
     uint2 listed[kRtTransmitList];      // (slot, primitive)
     float direction[3];                 // the world ray direction (set by rtTrace for the intersection function)
