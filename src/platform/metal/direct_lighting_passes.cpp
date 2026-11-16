@@ -1,4 +1,5 @@
 #include "platform/metal/direct_lighting_passes.h"
+#include "core/log.h"
 #include "platform/metal/lighting_dispatch.h"
 #include "platform/metal/scene_renderer.h"
 #include "platform/metal/mesh_renderer.h"
@@ -100,7 +101,8 @@ struct DirectLightingPasses::Impl {
     void reserveGuide(u32 mask,u64 pixels){
         featureUnion=mask;
         if(!mask){
-            if(guideCapacity){for(auto& f:slots){c.memory().release(f.lobeGuide,MemoryCategory::RayTracing);c.memory().release(f.lobeReadback,MemoryCategory::RayTracing);f.lobeGuide=f.lobeReadback=nullptr;}guideCapacity=0;++graphVersion;}
+            if(guideCapacity){for(auto& f:slots){c.memory().release(f.lobeGuide,MemoryCategory::RayTracing);c.memory().release(f.lobeReadback,MemoryCategory::RayTracing);f.lobeGuide=f.lobeReadback=nullptr;}guideCapacity=0;++graphVersion;
+                LOG_INFO("Lobe guide released (empty feature union)");}
             return;
         }
         if(pixels>guideCapacity){
@@ -108,6 +110,9 @@ struct DirectLightingPasses::Impl {
                 f.lobeGuide=lighting::buffer(c,pixels*sizeof(GPULobeGuide),"Lobe guide");
                 f.lobeReadback=options.debugLobeGuide?lighting::buffer(c,pixels*(sizeof(GPUDISurface)+sizeof(GPULobeGuide)),"Lobe guide readback",true):nullptr;}
             guideCapacity=pixels;++graphVersion;
+            // F15 ticket 06 (criterion 3): the guide exists only for a non-empty feature union; quote its memory per category.
+            LOG_INFO("Lobe guide: %zu frame slots x %.1f MiB (%llu pixels x %zu B), category RayTracing, feature union 0x%x",slots.size(),
+                     double(pixels*sizeof(GPULobeGuide))/(1024.0*1024.0),static_cast<unsigned long long>(pixels),sizeof(GPULobeGuide),mask);
         }
     }
     void prepare(const GpuScene& g,const SceneStore& s,std::span<const GPULight> l,const ShadowPasses::Frame& f){

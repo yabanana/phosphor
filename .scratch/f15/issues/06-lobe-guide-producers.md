@@ -85,3 +85,13 @@ Open item: "no coplanar-overlap fixture proving the raster_order_group need of `
 - Criteria were fixed before the delay captures (docstring of the tool): with the group every checked frame passes and at least 32 000 pixels are extended; the control must fail on at least one frame.
 - Tests: tests/test_material_validation.cpp "lobe-guide-coplanar is one mesh of 16 coplanar layers ..." (identical positions, distinct normals, union = coat only), tests/test_launch_options.cpp (the two options need `--debug-lobe-guide`).
 - The visibility resolve still does not write the guide (deviation of ticket 06): the pre-resolve guide kernel covers every meshlet pixel; unchanged.
+
+### 2026-11-16 — round 3: criterion 3, guide memory per category (orchestrator)
+
+`DirectLighting::reserveGuide` logs the allocation (`Lobe guide: N frame slots x S MiB (P pixels x 80 B), category RayTracing, feature union M`) and the
+release for an empty union.  Measured (terrain, 1920x1080, `--lighting restir`, build/int14/guide-mem): the single material (empty feature union) allocates
+no guide (no log line); `layers-1` (union 0x100) allocates 3 frame slots x 158.2 MiB = 474.6 MiB in the RayTracing category.  `--lighting legacy` has no DI
+passes and allocates none.  The report JSON has no per-category memory section and the startup "GPU memory" line is printed before the first frame graph
+(identical 598.8 MiB in both arms), hence the log line.  Candidate, not activated (no measured need): one frame-lifetime guide instead of one per frame
+slot would save two thirds.  The visibility resolve still does not write the guide (the pre-resolve kernel covers every meshlet pixel), recorded here and
+in the handoff.
