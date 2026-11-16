@@ -92,14 +92,14 @@ def main(argv=None):
 
     if out.exists() and any(out.iterdir()):
         parser.error(f"{out} is not empty")
+    lock = f15_check.gpu_lock(args.gpu_lock)
     try:
-        lock = f15_check.gpu_lock(args.gpu_lock)
-        lock.__enter__()
+        lock.__enter__()  # entered once here (a second `with` on the same generator context manager raises)
     except f15_check.GpuBusy as error:
         print(f"GPU busy: {error}", file=sys.stderr)
         return 4
     print("load average at start:", ", ".join(f"{x:.2f}" for x in os.getloadavg()))
-    with lock:
+    try:
         for run in runs:
             busy = f15_check.running_gpu_processes()
             if busy:
@@ -114,6 +114,8 @@ def main(argv=None):
                 print(f"{name(run)}: exit {code}, fallback line missing or non-zero: not a valid measurement", file=sys.stderr)
                 return 6
             time.sleep(3)
+    finally:
+        lock.__exit__(None, None, None)
     print(summarize(out))
     return 0
 
