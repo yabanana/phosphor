@@ -2552,3 +2552,44 @@ transmission-glass-behind-glass, transmission-tinted-bodies, transmissive-shadow
 exit 0 on both binaries (gates hold, controls fail) and all 12 captured PFMs cmp-identical; (4) ctest 45/45 (1 skipped: terrain_materials_verify).  (f15_check captures were run with the archive-miss lines allowed in a throw-away local edit
 of run_checked.py, because the shared archive in my tree lagged the orchestrator's: the miss is `visibility_lit_resolve`, identical for both binaries; the evaluation step needs numpy and was not run.)
 Quiet A/B: `python3 -I tools/f15_costs.py run --binary build/tip/phosphor --only t1-transmission-chess-backlight --out build/f15-costs/tip` and the same with `build/fix128/phosphor` (each with `shaders/` beside it).
+
+**Quiet A/B (orchestrator, 2026-11-16 07:56-08:02, Mitsuba renders SIGSTOPped, quietgate passed, load1 at run start 1.3-4.0 for the tip and 1.5-1.8
+for the fix, 0 GPU allocations and 0 fallback draws in every run; `build/f15-costs-r2/trans-{tip,fix128}`), back-light rig, effect = B - mean(A0, A2),
+median of 3 replicas:** frame GPU p50 effect tip (144 B) +14.46 ms (B arm 51.92) against fix (128 B) +12.62 ms (B arm 49.92): **-1.84 ms**;
+`Local clustered RT shading` +11.36 -> +9.67, `F13 reflection samples` +3.18 -> +2.96.  The quiet number is half the -3.7 ms the loaded spike
+suggested.  The B arm stays about +2.2 ms above 41be99b (47.75 ms, 124-byte payload): that is the price of the closed-volume interior and the
+masked casters (049f570) plus the bounded Fresnel weights (aa3b19b) beyond the payload bytes, correctness work kept, not attributed further.
+**ADOPTED** (f7d1f22, evidence dabaeaf; integrated tip verified as int12: ctest 45/45, F13 exactness 5/5, visual 0 px, runtime JIT failures 0,
+transport fixtures 4/4).
+
+## 2026-11-16 — F15.4 (ticket 23) / F15.2 option (a): what the layer-stack resolve pays since round 1 (exact-maths module; in-stack texture-transform specialisation ADOPTED)
+
+**Question.** On the CC0 terrain at 1080p (union pipeline, `Material resolve` mean) the layer arms grew from the base 3ef8f41 (layers-1 0.129, layers-4 0.203,
+full 0.199 ms) to 41be99b (0.286 / 0.383 / 0.544 ms; perf-log entry "F15 closure round 2").  Candidates: (1) the exact-maths copy of the resolve kernels that
+scenes with material features select (owner option (a) of F15.2, fa6786d: safe math mode plus scoped `contract(off)` / precise), (2) the blending of feature
+blocks and emission (e074074), (3) per-slot texture transforms inside stacks (7fcbb3d), (4) multiple-scattering compensation (3812871).
+**Method.** Branch `f15c-layercost` (Sonnet writer): a debug-only `--debug-material-module exact|fast` (ce3997d; `fast` makes `exactModuleKernel` the identity, so
+the same binary runs the fast-maths kernels) and a compute-pipeline limits log (`PHOSPHOR_LOG_COMPUTE_LIMITS`: `maxTotalThreadsPerThreadgroup` is 1024 for every
+pipeline including the layered exact variants, no register-pressure signal).  Static reading found candidate (3) live in every stack: the transform helpers
+ran at each mask, height and layer slot even without constant 26.  Quiet rotation (orchestrator, renders paused, quietgate passed; `build/f15-costs-r2/module-rot`):
+four arms (pre-fix tip and fix binary, each `exact` and `fast`), terrain CC0 1920x1080, union, `--material-binning off --pipeline-sync --no-vsync
+--gpu-timing-serial`, 64 warm-up + 320 frames, 3 replicas with the order reversed every replica; 0 GPU allocations, 0 fallback draws, 0 compiler calls in
+every measured window.  `Material resolve` mean ms, median (3 runs):
+
+| arm | tip exact | tip fast | fix exact | fix fast |
+|---|---|---|---|---|
+| single material (no material feature: base module) | 0.095 | 0.095 | 0.095 | 0.096 |
+| layers-1 | 0.283 | 0.175 | 0.282 | 0.158 |
+| layers-4 | 0.380 | 0.269 | 0.353 | 0.239 |
+| full (generated mask, height contrast, coat finish) | 0.542 | 0.299 | 0.494 | 0.277 |
+
+**Findings.** (a) The exact-maths module is the dominant cost: on the fix binary +0.124 ms (layers-1, +78 %), +0.114 (layers-4, +48 %), +0.217 (full, +78 %);
+scenes without material features keep the fast base module and pay nothing (single 0.095 both).  (b) The in-stack transform code: compiled out by c8e240f
+(b6e3a55) when no material of the scene carries a transform (the scene store counts `MATERIAL_FLAG_LAYER_TRANSFORM` too): exact layers-4 0.380 -> 0.353 (-7 %),
+full 0.542 -> 0.494 (-9 %), layers-1 unchanged; images: 39 of 39 sampled `layers-*` keys of `f15_check.py` and the five F13 exactness PFMs `cmp`-identical to the
+pre-change binary.  (c) Left after both: fast fix against the base, layers-1 +0.029 ms, full +0.078 ms (feature-block / emission blending, coverage alpha, MS
+compensation), not attributed further inside the timebox.
+**Decision.** c8e240f ADOPTED (b6e3a55).  The exact module stays: it is what makes class bins and the all-lobes pipeline 0 px / 0 ULP apart (owner option (a));
+its price, 0.11-0.22 ms of resolve at 1080p on the terrain (+48..78 % of the resolve), is reported to the owner in the handoff as the trade-off of that option.
+`--debug-material-module fast` stays debug-only for future A/Bs (its pipelines are not archived: always measure it with `--pipeline-sync`).
+
