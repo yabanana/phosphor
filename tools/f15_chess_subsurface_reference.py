@@ -146,6 +146,23 @@ def class_medium(color, mfp, roughness, g):
             "albedo_reached": [i[1] for i in inverted], "saturated": [bool(i[2]) for i in inverted], "g": float(g)}
 
 
+def repair_nonfinite(image):
+    """(image, count) -- the RULE, independent of the engine image: a sample is non-finite when it is NaN or +-inf.  Mitsuba's volpath returns such a sample
+    rarely (9 in about 10^7 for the white pieces at 512 spp); a cumulative-sum box pool would spread one over the rest of the image.  Each one takes the mean of the
+    FINITE samples of its own 5x5 neighbourhood in the same half and channel, read from the UNREPAIRED image (the result does not depend on the scan order; 0.0 when
+    the whole neighbourhood is non-finite).  The count is stored in reference.json (`nonfinite_samples_repaired`)."""
+    bad = ~np.isfinite(image)
+    count = int(bad.sum())
+    if not count:
+        return image, 0
+    fixed = image.copy()
+    for y, x, c in zip(*np.nonzero(bad)):
+        window = image[max(y - 2, 0):y + 3, max(x - 2, 0):x + 3, c]
+        finite = window[np.isfinite(window)]
+        fixed[y, x, c] = float(finite.mean()) if finite.size else 0.0
+    return fixed, count
+
+
 def render_class(root, data, instance_index, crop, medium, spp, threads, cache):
     """(a, b): the two halves, float32 (crop h, crop w, 3) of the three grey channel renders of one class (cached by content)."""
     sun = sub.sun_emitters(data)
@@ -192,6 +209,7 @@ def command_render(args):
     grid = np.full((height, width), -1, dtype=np.int32)
     roi = np.zeros((height, width), dtype=bool)
     pieces = {}
+    repaired = 0
     for k, block in blocks.items():
         material = data["materials"][block["material"]]
         alone, uv = cast_piece(root, data, k, args.threads)
@@ -221,6 +239,9 @@ def command_render(args):
                 continue
             medium = class_medium(colour[members].mean(axis=0), mfp[members].mean(axis=0), float(roughness[members].mean()), block["anisotropy"])
             a, b = render_class(root, data, k, crop, medium, args.spp, args.threads, cache)
+            a, repaired_a = repair_nonfinite(a)
+            b, repaired_b = repair_nonfinite(b)
+            repaired += repaired_a + repaired_b
             x0, y0, x1, y1 = crop
             idx = np.flatnonzero(members)
             py, px = ys[idx] - y0, xs[idx] - x0
@@ -253,7 +274,7 @@ def command_render(args):
     np.savez_compressed(out / "masks.npz", sphere=grid, roi=roi)
     report = {"schema": 1, "tool": "tools/f15_chess_subsurface_reference.py", "tool_sha256": sha256_file(__file__), "version": VERSION,
               "model": "textured volumetric subsurface: locally homogeneous Mitsuba 3.9.1 volpath classes (k-means)", "classes_per_piece": args.classes,
-              "spp_per_grey_render": args.spp, "pool_window": args.pool, "boundary_ior": sub.BOUNDARY_IOR, "knot_roughness": list(KNOT_ROUGHNESS),
+              "nonfinite_samples_repaired": repaired, "spp_per_grey_render": args.spp, "pool_window": args.pool, "boundary_ior": sub.BOUNDARY_IOR, "knot_roughness": list(KNOT_ROUGHNESS),
               "snapshot_sha256": sub.scene_digest(root), "pieces": pieces, "width": width, "height": height,
               "seconds": round(time.time() - started, 1)}
     (out / "reference.json").write_text(json.dumps(report, indent=2) + "\n")
