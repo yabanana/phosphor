@@ -13,15 +13,10 @@ inline void rtAccumulateTransmittance(uint primitive, uint slot, float2 bary, fl
                                       const device GPUMaterial& m, const device GPUInstance& instance, const device GPURtMesh& mesh,
                                       const device RtTextureHandle* textures, const device GPUVertex* vertices, const device uint* indices,
                                       const device GPUMaterialExtRecord* extensions, uint transmittanceFlags) {
-    ++payload.ifInvocations;
     // The duplicate filter: Metal may invoke the function more than once for the same primitive (measured by the F15 ticket 14 spike).
     bool seen = false;
     for (uint i = 0; i < payload.listCount; ++i) seen |= all(payload.listed[i] == uint2(slot, primitive));
-    if (!seen) {
-        ++payload.ifDistinct;
-        if (payload.listCount < kRtTransmitList) payload.listed[payload.listCount++] = uint2(slot, primitive);
-        else ++payload.listOverflows;
-    }
+    if (!seen && payload.listCount < kRtTransmitList) payload.listed[payload.listCount++] = uint2(slot, primitive);
     if (seen && (transmittanceFlags & RT_TRANSMITTANCE_NO_DEDUP) == 0u) return;
     const uint base = mesh.indexOffset + 3u * primitive;
     const device GPUVertex& v0 = vertices[mesh.vertexOffset + indices[base]];

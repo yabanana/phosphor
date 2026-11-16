@@ -511,11 +511,6 @@ static float3 shadowSolarSample(float3 light,float angularRadius,float u,float v
     const float z=1-u*(1-cos(angularRadius)),r=sqrt(max(0.0f,1-z*z)),a=6.283185307f*v;
     return normalize(light*z+(right*cos(a)+up*sin(a))*r);
 }
-static void shadowSunCounters(device atomic_uint* counters,thread const RtPayload& payload) {
-    shadowCount(counters,8,payload.ifInvocations?1u:0u); shadowCount(counters,9,payload.ifInvocations);
-    shadowCount(counters,10,payload.ifDistinct); shadowCount(counters,11,payload.listOverflows);
-}
-static void shadowSunCounters(device atomic_uint*,thread const RtPayloadLite&) {}
 // F15 ticket 24: one body, two kernels.  `shadow_sun_rt` (RtPayload, rt_alpha_generic) traces the transmittance of the coloured casters;
 // `shadow_sun_rt_lite` (RtPayloadLite, rt_alpha_lite) is for a scene without transmissive materials and traces the same any-hit ray with
 // the 16-byte payload (the 124-byte one alone costs 0.06 ms on Sponza D2, docs/opt-log.md): its transmittance is 1, and the spike counters stay 0.
@@ -548,7 +543,6 @@ static void shadowSunRt(instance_acceleration_structure as,
         visible=hit.hit?float3(0):rtShadowTransmittance(payload);
         shadowCount(counters,1,1); shadowCount(counters,2,hit.hit);
         if(hit.t==-2.0f) shadowCount(counters,7,1);
-        shadowSunCounters(counters,payload);
     }
     mask.write(float4(visible,1),pixel);
 }

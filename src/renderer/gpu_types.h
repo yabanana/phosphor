@@ -887,11 +887,8 @@ PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowParams) == 872, "GPUShadowParams layout")
 struct GPUShadowCounters {
     u32 guides, rays, hits, historyReused;
     u32 historyRejected, casters, contactHits, errors;
-    // F15.1 (ticket 14): transmittance rays that crossed at least one transmissive triangle, intersection-function invocations on
-    // transmissive triangles, of which distinct (slot, primitive) pairs, and rays whose hit list overflowed.
-    u32 transmittedRays, ifInvocations, ifDistinct, listOverflows;
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCounters) == 48, "GPUShadowCounters layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCounters) == 32, "GPUShadowCounters layout");
 
 // F10.5 cache region controls. Masks are 64 bits split into scalar u32 words;
 // bit y*8+x identifies a tile in the 8x8 map. Revisions are FULL 64-bit values,

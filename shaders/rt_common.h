@@ -25,7 +25,7 @@ static_assert(sizeof(GPURtRay) == 48 && sizeof(GPURtHit) == 32, "RT ray/hit ABI"
 // ray, then reduced by SIMD-group; alpha tests do not atomically contend.
 // F15.1 (ticket 14): RT_PROBE_SHADOW_TRANSMITTED rays also carry the log-space RGB transmittance accumulated by the intersection function
 // (zero = transmittance 1), the bounded list of the (slot, primitive) pairs already accounted (the duplicate filter, see rt_intersections.metal)
-// and the spike counters.  Plain `RtPayload payload{}` stays valid for every other ray type.
+//.  Plain `RtPayload payload{}` stays valid for every other ray type.
 constant constexpr uint kRtTransmitList = 8u;
 struct RtPayload {
     float coneWidth;
@@ -35,16 +35,16 @@ struct RtPayload {
     float lnTransmittance[3];
     float openSigma[3];                 // net open sigma_t of the media entered and not left (ticket 14 closure: a segment that ends inside a volume)
     uint listCount;
-    uint payloadPad;                    // padding: keeps the validated 144-byte layout (see the static_assert below: the 136-byte layout makes the Apple GPU compiler fail)
-    uint ifInvocations, ifDistinct, listOverflows;
     uint2 listed[kRtTransmitList];      // (slot, primitive)
     float direction[3];                 // the world ray direction (set by rtTrace for the intersection function)
 };
-// F15 ticket 24: the Apple GPU compiler (MetalToolchain 27.2.47) fails with an internal compiler error on reflection_rt_lobe with rt_alpha_generic
-// linked (constant 22 = 1) when this payload is laid out at 136 bytes (the layout after the dead noDedup word was removed); the 144-byte layout
-// with payloadPad compiles.  The trigger is not a simple alignment rule, so the validated layout is pinned: a change here must be re-validated by
-// the archive translation (metal-tt in the build) AND a runtime JIT of that pipeline (--no-pipeline-archive, a specular-ior scene with RT reflections).
-static_assert(sizeof(RtPayload) == 144, "RtPayload layout changed: re-validate metal-tt + runtime JIT of reflection_rt_lobe (Apple GPU compiler ICE), then update this pin");
+// F15 ticket 24 / closure: the Apple GPU compiler (MetalToolchain 27.2.47) fails with an internal compiler error on reflection_rt_lobe with
+// rt_alpha_generic linked (constant 22 = 1) at 132 and 136 bytes (the trigger is not a simple alignment rule); 144 and 128 bytes compile.  The payload
+// SIZE is a per-ray cost of every pipeline that links it (chess back-light, docs/opt-log.md 2026-11-16: 144 -> 128 bytes = -3.7 ms in
+// `Local clustered RT shading`), so the layout is the 128-byte one (the three spike counters and the pad word removed).  Validated: metal-tt archive
+// translation in the build AND the runtime JIT of reflection_rt_lobe (--no-pipeline-archive, specular-grid-sun, PIPELINES failures 0).  A change here
+// must be re-validated the same way, then this pin updated.
+static_assert(sizeof(RtPayload) == 128, "RtPayload layout changed: re-validate metal-tt + runtime JIT of reflection_rt_lobe (Apple GPU compiler ICE), then update this pin");
 
 // F15 ticket 24: the payload of a kernel that never needs the transmittance of a ray (no transmittance, no dedup list, no direction): the
 // pre-ticket-14 16 bytes.  The payload size alone slows every traversal of the pipeline (RTAO +0.43 ms on Sponza D2, docs/opt-log.md), so a
