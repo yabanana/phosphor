@@ -1174,7 +1174,7 @@ def _layer_block_keys():
                                        "terms": f"layer 1 alone WITHOUT the {b} block (the old behaviour: the block ignored)"}
         keys[f"layers-blk-{b}-e1"] = {
             "kind": "layer-equal", "always_green": True, **base, "scene": f"terrain/block={b}/weights=0,1,0,0", "pair": f"layers-blk-{b}-s1",
-            **({"pending": "ticket 23: the seven blocks together differ from the single material by 2 ULP (39,045 of 921,600 pixels, 0 in the 8-bit image): each block alone is exact"} if b == "all" else {}),
+            # ticket 23: `all` was "pending" (2 ULP, 39,045 px) until the exact resolve module; both arms now resolve exactly: asserted to pass (final battery 2026-11-16).
             "controls": [f"layers-blk-{b}-s1x", f"layers-blk-{b}-s0"], "needs": [f"layers-blk-{b}-s1x", f"layers-blk-{b}-s0"],
             "terms": f"the stack with the constant mask (0, 1) must render layer 1 with its {b} block exactly like the single material (0 pixels); the "
                      f"controls are the same layer without the block (blocks ignored) and the plain layer 0"}
