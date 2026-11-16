@@ -22,8 +22,9 @@ Thresholds, fixed here before any capture was compared (criterion independent of
      red; the emitters' right half emits) with the same `th` and `model_min` of f15_texture_transform_secondary.CASES;
   2. equivalence: max over the 12 numbers (floor left / right RGB and the left / right image halves RGB, display units) of |color0 - baked| <= 0.10 x
      max |control - baked|  (the engine matches the baked equivalent within a tenth of the effect size);
-     (emitter-fog: th 0.05, set after a first run showed that the fog scatter dilutes the floor contrast to 0.067 for the baked equivalent itself: the
-     sign gate follows the baked scene's magnitude, the equivalence gate of 0.10 was fixed beforehand and is unchanged);
+     (emitter-fog: NO sign gate, owner decision 2026-11-16: the pre-registered th 0.08 is infeasible by construction there, the fog scatter dilutes the
+     floor contrast to 0.067 for the baked equivalent itself; lowering it to 0.05 after that measurement was rejected as a post-hoc change, so the
+     equivalence gate below, fixed beforehand, is the fog case's gate of record; th 0.08 still drives its control check);
   3. control: the control capture must NOT pass the sign gate and must differ from `baked` by at least `th` (otherwise the fixture cannot tell
      COLOR_0 from its absence and the run exits 3).
 
@@ -59,7 +60,7 @@ CASES = {
               "reflections": "probes", "extra": ["--reflection-capture-probe"]},
     "emitter-restir": {"kind": "emitter", "sec": "emitter", "pitch": 40.0, "th": 0.08, "model_min": 0.3, "lighting": "restir", "shadows": ["--shadows", "rt"]},
     "emitter-clustered": {"kind": "emitter", "sec": "emitter", "pitch": 40.0, "th": 0.08, "model_min": 0.3, "lighting": "clustered", "shadows": ["--shadows", "rt"]},
-    "emitter-fog": {"kind": "emitter", "sec": "emitter", "pitch": 40.0, "th": 0.05, "model_min": 0.3, "lighting": "restir", "shadows": ["--shadows", "rt"],
+    "emitter-fog": {"kind": "emitter", "sec": "emitter", "pitch": 40.0, "th": 0.08, "sign_gate": False, "model_min": 0.3, "lighting": "restir", "shadows": ["--shadows", "rt"],
                     "emission": 400.0, "extra": ["--fog", "on", "--fog-density", "0.2", "--fog-far", "30", "--fog-local-samples", "16"]},
 }
 
@@ -207,13 +208,13 @@ def evaluate_numbers(case, got):
     a, b, c = flat(got["color0"]), flat(got["baked"]), flat(got["control"])
     err = max(abs(x - y) for x, y in zip(a, b))
     effect = max(abs(x - y) for x, y in zip(c, b))
-    gate_sign = cls["color0"] == expected and expected != 0
+    gate_sign = (cls["color0"] == expected and expected != 0) if cfg.get("sign_gate", True) else None  # None: not gated (emitter-fog, see the docstring)
     gate_equiv = err <= EQUIVALENCE * effect
     control_ok = cls["control"] != expected and effect >= cfg["th"]
     return {"case": case, "model_difference": round(model, 3), "model_class": expected, "measured_difference": {n: round(v, 4) for n, v in diff.items()},
             "measured_class": cls, "threshold": cfg["th"], "equivalence_error": round(err, 5), "control_effect": round(effect, 5),
             "equivalence_limit": round(EQUIVALENCE * effect, 5), "gate_sign": gate_sign, "gate_equivalence": gate_equiv,
-            "gate_ok": gate_sign and gate_equiv, "controls_discriminate": control_ok}
+            "gate_ok": (gate_sign is not False) and gate_equiv, "controls_discriminate": control_ok}
 
 
 def evaluate(case, root):

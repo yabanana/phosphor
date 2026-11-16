@@ -159,7 +159,7 @@ ARMS = {
 }
 ARMS["girestir"] = {"panel_half": 0.15, "wall": "diffuse", "intensity": 200.0, "warmup": 160, "args": ["--rt", "on", "--gi", "restir", "--reflections", "off"], "patch": 0}
 WALL_REGION = (-0.3, 0.3, -0.3, 0.3)  # gi: wall rectangle (x0, x1, dy0, dy1) around (0, 3) on W
-CENTRE_HALF = 0.054                   # mirror arms: half the world footprint of the 9 x 9 pixel patch at the mirror image (7.5 m): 4.5 x 2 tan(30 deg) / 720 x 7.5 m (a first run used 0.05: 7.44 % at tilt 0.55 for rtrefl)
+CENTRE_HALF = 0.05                    # mirror arms: the pre-registered patch half-size (owner decision 2026-11-16: the change to 0.054 m, the camera footprint of the 9 x 9 patch, made after a 7.44 % failure at tilt 0.55, was rejected as post hoc; a failing tilt stays an open failure)
 
 
 def tilt_quat(angle):
