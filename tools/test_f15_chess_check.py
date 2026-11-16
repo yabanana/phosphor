@@ -342,6 +342,19 @@ class SssBound(unittest.TestCase):
             (folder / "report.json").write_text(json.dumps({"subsurface": {"requested": "rt-walk", "effective": "rt-walk", "fallback_reason": ""}}))
             cc.require_walk(folder, "rw-w100")
 
+    def test_the_weight_zero_control_renders_the_base_model(self):
+        import json, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = pathlib.Path(tmp)
+            (folder / "report.json").write_text(json.dumps({"subsurface": {"requested": "rt-walk", "effective": "none",
+                                                                              "fallback_reason": "no volumetric subsurface in the scene"}}))
+            cc.require_base_control(folder, "rw-w000")
+            with self.assertRaises(cc.fc.CaptureFailed):
+                cc.require_walk(folder, "rw-w000")
+            (folder / "report.json").write_text(json.dumps({"subsurface": {"requested": "rt-walk", "effective": "diffusion", "fallback_reason": "--rt off"}}))
+            with self.assertRaises(cc.fc.CaptureFailed):
+                cc.require_base_control(folder, "rw-w000")
+
     def test_the_default_groups_do_not_run_the_rt_tier(self):
         self.assertNotIn("sssbound", ["backlight", "sidelight", "shadow"])
         self.assertTrue(any(s["group"] == "sssbound" for s in cc.CAPTURES.values()))

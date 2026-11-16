@@ -522,6 +522,16 @@ def require_walk(folder, label):
                                f"(requested {section.get('requested')!r}, fallback reason: {section.get('fallback_reason') or 'none reported'})")
 
 
+def require_base_control(folder, label):
+    """The weight-0 control renders the BASE model: the subsurface weight 0 removes the volumetric subsurface from the scene, so the report says
+    effective 'none' (or 'rt-walk' if the union still carries it); a screen-space diffusion fallback would make it a capture error."""
+    path = pathlib.Path(folder) / "report.json"
+    section = (json.loads(path.read_text()).get("subsurface") or {}) if path.is_file() else {}
+    if section.get("effective") not in ("none", "rt-walk"):
+        raise fc.CaptureFailed(f"{label}: subsurface.effective is {section.get('effective')!r}, the weight-0 control requires the base model ('none') "
+                               f"or the walk (fallback reason: {section.get('fallback_reason') or 'none reported'})")
+
+
 def evaluate_group_sssbound(np, out):
     """The textured volumetric subsurface bound of the RT tier: per view, the pieces the weight-0 control does NOT pass are gated at the side-lit
     bound (mean 0.10, p95 0.25, 5 % floor; ticket 17 / decision 11) on the pooled estimator (tools/f15_check.py pool_noisy_term with the lights-off
@@ -531,8 +541,9 @@ def evaluate_group_sssbound(np, out):
     from f12_reference import read_pfm
     entries = {}
     for view, prefix in SSS_VIEWS:
-        for suffix in ("w100", "off", "w000"):
+        for suffix in ("w100", "off"):
             require_walk(out / f"{prefix}-{suffix}", f"{prefix}-{suffix}")
+        require_base_control(out / f"{prefix}-w000", f"{prefix}-w000")
         folder = out / f"{prefix}-w100"
         reference_dir = folder / "reference"
         if not (reference_dir / "reference.json").is_file():
