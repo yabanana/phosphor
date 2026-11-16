@@ -472,7 +472,7 @@ inline bool DI_FN(diMerge)(thread GPUDIReservoir& r, GPUDIReservoir source, GPUD
         return accepted;
     }
     const DISample sample = diSampleTexturedLight(light, source.lightIndex, float2(source.u, source.v),
-                                                 diVec(destination.position), emitters, materials, textures, p.materialExtensions);
+                                                 diVec(destination.position), emitters, materials, textures, p.materialExtensions, p.vertexColors);
     source.target = DI_FN(diTarget)(destination, sample, p.targetFloor, lobe);
     const bool accepted = diStream(r, source, source.target * source.normalization * float(m), m, random);
     if (accepted) r.age = mergedAge; // A fresh selection must not rejuvenate old mass.

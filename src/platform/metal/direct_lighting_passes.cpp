@@ -179,7 +179,7 @@ struct DirectLightingPasses::Impl {
         if(options.debugLobeGuideDelay)params.flags|=DI_LOBE_GUIDE_DELAY;
         if(options.specularMs)params.flags|=DI_SPECULAR_MS;
         params.stbnWidth=stbn.config.width;params.stbnHeight=stbn.config.height;params.stbnFrames=stbn.config.frames;params.stbnDimensions=stbn.config.dimensions;params.stbnSeed=options.lightingSeed;
-        params.depthRelativeThreshold=0.02f;params.normalThreshold=0.95f;params.targetFloor=1e-6f;params.materialExtensions=scene.materialExtensionsAddress();params.slotCount=s.slotCapacity();params.pad1=options.directLighting==DirectLightingMode::BruteForce;
+        params.depthRelativeThreshold=0.02f;params.normalThreshold=0.95f;params.targetFloor=1e-6f;params.materialExtensions=scene.materialExtensionsAddress();params.vertexColors=scene.vertexColorsAddress();params.slotCount=s.slotCapacity();params.pad1=options.directLighting==DirectLightingMode::BruteForce;
         // F13.1: whenever a reflection path sees emissive geometry (RT rays or
         // their SSR fallback, SSR, a captured probe), DI keeps only the
         // roughness band of the emitter lobe; the reflection paths own the rest.

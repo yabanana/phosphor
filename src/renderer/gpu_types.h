@@ -1037,8 +1037,15 @@ struct GPUDIParams {
 #else
     u64 materialExtensions;
 #endif
+    // F15 closure round 3 (COLOR_0): GPU address of the per-vertex colour stream; the cut-out alpha of a sampled emitter multiplies its vertex colour's
+    // alpha (restir_common.h diSampleTexturedLight).  0 without COLOR_0.  A runtime test (this pointer), as in the reflection / GI parameters.
+#if defined(__METAL_VERSION__)
+    const device float4* vertexColors;
+#else
+    u64 vertexColors;
+#endif
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUDIParams) == 120, "GPUDIParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDIParams) == 128, "GPUDIParams layout");
 
 struct GPULightCluster {
     u32 count, overflow, pad[2]; // overflow selects full local-light iteration
@@ -1367,8 +1374,14 @@ struct GPUFogParams {
 #else
     u64 materialExtensions;
 #endif
+    // F15 closure round 3 (COLOR_0): the per-vertex colour stream of the emitter cut-out alpha (fogLocalSample); 0 without COLOR_0.
+#if defined(__METAL_VERSION__)
+    const device float4* vertexColors;
+#else
+    u64 vertexColors;
+#endif
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUFogParams) == 456, "GPUFogParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUFogParams) == 464, "GPUFogParams layout");
 struct GPUFogCell {
     float source[3], extinction; // source radiance per metre; scalar extinction m^-1
     float worldPosition[3], viewDepth;
