@@ -304,3 +304,41 @@ Added by the closure audit
 - Plan deliverables: docs/F15_HANDOFF.md, RENDERER.md and ROADMAP status lines are recorded as written on 2026-11-15 (box 5 above); the final per-ID update after the battery is PENDING and outside this reconciliation.
 
 Found in F15 outside F15 code: all items marked CLOSED above in their own entries (C22-D3, wall behind glass, back-face transport rays, GI-mode environment, DI cap cause, a-trous option B) stay closed; the negative-f14-lut AGX compiler crash stays OPEN (NOT REPRODUCED in the 2026-11-15 stress study (agx_link_stress, 0 crashes in every attempt), cause unexplained, no mitigation added); GI with temporal accumulation 0.926 +- 0.016 filtered / raw is ISOLATED (transient history lag), not a defect.
+
+### 2026-11-16 — final battery on the final tip (orchestrator, `build/final2`)
+
+Tree: final tip (round 3 integrated, aniso b6c9b3d + records); binary rebuilt once more after 740b6b7 (+2 corpus tile pipelines, archive
+only). Final sha256: phosphor `c2514d6fdbe7344ae50fa14528a7f89970f3d5a17aa6652705d556effc019787`, metallib
+`5adf457e26bae033e65062dc429fbc8b48856099a125038e682d509c01f4614e`, archive `49e5d00e2965cc9b97c525f9f3585d5c698934b7febfc160e3f19278aa49cc9e`
+(phosphor and metallib unchanged by the archive rebuild). Every step records whether the Mitsuba disocclusion correction was running
+(owner rule: correctness may share the machine, timing waits for quiet); timing ran in a separate window (perf-log round 3).
+
+| check | result |
+|---|---|
+| ctest | 46 / 46 (before and after the archive rebuild) |
+| syntax (macOS emulation of metal_syntax_check) | 48 / 49 files, the known `__APPLE__` block of metalfx_lifetime.cpp (expected) |
+| visual_check (8 benches, vs reference-f15-final, API + shader validation) | 0 px on every bench |
+| variant_check, variant_check mesh | pass |
+| archive_check | pass (before and after the archive rebuild) |
+| hitch_check (quiet window) | 15 switches, 0 hitches, 21 / 21 archive hits |
+| subsurface overflow | PASS, worst 1.6e-5 (limit 2e-3) |
+| F13 exactness (5 PFMs vs exact-final-ms) | 5 / 5 SAME |
+| JIT reflection_rt_lobe | 0 failures |
+| XPC retry fixture | N=2 recovers, N=4 fails as required |
+| forced Apple9 (6 scenarios, API + shader validation without RT) | all exit 0, 0 validation lines, effective apple9; layers-patch and subsurface-volumetric-sun differ by design (Apple9 selects the `reduced` lighting preset, report `lighting.preset`), the others 0 px |
+| transport fixtures volume / masked / thin-backlit / glass-weights / csm-thin | pass |
+| glass receiver, thin GI back, texture transforms (primary, secondary, layers) | pass |
+| COLOR_0 primary paths; secondary paths | pass; pass after a rerun with Pillow (the step's environment lacked it) |
+| GI / reflection shadow rays through glass (gi-glass, with controls) | pass |
+| spot falloff, DI paths | PASS after the tool fix 75166e0 (legacy / ReSTIR / clustered 2.17 / 2.16 / 2.16 % against 7 %) |
+| spot falloff, secondary arms | RED as declared: RT reflection tilt 0.55 7.44 %, probe 17.59 %, GI 139.22 %, ReSTIR GI 19.60 % |
+| unlit / punctual lights, unlit GI, residue, shadowed hit (off, ddgi), GI environment | pass |
+| RT walk moving-camera clip | pass |
+| anisotropic lobe-id runner | PASSED (history 40 / 40, flip control 0.0 / 1) |
+| chess validation, chess rigs (green), chess O7 | pass, pass, GREEN (0 GPU allocations) |
+| Khronos corpus (24 models) and validation | 24 / 24 render, validation pass; 0 archive misses after 740b6b7 (before: one visibility_tile miss each in ToyCar and GlamVelvetSofa, 0 fallback draws) |
+| chess king / queen subsurface bound | RED as declared (ticket 20), equal to the pre-check |
+| F15.2 permutation equivalence | 237 cases / 168 scenes 0 px / 0 ULP; controls leave the envelope in 151 of 216; every feature bit 0-8 discriminated; overflow 12 / 12 0 ULP; repeats 7 / 7 |
+| transmission temporal clip | the battery run had no converged control (exit 5, not judged); the control is rebuilt for the final binary (128 seeds) and judged separately |
+| f15_check (286 scenarios) | captures done on the final binary; the reference rendering held the GPU lock for hours (every transmission reference re-renders since f15_reference.py changed), so the run was stopped after the captures and is evaluated with `--evaluate` (CPU only) next to the GPU jobs |
+| F13/F14 corpus with the MS references | after the clip control |
