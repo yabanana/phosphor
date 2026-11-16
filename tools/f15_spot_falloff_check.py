@@ -344,6 +344,95 @@ def arms_verify(out, arms):
     return ok, lines
 
 
+# --- GI hit shading, kernel-agnostic: the same wall response for an EMISSIVE panel whose texture encodes the analytic lit pattern ----------------
+# The DDGI arm above weights the panel with the probe grid's own kernel, which the form-factor model does not know.  Here the kernel cancels: the spot-lit
+# panel (A, GI only: the spot never lights the wall) and an emissive panel of the same size whose emission texture is the ANALYTIC lit radiance of the
+# panel at that tilt (B, pattern = smoothstep; control B' = linear falloff) go through the same GI machinery, and the GI part of the wall response
+# (B: gi on - gi off, which removes the direct emitter lighting) must follow the same ratio to tilt 0.  Threshold fixed beforehand: B / A ratio within
+# TOL_ARM of 1 at every tilt; the control B' must miss it by more than TOL_ARM at some tilt.  8-bit sRGB texture, 48 x 48.
+
+ARMS["giemit"] = dict(ARMS["gi"])
+ARMS["giemit-off"] = dict(ARMS["gi"], args=["--rt", "on", "--gi", "off", "--reflections", "off"])
+EMIT_N = 48
+
+
+def srgb_encode(v):
+    v = max(0.0, min(1.0, v))
+    return 12.92 * v if v <= 0.0031308 else 1.055 * v ** (1 / 2.4) - 0.055
+
+
+def emit_pattern_scene(tilt, pattern):
+    cfg = ARMS["gi"]
+    s_ = cfg["panel_half"]
+    falloff = smoothstep if pattern == "s" else MODELS["linear"]
+    peak = base.BASE / math.pi * cfg["intensity"] * lit_value(0.0, 0.0, LIGHT[1], smoothstep)
+
+    def pixel(x, y):
+        u, v = (x + .5) / EMIT_N, (y + .5) / EMIT_N
+        wx, wy = s_ - u * 2 * s_, LIGHT[1] + s_ - v * 2 * s_
+        radiance = base.BASE / math.pi * cfg["intensity"] * lit_value(tilt, wx, wy, falloff)
+        c = int(round(255 * srgb_encode(radiance / peak)))
+        return (c, c, c)
+
+    png = vcs.base.png_bytes(EMIT_N, EMIT_N, pixel)
+    panel = {"name": "panel", "pbrMetallicRoughness": {"baseColorFactor": [base.BASE, base.BASE, base.BASE, 1], "metallicFactor": 0.0, "roughnessFactor": 1.0},
+             "emissiveFactor": [1, 1, 1], "emissiveTexture": {"index": 0}, "extensions": {"KHR_materials_emissive_strength": {"emissiveStrength": peak}}}
+    wall = {"name": "wall", "pbrMetallicRoughness": {"baseColorFactor": [0.9, 0.9, 0.9, 1], "metallicFactor": 0.0, "roughnessFactor": 1.0}}
+    quads = [vcs.quad(wall, (-2.0, 5.0, WALL_Z), (4.0, 0, 0), (0, -4.0, 0)), vcs.quad(panel, (s_, LIGHT[1] + s_, PANEL_Z), (-2 * s_, 0, 0), (0, -2 * s_, 0))]
+    extra = {"textures": [{"source": 0, "sampler": 0}], "images": [{"uri": vcs.base.data_uri(png)}],
+             "samplers": [{"magFilter": 9729, "minFilter": 9729, "wrapS": 33071, "wrapT": 33071}]}
+    return quads, [], extra
+
+
+def giemit_run(out, binary, parts):
+    for part in parts:  # "on-s", "off-s", "on-l", "off-l", "base"
+        if part == "base":
+            jobs = [("giemit", "base", 0.0, "s", True), ("giemit-off", "base", 0.0, "s", True)]
+        else:
+            mode, pattern = part.split("-")
+            arm = "giemit" if mode == "on" else "giemit-off"
+            jobs = [(arm, f"{pattern}-{tilt_name(t)}", t, pattern, False) for t in TILTS]
+        for arm, name, tilt, pattern, dark in jobs:
+            quads, nodes, extra = emit_pattern_scene(tilt, pattern)
+            if dark:  # the baseline: the same panel with zero emission
+                quads[1][0]["extensions"]["KHR_materials_emissive_strength"]["emissiveStrength"] = 1.0
+                quads[1][0]["emissiveFactor"] = [0, 0, 0]
+            folder = out / arm
+            folder.mkdir(parents=True, exist_ok=True)
+            vcs.write_gltf(folder / f"{name}.gltf", quads, nodes, extra)
+            code, bad = arm_capture(binary, folder, arm, name, folder / f"{name}.gltf")
+            print(f"{arm}-{name}: exit {code}{' (log shows a failure)' if bad else ''}", flush=True)
+            if code != 0 or bad:
+                return 1
+    return 0
+
+
+def giemit_verify(out, spot_out):
+    spot = (out / spot_out).resolve()
+
+    def img(path):
+        return base.read_pfm(path)
+    off_a = img(spot / "gi" / "off.pfm")
+    w, h = off_a[0], off_a[1]
+    pixels = wall_pixels((w, h))
+
+    def mean_delta(a, b):
+        return sum(arm_delta(a, b, px, py, 0) for px, py in pixels) / len(pixels)
+    a = {t: mean_delta(img(spot / "gi" / f"{tilt_name(t)}.pfm"), off_a) for t in TILTS}
+    zero = mean_delta(img(out / "giemit" / "base.pfm"), img(out / "giemit-off" / "base.pfm"))
+    lines, ratios = [], {}
+    for pattern in ("s", "l"):
+        b = {t: mean_delta(img(out / "giemit" / f"{pattern}-{tilt_name(t)}.pfm"), img(out / "giemit-off" / f"{pattern}-{tilt_name(t)}.pfm")) - zero for t in TILTS}
+        ratios[pattern] = {t: (b[t] / b[0.0]) / (a[t] / a[0.0]) for t in TILTS[1:]}
+        for t in TILTS[1:]:
+            lines.append(f"giemit {pattern} tilt {t}: A ratio {a[t] / a[0.0]:.4f}, B ratio {b[t] / b[0.0]:.4f}, B / A {ratios[pattern][t]:.4f}")
+    worst_s = max(abs(r - 1) for r in ratios["s"].values())
+    worst_l = max(abs(r - 1) for r in ratios["l"].values())
+    ok = worst_s <= TOL_ARM and worst_l > TOL_ARM
+    lines.append(f"giemit: smoothstep pattern worst |B/A - 1| {worst_s*100:.2f} % (<= {TOL_ARM*100:.0f} %), linear-pattern control {worst_l*100:.2f} % (must be > {TOL_ARM*100:.0f} %) -> {'PASS' if ok else 'FAIL'}")
+    return ok, lines
+
+
 def selftest():
     for t in (0.0, 0.5):  # the tilt quaternion points the light at +Z tilted up by the angle
         qx, qy, qz, qw = tilt_quat(t)
@@ -369,6 +458,21 @@ def selftest():
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ("giemit-run", "giemit-verify"):
+        parser = argparse.ArgumentParser()
+        parser.add_argument("mode")
+        parser.add_argument("out", type=pathlib.Path)
+        parser.add_argument("binary", type=pathlib.Path, nargs="?", default=REPO / "build/release/phosphor")
+        parser.add_argument("--parts", default="base,on-s,off-s,on-l,off-l")
+        parser.add_argument("--spot-out", default="../spot-arms", help="the directory of the DDGI gi arm captures (relative to OUT)")
+        args = parser.parse_args()
+        if args.mode == "giemit-run":
+            code = giemit_run(args.out, args.binary, args.parts.split(","))
+            if code:
+                return code
+        ok, lines = giemit_verify(args.out, args.spot_out)
+        print("\n".join(lines))
+        return 0 if ok else 1
     if len(sys.argv) > 1 and sys.argv[1] in ("arms-run", "arms-verify", "selftest"):
         parser = argparse.ArgumentParser()
         parser.add_argument("mode", choices=["arms-run", "arms-verify", "selftest"])
