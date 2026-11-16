@@ -204,3 +204,20 @@ to separate the reference's class approximation from an engine error.  The final
 
 
 2026-11-16 — status reconciliation (closure): Status said the chess sssbound gate was 'not yet evaluated'; the round-2 section evaluated it RED and the owner declared it OPEN (option A). The 'NOT BUILDABLE' wording of the criterion is history (the gate is built; the 2026-11-14 reasons concern the texture-free homogeneous reference of the default tier). The criterion stays unticked; final-tip numbers wait for the final battery (ticket 24).
+
+### 2026-11-16 — final tip re-capture of the king/queen bound (orchestrator, final battery `build/final2`, owner decision A)
+
+Binary sha256 c2514d6f… (phosphor), 5adf457e… (metallib); snapshots 641068ed… (white) and 5304ceeb… (black) MATCH the references; the
+same Mitsuba references (6 classes, 512 spp) and the same gate (per-piece relative luminance error, 5 % floor, mean <= 0.10, p95 <= 0.25).
+Result: RED as in the pre-check, numbers equal to it to three decimals; controls (subsurface-off weight 0, walk lights off) fail as required.
+
+| view / piece | pooled mean / p95 (MS on) | piece luminance vs reference | MS off | reference noise |
+|---|---|---|---|---|
+| white King (1) | 0.197 / 0.636 | -6.7 % | 0.197 / 0.636 | 0.128 / 0.482 |
+| white Queen (3) | 0.543 / 0.921 | +6.3 % | 0.541 / 0.919 | 0.137 / 0.525 |
+| black King (0) | 0.756 / 2.409 | +6.3 % | 0.743 / 2.368 | 0.101 / 0.337 |
+| black Queen (2) | 1.431 / 3.072 | +30.1 % | 1.423 / 3.047 | 0.127 / 0.473 |
+
+Unpooled worst (MS on): white 0.606 / 1.180, black 1.467 / 3.582 (pre-check: 0.606 / 1.180, 1.467 / 3.582).  The MS-off arm's pipelines
+are not archived (4-5 misses per capture, captured with final pipelines), the MS-on arm has 0 misses.  Still OPEN by owner decision A
+(2026-11-16); follow-up D (a homogeneous medium per piece, identical in engine and reference) not started.
