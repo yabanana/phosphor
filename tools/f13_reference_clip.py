@@ -23,7 +23,7 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools"))
-from f12_reference import snapshot, write_pfm  # noqa: E402
+from f12_reference import read_pfm, snapshot, write_pfm  # noqa: E402
 import f13_reference as reference  # noqa: E402
 import battery_pause  # noqa: E402
 
@@ -233,6 +233,257 @@ def command_render(args):
     return 0 if converged else 1
 
 
+# ---------------------------------------------------------------------------------------------------------------------------
+# Correlated difference estimator: new_clip = old_converged + (render_new - render_old), same seeds and sample streams.
+# ---------------------------------------------------------------------------------------------------------------------------
+
+def seed_stream(seed, done, shift=0):
+    """Mitsuba stream seed of the pass starting at sample `done` (the same formula as f13_reference.converge)."""
+    return ((seed + shift) * 1000003 + done) & 0x7FFFFFFF
+
+
+class Accumulator:
+    """Running per-seed sums over the converge() streams; extend() continues exactly where the last call stopped."""
+
+    def __init__(self, context, spp_per_pass, shift=0):
+        self.context, self.spp_per_pass, self.shift, self.done = context, spp_per_pass, shift, 0
+        self.sums = {seed: context.np.zeros((context.height, context.width, 3)) for seed in reference.SEEDS}
+
+    def extend(self, spp):
+        while self.done < spp:
+            step = min(self.spp_per_pass, spp - self.done)
+            for seed in reference.SEEDS:
+                self.sums[seed] += self.context.render_pass(seed_stream(seed, self.done, self.shift), step)
+            self.done += step
+
+    def means(self):
+        return [self.sums[seed] / self.done for seed in reference.SEEDS]
+
+
+def accumulate(context, spp, spp_per_pass, shift=0):
+    """Per-seed mean images over `spp` samples, with the converge() streams (shift != 0 decorrelates them on purpose)."""
+    accumulator = Accumulator(context, spp_per_pass, shift)
+    accumulator.extend(spp)
+    return accumulator.means()
+
+
+def combine(np, old, minus, plus):
+    """new = old + mean over seeds of (plus_seed - minus_seed); also returns the per-seed differences."""
+    differences = [p - m for p, m in zip(plus, minus)]
+    return old + np.mean(differences, axis=0), differences
+
+
+def difference_statistics(np, old, differences, area):
+    """Effect size and the noise of the seed-averaged difference inside `area` (a pair of slices)."""
+    mean_diff = np.mean(differences, axis=0)[area]
+    effect = float(np.sqrt(np.mean(mean_diff ** 2)))
+    # The two seeds are independent estimates of the same difference: half their difference is the noise of their mean.
+    noise = float(np.sqrt(np.mean((differences[0][area] - differences[1][area]) ** 2))) / 2.0
+    support = float(np.sqrt(np.mean(old[area] ** 2)))
+    return {"support": support, "mean_old": float(np.mean(old[area])), "mean_difference": float(np.mean(mean_diff)),
+            "relative_mean_effect": float(np.mean(mean_diff)) / max(float(np.mean(old[area])), 1e-12),
+            "effect_rms": effect, "difference_noise_rms": noise,
+            "effect_rms_over_support": effect / max(support, 1e-12), "noise_over_support": noise / max(support, 1e-12),
+            "noise_over_effect": noise / max(effect, 1e-12)}
+
+
+def read_pfm_array(path):
+    """Linear PFM as float64 (height, width, 3), in the row order write_pfm takes."""
+    return read_pfm(path).astype("float64")
+
+
+def correction_pair(root, data, args, regions, window_margin, use_window):
+    """[(ms_lobe, context)] for the old model (ms off, no chain) and the new one (ms on, mirror chain)."""
+    contexts = []
+    for ms, bounces in ((False, 0), (True, args.mirror_bounces)):
+        reference.Context.ms_lobe = ms  # read when the tables are built and in lobes(): set again before every render
+        context = reference.Context(root, data, args.threads, args.secondary_specular,
+                                    regularization_scale=args.regularization_scale, mirror_bounces=bounces)
+        if use_window:
+            context.window = window(regions, context.width, context.height, window_margin)
+        contexts.append((ms, context))
+    return contexts
+
+
+def render_difference(contexts, args, shift=0):
+    """Render the old and the new model with the same seed streams (shift decorrelates the new one: negative control)."""
+    results = []
+    for ms, context in contexts:
+        reference.Context.ms_lobe = ms
+        results.append(accumulate(context, args.spp[-1] if isinstance(args.spp, list) else args.spp, args.spp_per_pass,
+                                  shift if ms else 0))
+    return results
+
+
+def adaptive_difference(contexts, args, old_image, slices, sigma):
+    """Extend both renders through the spp checkpoints until the difference noise of every region is small against the old
+    reference's own noise (`sigma[region]` = rms noise of its mean of two seeds); returns (off, on, spp, noise per region)."""
+    np = contexts[0][1].np
+    accumulators = [(ms, Accumulator(context, args.spp_per_pass)) for ms, context in contexts]
+    for target in args.spp:
+        for ms, accumulator in accumulators:
+            reference.Context.ms_lobe = ms
+            accumulator.extend(target)
+        off, on = accumulators[0][1].means(), accumulators[1][1].means()
+        differences = [p - m for p, m in zip(on, off)]
+        noise = {name: difference_statistics(np, old_image, differences, area)["difference_noise_rms"] for name, area in slices.items()}
+        if all(noise[name] <= args.max_noise_ratio * sigma[name] for name in slices):
+            break
+    return off, on, target, noise
+
+
+def old_noise(report, names):
+    """rms noise of the old clip's mean-of-two-seeds per region, from its last convergence record (seed_nrmse is the seed-pair error)."""
+    regions = report["records"][-1]["regions"]
+    return {name: regions[name]["support"] * regions[name]["seed_nrmse"] / 2.0 for name in names}
+
+
+def command_correct(args):
+    """Corrected clip: old converged references plus a same-seed (model_new - model_old) difference per state."""
+    old_dir = pathlib.Path(args.old).resolve()
+    old_report_path = old_dir / "clip_report.json"
+    old = json.loads(old_report_path.read_text())
+    root, base = snapshot(old["base_snapshot"])
+    if reference.scene_digest(root) != old["base_snapshot_sha256"]:
+        raise ValueError("base snapshot digest differs from the old clip report")
+    regions, use_window, margin = old["regions"], old.get("window_regions", False), old.get("window_margin", 2)
+    args.secondary_specular, args.regularization_scale = old["secondary_specular"], old["regularization_scale"]
+    out = pathlib.Path(args.out).resolve()
+    (out / "linear").mkdir(parents=True, exist_ok=True)
+    (out / "states").mkdir(exist_ok=True)
+    config = {"method": "difference", "spp": list(args.spp), "max_noise_ratio": args.max_noise_ratio, "spp_per_pass": args.spp_per_pass, "mirror_bounces": args.mirror_bounces,
+              "old_clip_report_sha256": reference.sha(old_report_path), "regularization_scale": old["regularization_scale"],
+              "secondary_specular": old["secondary_specular"], "regions": regions, "window_regions": use_window}
+    index = []
+    states = old["states"][args.first_state:args.last_state]
+    for number, row in enumerate(states):
+        identity, members = row["state"], row["frames"]
+        folder = out / "states" / identity[:16]
+        report_path = folder / "reference_report.json"
+        saved = json.loads(report_path.read_text()) if report_path.is_file() else None
+        if not (args.resume and saved and saved.get("render_config") == config and (folder / "reference.pfm").is_file()):
+            if folder.exists():
+                shutil.rmtree(folder)
+            data = state(old["scene"], base, members[0])
+            if key(data) != identity:
+                raise ValueError(f"state {identity[:16]} is not reproduced by the script reconstruction")
+            started = time.monotonic()
+            contexts = correction_pair(root, data, args, regions, margin, use_window)
+            np = contexts[0][1].np
+            old_image = read_pfm_array(old_dir / "states" / identity[:16] / "reference.pfm")
+            window_xyxy = contexts[0][1].window
+            slices = reference.region_slices(regions, contexts[0][1].width, contexts[0][1].height, window_xyxy)
+            old_report = json.loads((old_dir / "states" / identity[:16] / "reference_report.json").read_text())
+            sigma = old_noise(old_report, slices)
+            off, on, used_spp, noise = adaptive_difference(contexts, args, old_image, slices, sigma)
+            image, differences = combine(np, old_image, off, on)
+            stats = {name: difference_statistics(np, old_image, differences, area) for name, area in slices.items()}
+            folder.mkdir(parents=True)
+            write_pfm(folder / "reference.pfm", image)
+            write_pfm(folder / "difference.pfm", np.mean(differences, axis=0))
+            elapsed = time.monotonic() - started
+            report = {"schema": 1, "frame": data["frame"], "state": identity, "frames": members, "converged": True,
+                      "method": "old converged + same-seed (new - old) difference", "spp_per_seed": used_spp,
+                      "old_reference_noise_rms": sigma, "noise_over_old_noise": {n: noise[n] / sigma[n] for n in noise},
+                      "window_xyxy": list(window_xyxy), "difference_statistics": stats, "render_config": config,
+                      "seconds": round(elapsed, 2)}
+            report_path.write_text(json.dumps(report, indent=2) + "\n")
+            if args.rest_ratio > 0 or args.battery_low is not None:
+                battery_pause.rest(elapsed, args.rest_ratio, args.battery_low, args.battery_high, None, args.battery_cap, sys.stdout)
+        report = json.loads(report_path.read_text())
+        index.append({"state": identity, "frames": members, "converged": True, "spp_per_seed": report["spp_per_seed"],
+                      "difference_statistics": report["difference_statistics"]})
+        print(json.dumps({"state": number + 1, "of": len(states), "frames": members, "seconds": report["seconds"],
+                          "spp_per_seed": report["spp_per_seed"],
+                          "noise_over_old_noise": {n: round(v, 4) for n, v in report["noise_over_old_noise"].items()}}), flush=True)
+        for frame in members:
+            target = out / "linear" / f"frame-{frame:06d}.pfm"
+            if target.exists() or target.is_symlink():
+                target.unlink()
+            shutil.copyfile(folder / "reference.pfm", target)
+    complete = len(index) == len(old["states"])
+    manifest = {k: old[k] for k in ("schema", "scene", "base_snapshot", "base_snapshot_sha256", "frames", "model",
+                                   "secondary_specular", "regularization_scale", "regions", "window_regions", "window_margin")}
+    manifest.update(states=index, converged=complete, method="difference_estimator", correction_spp_checkpoints=list(args.spp), max_noise_ratio=args.max_noise_ratio,
+                    correction_spp_per_seed_range=[min(r["spp_per_seed"] for r in index), max(r["spp_per_seed"] for r in index)],
+                    old_clip=str(old_dir), old_clip_report_sha256=config["old_clip_report_sha256"], specular_ms=True,
+                    mirror_bounces=args.mirror_bounces, tool_sha256=reference.sha(__file__),
+                    reference_tool_sha256=reference.sha(reference.__file__), candidate_read=False, phase_accepted=False,
+                    note="new = old converged reference + mean over seeds of (render(ms on, mirror chain) - render(ms off, no chain)), "
+                         "both with the identical seed streams of f13_reference.converge")
+    (out / "clip_report.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    return 0 if complete else 1
+
+
+def region_error(np, image, truth, area):
+    """rms(image - truth) / rms(truth) inside `area`."""
+    return float(np.sqrt(np.mean((image[area] - truth[area]) ** 2)) / max(np.sqrt(np.mean(truth[area] ** 2)), 1e-12))
+
+
+def command_check_correction(args):
+    """Accuracy evidence on chosen states: corrected frame vs a full converged new-model render, and the seed-correlation control."""
+    old_dir = pathlib.Path(args.old).resolve()
+    old = json.loads((old_dir / "clip_report.json").read_text())
+    root, base = snapshot(old["base_snapshot"])
+    regions, use_window, margin = old["regions"], old.get("window_regions", False), old.get("window_margin", 2)
+    args.secondary_specular, args.regularization_scale = old["secondary_specular"], old["regularization_scale"]
+    results = []
+    for index in args.state_index:
+        row = old["states"][index]
+        data = state(old["scene"], base, row["frames"][0])
+        old_image = read_pfm_array(old_dir / "states" / row["state"][:16] / "reference.pfm")
+        contexts = correction_pair(root, data, args, regions, margin, use_window)
+        off_context, on_context = contexts[0][1], contexts[1][1]
+        np = off_context.np
+        slices = reference.region_slices(regions, off_context.width, off_context.height, off_context.window)
+        area = slices.get("primary-signal", slices["frame"])
+        reference.Context.ms_lobe = True
+        full_dir = pathlib.Path(args.workdir) / f"full-{row['state'][:16]}"
+        report_file = full_dir / "reference_report.json"
+        if not report_file.is_file():
+            reference.render_frame(on_context, argparse.Namespace(spp=args.full_spp, spp_per_pass=args.spp_per_pass), full_dir, None, regions)
+        full = read_pfm_array(full_dir / "reference.pfm")
+        full_report = json.loads(report_file.read_text())
+        old_report = json.loads((old_dir / "states" / row["state"][:16] / "reference_report.json").read_text())
+        # Independent truth: the same new model with streams that share nothing with the old clip (shift) -- the honest test.
+        indep_files = [full_dir / f"independent-{seed}.pfm" for seed in reference.SEEDS]
+        if not all(f.is_file() for f in indep_files):
+            reference.Context.ms_lobe = True
+            for f, picture in zip(indep_files, accumulate(on_context, args.independent_spp, args.spp_per_pass, shift=104729)):
+                write_pfm(f, picture)
+        indep_seeds = [read_pfm_array(f) for f in indep_files]
+        independent = np.mean(indep_seeds, axis=0)
+        indep_support, indep_nrmse = reference.seed_agreement(np, indep_seeds[0][area], indep_seeds[1][area])
+        entry = {"state_index": index, "frames": row["frames"],
+                 "independent": {"spp_per_seed": args.independent_spp, "seed_nrmse": indep_nrmse},
+                 "full": {"spp_per_seed": full_report["records"][-1]["spp_per_seed"], "converged": full_report["converged"],
+                          "seed_nrmse": full_report["records"][-1]["regions"].get("primary-signal", {}).get("seed_nrmse")},
+                 "old_seed_nrmse": old_report["records"][-1]["regions"].get("primary-signal", {}).get("seed_nrmse"),
+                 "old_vs_full_nrmse": region_error(np, old_image, full, area),
+                 "old_vs_independent_nrmse": region_error(np, old_image, independent, area), "corrections": {}}
+        for spp in args.spp_list:
+            args.spp = spp  # scalar here: render_difference renders exactly this many
+            record = {}
+            for label, shift in (("same_seed", 0), ("different_seed", 7919)):
+                started = time.monotonic()
+                off, on = render_difference(contexts, args, shift)
+                corrected, differences = combine(np, old_image, off, on)
+                stats = difference_statistics(np, old_image, differences, area)
+                measured = region_error(np, corrected, independent, area)
+                floor = math.hypot(entry["old_seed_nrmse"], indep_nrmse) / 2.0  # noise of two means-of-two-seeds, relative
+                record[label] = {"corrected_vs_full_nrmse": region_error(np, corrected, full, area),
+                                 "corrected_vs_independent_nrmse": measured, "independent_noise_floor": floor,
+                                 "excess_over_floor": math.sqrt(max(measured ** 2 - floor ** 2, 0.0)),
+                                 "difference_noise_rms": stats["difference_noise_rms"], "effect_rms": stats["effect_rms"],
+                                 "noise_over_effect": stats["noise_over_effect"], "relative_mean_effect": stats["relative_mean_effect"],
+                                 "seconds": round(time.monotonic() - started, 1)}
+            entry["corrections"][str(spp)] = record
+            print(json.dumps({"state_index": index, "spp": spp, **record}), flush=True)
+        results.append(entry)
+        pathlib.Path(args.report).write_text(json.dumps({"schema": 1, "old_clip": str(old_dir), "results": results}, indent=2) + "\n")
+    return 0
+
+
 def command_refs(args):
     """Write the runner's --references mapping for converged clips, bound to the frozen manifest bytes."""
     manifest_path = pathlib.Path(args.manifest).resolve()
@@ -297,13 +548,43 @@ def main(argv=None):
     p.add_argument("--block-gain", type=int, default=15, help="charge points a recharge break waits for")
     p.add_argument("--battery-cap", type=int, default=90, help="upper bound of the recharge break target")
     p.set_defaults(function=command_render)
+    p = sub.add_parser("correct", help="old clip + same-seed (ms on, mirror chain) - (ms off, no chain) difference estimator")
+    p.add_argument("old", help="old clip folder (clip_report.json, states/)")
+    p.add_argument("--out", required=True)
+    p.add_argument("--spp", type=int, nargs="+", default=[256, 512, 1024],
+                   help="samples-per-seed checkpoints of the two difference renders; stops at the first that meets --max-noise-ratio")
+    p.add_argument("--max-noise-ratio", type=float, default=0.2,
+                   help="difference noise (rms) must be at most this fraction of the old reference's own noise, in every region")
+    p.add_argument("--spp-per-pass", type=int, default=32)
+    p.add_argument("--mirror-bounces", type=int, default=3)
+    p.add_argument("--threads", type=int, default=min(12, os.cpu_count() or 1))
+    p.add_argument("--first-state", type=int, default=0)
+    p.add_argument("--last-state", type=int, default=None)
+    p.add_argument("--resume", action="store_true")
+    p.add_argument("--rest-ratio", type=float, default=0.0)
+    p.add_argument("--battery-low", type=int)
+    p.add_argument("--battery-high", type=int)
+    p.add_argument("--battery-cap", type=int, default=90)
+    p.set_defaults(function=command_correct)
+    p = sub.add_parser("check-correction", help="accuracy and seed-correlation evidence for the difference estimator")
+    p.add_argument("old")
+    p.add_argument("--state-index", type=int, nargs="+", required=True)
+    p.add_argument("--spp-list", type=int, nargs="+", default=[128, 256, 512, 1024])
+    p.add_argument("--full-spp", type=int, nargs="+", default=[256, 1024, 4096, 16384])
+    p.add_argument("--independent-spp", type=int, default=4096, help="samples per seed of the shifted-stream new-model truth")
+    p.add_argument("--spp-per-pass", type=int, default=32)
+    p.add_argument("--mirror-bounces", type=int, default=3)
+    p.add_argument("--threads", type=int, default=min(12, os.cpu_count() or 1))
+    p.add_argument("--workdir", required=True)
+    p.add_argument("--report", required=True)
+    p.set_defaults(function=command_check_correction)
     p = sub.add_parser("refs", help="runner --references file for converged clips")
     p.add_argument("manifest", help="frozen-manifest.json of the plan to compare")
     p.add_argument("--case", action="append", required=True, metavar="NAME=CLIP_DIR")
     p.add_argument("--out", required=True)
     p.set_defaults(function=command_refs)
     args = parser.parse_args(argv)
-    if hasattr(args, "specular_ms"):
+    if getattr(args, "specular_ms", None):
         reference.Context.ms_lobe = args.specular_ms == "on"
     try:
         return args.function(args)
