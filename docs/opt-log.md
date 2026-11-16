@@ -2593,3 +2593,16 @@ compensation), not attributed further inside the timebox.
 its price, 0.11-0.22 ms of resolve at 1080p on the terrain (+48..78 % of the resolve), is reported to the owner in the handoff as the trade-off of that option.
 `--debug-material-module fast` stays debug-only for future A/Bs (its pipelines are not archived: always measure it with `--pipeline-sync`).
 
+
+## 2026-11-16 — F15.2 / F15.4 (tickets 21, 23): material binning re-measured on the exact resolve module (NOT adopted)
+
+**Question.** Round 1 kept per-class binning opt-in (never >= 5 % on chess or terrain) with the fast module.  Since F15.2 option (a) every
+scene with material features resolves with the exact-maths module, whose class bins are exact copies too: does binning pay now?
+**Method.** Final binary (`build/d2-final/final3`, perf-log "F15 closure round 3: final window"), A = union (`--material-binning off`), B =
+bins, A/B/A x 3 replicas, `--gpu-timing-serial`; terrain CC0 1080p per arm (`tools/f15_layers_timing.py run --binning`), chess rigs
+(`tools/f15_costs.py t6-binning-chess-*`).  Resolve = `Material resolve` + `Material classification`.  The window was flagged disturbed by
+quietgate (java and the Virtualization VM, not ours); the decision does not depend on it (no arm comes near a 5 % gain).
+**Result.** Terrain union / bin ms: layers-1 0.279 / 0.291, layers-2 0.311 / 0.325, layers-3 0.332 / 0.341, layers-4 0.352 / 0.363, full
+0.492 / 0.503, blocks-1..4 1.265 / 1.286, 1.494 / 1.580, 1.608 / 1.683, 2.433 / 2.412 (the only gain, -0.9 %).  Chess: side-light +2.9 %
+(A-A noise 0.8 %), shadow rig +10.3 % (1.9 %), back-light +4.4 % (4.6 %).
+**Decision.** NOT adopted: union stays the default, binning stays opt-in (decision 05).
