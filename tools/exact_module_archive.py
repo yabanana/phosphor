@@ -3,7 +3,7 @@
 
 A scene with material features requests `phx_exact::visibility_resolve` / `phx_exact::visibility_lit_resolve` (pipeline/forward_variants.h,
 exactModuleKernel): the class bins, the union-specialised pipeline, the all-lobes reference and their texture-transform / subsurface
-variants.  tools/material_class_archive.py adds the planned class bins; this tool adds every other pipeline of those kernels that the
+variants, and with --material-binning off (the default) the legacy-class resolves.  tools/material_class_archive.py adds the planned class bins; this tool adds every other pipeline of those kernels that the
 archive lacks, label independent, additive (existing entries are never touched or duplicated):
 
   exact_module_archive.py update --archive shaders/pipelines.mtl4-json --harvest RAW [RAW ...] --output OUT
@@ -26,13 +26,6 @@ import material_class_archive as mca  # noqa: E402
 EXACT_KERNELS = ("phx_exact::visibility_resolve", "phx_exact::visibility_lit_resolve")
 
 
-def is_legacy_class_pipeline(spec):
-    """A specialised legacy-class resolve (constant 21 = one of the four normal/emission classes with MATERIAL_FEATURES): only a scene with
-    --material-binning off requests it; a scene with features bins by feature class instead."""
-    values = {c["id"]["data"]: c["value"]["data"] for c in spec.get("constant_values", [])}
-    return 21 in values and 22 in values and 24 not in values
-
-
 def keep_exact(corpus, present=None):
     """The pipelines of `corpus` whose compute function is one of EXACT_KERNELS (specialised or not), minus those `present` holds."""
     functions = corpus.get("function_descriptors", {})
@@ -40,7 +33,8 @@ def keep_exact(corpus, present=None):
     library = {d["label"]: d for d in functions.get("library_function_descriptors", [])}
     wanted = {label for label, d in library.items() if d.get("name") in EXACT_KERNELS}
     wanted |= {label for label, d in specialized.items() if d["function_descriptor"][len(fph.PREFIX):] in wanted}
-    wanted -= {label for label in wanted if label in specialized and is_legacy_class_pipeline(specialized[label])}
+    # The legacy-class resolves (constant 21 with MATERIAL_FEATURES, no RESOLVE_BIN) are kept: --material-binning off is the DEFAULT, and a
+    # scene with features requests them there (F15 closure round 2: the budget, which runs binning on, never saw them).
     skip = fph.semantic_keys(present) if present else set()
     single = {"function_descriptors": functions}
     kept_pipelines, used = {}, set()
