@@ -77,6 +77,11 @@ struct Variant {
 /// F15.2 (ticket 21): the visibility resolve kernels of a scene with material features come from the exact-maths copy of the module
 /// (shaders/material_passes_exact.metal, namespace phx_exact): "visibility_resolve" -> "phx_exact::visibility_resolve", likewise the lit
 /// kernel; any other name is returned unchanged.  Both the class pipelines and the all-lobes pipeline use it, so they are bit-identical.
+/// DEBUG ONLY (--debug-material-module exact|fast): false makes exactModuleKernel the identity, so scenes with material features keep the base
+/// fast-maths resolve kernels.  Default true (the product).  Process-wide, set once before the first pipeline request; the fast kernels with a
+/// feature mask are not in the archive and compile at run time (use --pipeline-sync).
+void setExactMaterialModule(bool exact);
+[[nodiscard]] bool exactMaterialModule();
 [[nodiscard]] std::string exactModuleKernel(const std::string& name);
 /// `desc` with its first function mapped through exactModuleKernel.
 [[nodiscard]] PipelineDesc inExactModule(const PipelineDesc& desc);

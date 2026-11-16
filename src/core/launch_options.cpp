@@ -256,6 +256,10 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.debugFlexiblePipelines = true;
         } else if (arg == "--debug-pipeline-fallback") {
             out.debugPipelineFallback = true;
+        } else if (arg == "--debug-material-module") {
+            std::string v;
+            if (!needString(v) || (v != "exact" && v != "fast")) return false;
+            out.debugMaterialModuleFast = v == "fast";
         } else if (arg == "--debug-pipeline-xpc-fail") {
             if (!needCount(out.debugPipelineXpcFail)) return false;
         } else if (arg == "--debug-compile-storm") {

@@ -168,6 +168,7 @@ private:
                  MTL::Library* library, bool allowFallback);
     /// Post a completion and wake the render thread if it is waiting.
     void complete(const pipe::Completion& completion);
+    void noteComputeLimits(const pipe::PipelineDesc& desc, const void* opaque) const; // debug log, env PHOSPHOR_LOG_COMPUTE_LIMITS
     /// Flexible pipeline of `generic` for `library` (compiled once, shared).
     MTL::RenderPipelineState* flexibleBase(const pipe::PipelineDesc& generic, MTL::Library* library,
                                            u32& compilerCalls, float& compileMs);

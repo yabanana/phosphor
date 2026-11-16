@@ -226,6 +226,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     pipelineOptions.fallbackOnly   = options_.debugFlexiblePipelines;
     pipelineOptions.debugXpcFail   = options_.debugPipelineXpcFail;
     pipelineOptions.specularMs     = options_.specularMs;
+    pipe::forward::setExactMaterialModule(!options_.debugMaterialModuleFast);
     pipelines_     = std::make_unique<PipelineCache>(*context_, pipelineOptions);
     renderer_      = std::make_unique<SceneRenderer>(*context_, *pipelines_, options_.pipelineSalt,
                                                      /*genericOnly*/ options_.debugPipelineFallback,

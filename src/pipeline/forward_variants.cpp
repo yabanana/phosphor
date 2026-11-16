@@ -5,6 +5,7 @@
 #include "renderer/scene_extract.h"
 
 #include <algorithm>
+#include <atomic>
 #include <string>
 
 namespace phosphor::pipe::forward {
@@ -73,7 +74,16 @@ u16 saltConstantIndex() { return gen::kSaltConstantIndex; }
 
 u16 materialFeaturesConstantIndex() { return gen::kMaterialFeaturesConstantIndex; }
 
+namespace {
+std::atomic<bool> g_exactMaterialModule{true};
+}
+
+void setExactMaterialModule(bool exact) { g_exactMaterialModule.store(exact, std::memory_order_relaxed); }
+
+bool exactMaterialModule() { return g_exactMaterialModule.load(std::memory_order_relaxed); }
+
 std::string exactModuleKernel(const std::string& name) {
+    if (!exactMaterialModule()) return name;
     return name == "visibility_resolve" || name == "visibility_lit_resolve" ? "phx_exact::" + name : name;
 }
 

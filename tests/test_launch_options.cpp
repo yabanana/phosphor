@@ -1646,3 +1646,15 @@ TEST_CASE("F15 closure launch option --specular-ms defaults on (ADR-0007) and pa
     CHECK(error.find("--specular-ms") != std::string::npos);
     CHECK_FALSE(parse({"--specular-ms"}, bad, error));
 }
+
+TEST_CASE("launch options: --debug-material-module (F15.4 attribution)") {
+    LaunchOptions o;
+    std::string err;
+    REQUIRE(parse({}, o, err));
+    CHECK_FALSE(o.debugMaterialModuleFast);
+    REQUIRE(parse({"--debug-material-module", "fast"}, o, err));
+    CHECK(o.debugMaterialModuleFast);
+    REQUIRE(parse({"--debug-material-module", "exact"}, o, err));
+    CHECK_FALSE(o.debugMaterialModuleFast);
+    CHECK_FALSE(parse({"--debug-material-module", "other"}, o, err));
+}

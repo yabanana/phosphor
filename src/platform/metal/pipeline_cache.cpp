@@ -502,6 +502,17 @@ void PipelineCache::submit(pipe::PipelineHandle handle, const pipe::PipelineDesc
                    });
 }
 
+// DEBUG (env PHOSPHOR_LOG_COMPUTE_LIMITS=1): the register-pressure / occupancy proxy of every compute pipeline that is created.
+void PipelineCache::noteComputeLimits(const pipe::PipelineDesc& desc, const void* opaque) const {
+    static const bool enabled = std::getenv("PHOSPHOR_LOG_COMPUTE_LIMITS") != nullptr;
+    if (!enabled || desc.kind != pipe::PipelineKind::Compute || !opaque) return;
+    auto* state = static_cast<MTL::ComputePipelineState*>(static_cast<NS::Object*>(const_cast<void*>(opaque)));
+    std::string constants;
+    for (u32 i = 0; i < desc.constantCount; ++i) constants += " c" + std::to_string(desc.constants[i].index) + "=" + std::to_string(desc.constants[i].bits);
+    LOG_INFO("COMPUTE_LIMITS %s fn=%s maxThreads=%lu staticTG=%lu%s", desc.label.c_str(), desc.functions[0].c_str(),
+             (unsigned long)state->maxTotalThreadsPerThreadgroup(), (unsigned long)state->staticThreadgroupMemoryLength(), constants.c_str());
+}
+
 void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDesc& desc, u32 generation,
                             MTL::Library* library, bool allowFallback) {
     NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
@@ -524,6 +535,7 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
         if (NS::Object* object = archiveLookup(desc, library, &error)) {
             done.object  = toOpaque(object);
             done.archive = pipe::ArchiveOutcome::Hit;
+            noteComputeLimits(desc, done.object);
             complete(done);
             pool->release();
             return;
@@ -595,6 +607,7 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
     done.compileMs     = msSince(start);
     done.compilerCalls = 1;
     if (!done.object) LOG_ERROR("Pipeline %s failed: %s", desc.label.c_str(), reason(error).c_str());
+    noteComputeLimits(desc, done.object);
     complete(done);
     pool->release();
 }
