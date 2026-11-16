@@ -189,7 +189,7 @@ struct ReflectionPasses::Impl {
         for(auto& f:slots){c.memory().release(f.samples,MemoryCategory::RayTracing);c.memory().release(f.metadata,MemoryCategory::RayTracing);
             // One sample stores its reduced record directly (REFLECTION_SINGLE_SAMPLE):
             // the per-sample buffer is then a one-record placeholder.
-            f.samples=lighting::buffer(c,options.reflectionSamples==1?sizeof(GPUSpecularSample):pixels*options.reflectionSamples*sizeof(GPUSpecularSample),"F13 per-sample raw reflection records");f.metadata=lighting::buffer(c,pixels*sizeof(GPUSpecularSample),"F13 reduced reflection hit metadata");}
+            f.samples=lighting::buffer(c,options.reflectionSamples==1?sizeof(GPUSpecularSample):pixels*options.reflectionSamples*sizeof(GPUSpecularSample),"F13 per-sample raw reflection records");f.metadata=lighting::buffer(c,pixels*sizeof(GPUSpecularSample),"F13 reduced reflection hit metadata",options.debugLighting);} // shared under --debug-lighting: the record self-check below reads it (F15.2 ticket 21)
         if(options.debugReflectionCorrupt==3)for(auto& f:slots){c.memory().release(f.testSurfaces,MemoryCategory::RayTracing);f.testSurfaces=lighting::buffer(c,pixels*sizeof(GPUDISurface),"F13 independent negative normal guides");}
         denoise.invalidateAll("F13 signal allocation growth");++graphVersion;
     }
@@ -505,6 +505,15 @@ bool ReflectionPasses::check(u32 slot)const{const auto& f=impl_->slots.at(slot);
         impl_->probeFormat==MTL::PixelFormatRGBA32Float?"RGBA32Float":"RGBA16Float");
     if(impl_->options.debugLighting&&errors[16])std::printf("REFLECTION back-face continuations slot %u | culled single-sided back faces passed %u | bound exhausted %u\n",slot,errors[16],errors[17]);
     if(impl_->options.debugLighting&&errors[18])std::printf("REFLECTION mirror bounces slot %u | extra specular bounces traced %u | chains ended by the bound %u\n",slot,errors[18],errors[19]);
+    // F15.2 (ticket 21, round 3): a record that carries radiance but no VALID flag cannot be produced by the reflection kernels (every sampled
+    // record has VALID, an empty one has zero radiance).  The old ToyCar variation was exactly this: whole aligned 32-pixel groups with flags 0 and
+    // radiance > 0, which made the denoiser's history test reject that group for a frame.  Checked on the completed frame (shared buffer, debug only).
+    u64 badRecords=0,firstBad=0;
+    if(impl_->options.debugLighting&&impl_->options.reflections!=ReflectionMode::Off&&f.metadata&&f.metadata->contents()){
+        const auto* m=static_cast<const GPUSpecularSample*>(f.metadata->contents());const u64 n=f.metadata->length()/sizeof(GPUSpecularSample);
+        for(u64 i=0;i<n;++i)if(m[i].flags==0&&(m[i].radiance[0]!=0.0f||m[i].radiance[1]!=0.0f||m[i].radiance[2]!=0.0f)){if(!badRecords)firstBad=i;++badRecords;}
+        if(badRecords)std::fprintf(stderr,"REFLECTION metadata check slot %u: %llu records with radiance but no flags, first %llu\n",slot,static_cast<unsigned long long>(badRecords),static_cast<unsigned long long>(firstBad));}
+    if(badRecords)return false;
     bool okay=!impl_->options.debugLighting||errors[0]==f.expected;for(u32 i=1;i<8;++i)okay=okay&&!errors[i];if(!okay){std::fprintf(stderr,"REFLECTION check slot %u expected %u counts %u %u %u %u %u %u %u %u\n",slot,f.expected,errors[0],errors[1],errors[2],errors[3],errors[4],errors[5],errors[6],errors[7]);
     if(errors[8])std::fprintf(stderr,"REFLECTION motion raw slot %u count %u first_tid %u bits %08x %08x\n",slot,errors[8],errors[9],errors[10],errors[11]);return false;}return !f.customUsed||impl_->denoise.check(slot);}
 bool ReflectionPasses::ready()const{const auto& i=*impl_;const auto& o=i.options;
