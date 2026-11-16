@@ -6,10 +6,10 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 06
 
-**Status:** resolved (2026-11-13; refract-axis clip control not demonstrable, carried to ticket 13 and 24; D2 band not met at HEAD, ticket 24)
+**Status:** resolved (2026-11-13); (2026-11-16, round 2: the refract-axis clip control is demonstrated by ticket 13 (b6c7ee6, 8d43c2e: endpoint-matched specular history; `negative-refract-axis` fails every smooth-glass gate, p95 0.1746 / 0.1691 / 0.1445 against 0.06, while the product passes at 0.0230 / 0.0236 / 0.0306); the D2 band item is recorded by ticket 24)
 
 - [x] ior/specular grids pass with RT reflections, SSR and probes; the support report marks every light path of decision 06 for ior/specular
-- [ ] Denoiser negative control: using the reflect axis for a refract-axis lobe fails the clip; history across lobe ids rejected (unit-tested on the CPU mirror of the rule) — rule and history rejection unit-tested, GPU lobe-key controls fail the clip; the refract-axis CLIP control needs refraction → carried to ticket 13
+- [x] Denoiser negative control: using the reflect axis for a refract-axis lobe fails the clip; history across lobe ids rejected (unit-tested on the CPU mirror of the rule) — rule and history rejection unit-tested, GPU lobe-key controls fail the clip; the refract-axis CLIP control is demonstrated by ticket 13 (2026-11-16: `negative-refract-axis` fails every smooth-glass gate while the product passes)
 - [x] F13 temporal metrics on a specular-extension clip within the F13.6 contract
 - [ ] Scenes without features unchanged (visual_check 0 px, D2 within band) — visual_check and F13 exact captures 0 px; D2 band → ticket 24 — D2 band not met at HEAD (median p95 +0.23 ms vs 2e1057a; owner decision on the 26fe229 continuation cost pending, ticket 24)
 - [x] Forced-overflow capture (`--debug-meshlets 1 --debug-meshlets-corrupt count`, as `tools/f13_overflow_emission_check.sh`) equals the meshlet path on the ticket's fixture
