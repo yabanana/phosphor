@@ -211,6 +211,12 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
         const bool featureBinsWanted = binning_ && !forceAllLobes_ && mask != 0u;
         subsurface_ = subsurfaceAllowed_ && !tileResolve_ && mask != 0u && store.volumetricSubsurface();
         // Ticket 17/18: the optional RT walk replaces the diffusion when the acceleration structures exist and its kernel is resident.
+        // F15.1 (ticket 14, round 3): a scene with transmissive materials is served by the glass walk (full payload, shadow rays through glass).
+        if (walkWanted_ && sssWalkLite_ != pipe::INVALID_PIPELINE) {
+            const bool glass = (store.featureUnion() & MATERIAL_FEATURE_TRANSMISSION) != 0u;
+            if (glass && sssWalkGlass_ == pipe::INVALID_PIPELINE) sssWalkGlass_ = pipelines_.request(lighting::kernel("subsurface_walk_glass", true, false));
+            sssWalk_ = glass ? sssWalkGlass_ : sssWalkLite_;
+        }
         walk_ = subsurface_ && walkWanted_ && walkRt_ && walkRt_->active() && sssWalk_ != pipe::INVALID_PIPELINE && pipelines_.isFinal(sssWalk_) &&
                 (!accumulate_ || pipelines_.isFinal(sssAccumulate_));
         const u32 so = walk_ ? 100u : (subsurface_ ? 50u : 0u);
@@ -379,7 +385,7 @@ void VisibilityRenderer::setSubsurfaceWalk(AccelerationStructures *rt, u32 sampl
     walkFlags_ = flags;
     if (!walkWanted_) return;
     // linked alpha function: the walk traces with the 16-byte lite payload (the alpha test is the same, rt_common.h)
-    sssWalk_ = pipelines_.request(lighting::kernel("subsurface_walk", true, true));
+    sssWalkLite_ = sssWalk_ = pipelines_.request(lighting::kernel("subsurface_walk", true, true));
     sssAccumulate_ = pipelines_.request(lighting::kernel("subsurface_accumulate"));
     walkConsumer_ = std::make_unique<RtConsumer>(context_, pipelines_, *rt);
 }

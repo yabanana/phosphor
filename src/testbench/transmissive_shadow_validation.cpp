@@ -19,8 +19,8 @@ namespace {
 // transmissive-shadow-curved (the last) is the report-only curved-glass case.
 constexpr std::array<std::string_view, 5> kAll{"transmissive-shadow-pane-sun", "transmissive-shadow-water-sun", "transmissive-shadow-volume-pane",
                                                "transmissive-shadow-point", "transmissive-shadow-curved"};
-constexpr std::array<std::string_view, 4> kIndirect{"transmissive-shadow-gi-pane", "transmissive-shadow-gi-open", "transmissive-shadow-refl-pane",
-                                                    "transmissive-shadow-refl-open"};
+constexpr std::array<std::string_view, 6> kIndirect{"transmissive-shadow-gi-pane", "transmissive-shadow-gi-open", "transmissive-shadow-refl-pane",
+                                                    "transmissive-shadow-refl-open", "transmissive-shadow-sss-pane", "transmissive-shadow-sss-open"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -85,9 +85,9 @@ glm::vec3 towardSun(float degreesFromVertical) {
 // F15.1 (ticket 14, round 3): the huge pane of the indirect fixtures.  60 m above the origin (the probe rays reach 100 m but the grid of the
 // fixture ends below 10 m: the atlas lookup at the pane is 0, so the pane adds no bounce), centred where the sun ray from the scene meets
 // its height (towardSun 30 degrees from the vertical: 60 m x tan 30 = 34.64 m towards -Z); 120 m wide: every sun ray of the scene crosses it.
-ShadowCaster hugePane(glm::vec3 tint, float degrees) {
+ShadowCaster hugePane(glm::vec3 tint, float degrees, float zSign = 1.0f) {
     ShadowCaster c = thinPane(0.0f, 120.0f, tint);
-    c.glass.center = {0.0f, 60.0f, -60.0f * std::tan(glm::radians(degrees))};
+    c.glass.center = {0.0f, 60.0f, -zSign * 60.0f * std::tan(glm::radians(degrees))};
     return c;
 }
 ShadowCaster mirrorWall() {
@@ -187,6 +187,24 @@ std::vector<ShadowScenarioSpec> specs() {
             all.push_back(std::move(s));
         }
     }
+    // 7. The subsurface receiver (rt-walk): a volumetric subsurface sphere (weight 1, radius 0.08 m, skin colour) on the floor, the sun from +Z
+    //    (towards the camera) so the camera sees the lit side; the same pane as above.
+    for (const bool withPane : {true, false}) {
+        ShadowScenarioSpec s;
+        s.name = withPane ? "transmissive-shadow-sss-pane" : "transmissive-shadow-sss-open";
+        if (withPane) s.casters.push_back(hugePane(green2, 30.0f, -1.0f));
+        ShadowCaster ball = glassSphere(0.0f, TransmissionValidation::SphereRadius, 1.5f);
+        ball.opaque = true;
+        ball.sss = true;
+        s.casters.push_back(ball);
+        s.cameraTarget = {0.0f, 0.4f, 0.0f};
+        s.cameraDistance = 2.0f;
+        s.cameraElevationDegrees = 25.0f;
+        s.sun = true;
+        s.sunIrradiance = 3.0f;
+        s.towardSun = {0.0f, std::cos(glm::radians(30.0f)), std::sin(glm::radians(30.0f))};
+        all.push_back(std::move(s));
+    }
     return all;
 }
 const std::vector<ShadowScenarioSpec>& table() {
@@ -257,7 +275,23 @@ void TransmissiveShadowValidation::setup(ECS& ecs, GpuScene& scene, TextureManag
         instance.setStatic(true);
         ecs.addComponent(e, std::move(instance));
         MaterialComponent material;
-        if (caster.mirror) {
+        if (caster.sss) {
+            auto description = std::make_shared<MaterialDescription>();
+            description->subsurface.emplace();
+            auto& block = *description->subsurface;
+            block.mode = SubsurfaceMode::Volumetric;
+            block.weight = 1.0f;
+            block.color = {0.85f, 0.55f, 0.45f};
+            block.radius = 0.08f;
+            block.radiusScale = {1.0f, 0.5f, 0.25f};
+            block.anisotropy = 0.0f;
+            description->volume.emplace(); // a solid: thickness = the sphere diameter
+            description->volume->thickness = 2.0f * TransmissionValidation::SphereRadius;
+            material.extension = std::move(description);
+            material.baseColorFactor = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
+            material.metallicFactor = 0.0f;
+            material.roughnessFactor = 0.35f;
+        } else if (caster.mirror) {
             material.baseColorFactor = glm::vec4(1.0f);
             material.metallicFactor = 1.0f;
             material.roughnessFactor = 0.02f; // below the engine's mirror band (0.1): the ideal mirror direction

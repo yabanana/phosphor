@@ -200,7 +200,9 @@ class VisibilityRenderer {
     // Ticket 17/18: the RT walk tier (SSS_OUTPUT == 2): the kernel replaces the diffusion pass.
     AccelerationStructures* walkRt_ = nullptr;
     std::unique_ptr<RtConsumer> walkConsumer_;
-    pipe::PipelineHandle sssWalk_ = pipe::INVALID_PIPELINE;
+    // F15.1 (ticket 14, round 3): sssWalk_ is the SERVED walk kernel: sssWalkLite_ (RtPayloadLite) or, while the scene feature union has
+    // transmission, sssWalkGlass_ (full RtPayload, transmittance-aware exit shadow rays).
+    pipe::PipelineHandle sssWalk_ = pipe::INVALID_PIPELINE, sssWalkLite_ = pipe::INVALID_PIPELINE, sssWalkGlass_ = pipe::INVALID_PIPELINE;
     bool walkWanted_ = false, walk_ = false;
     u32 walkSamples_ = 4, walkSteps_ = 512, walkFlags_ = 0;
     MTL::GPUAddress walkParamsAddress_ = 0, walkTableAddress_ = 0;

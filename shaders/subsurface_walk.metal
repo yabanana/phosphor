@@ -28,6 +28,19 @@ using namespace phosphor;
 
 constexpr sampler kWalkSampler(filter::linear, mip_filter::linear, address::repeat);
 
+// F15.1 (ticket 14, round 3): the exit light connection of a walk traces its shadow ray through glass.  `subsurface_walk_glass`
+// (shaders/subsurface_walk_glass.metal, served only while the scene feature union has transmission) uses the full RtPayload and a
+// RT_PROBE_SHADOW_TRANSMITTED ray; `subsurface_walk` keeps the 16-byte RtPayloadLite and the opaque any-hit shadow ray (exact without glass).
+#ifdef PHOSPHOR_SSS_GLASS
+typedef RtPayload SwPayload;
+#define SSS_WALK_KERNEL subsurface_walk_glass
+inline uint swShadowType(thread const RtPayload&) { return RT_PROBE_SHADOW_TRANSMITTED; }
+#else
+typedef RtPayloadLite SwPayload;
+#define SSS_WALK_KERNEL subsurface_walk
+inline uint swShadowType(thread const RtPayloadLite&) { return RT_PROBE_SHADOW; }
+#endif
+
 inline uint swHash(uint x) { x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; return x ^ (x >> 16); }
 inline float swRand(thread uint& seed) { seed = swHash(seed + 0x9e3779b9u); return float(seed >> 8) * (1.0f / 16777216.0f); }
 
@@ -181,12 +194,13 @@ inline float swWalk(float3 entryPoint, float3 entryNormalGeometric, float3 entry
                     if ((p.flags & SSS_WALK_SHADOW_RAYS) != 0u) {
                         const float3 origin = rtOffsetRay(s.point, s.ng);
                         GPURtRay shadow{};
-                        shadow.ox = origin.x; shadow.oy = origin.y; shadow.oz = origin.z; shadow.dx = toLight.x; shadow.dy = toLight.y; shadow.dz = toLight.z;
-                        shadow.tmin = 0.0f; shadow.tmax = distance > 1e29f ? 1e30f : max(distance - 1e-3f, 0.0f); shadow.mask = RT_MASK_SHADOW; shadow.type = RT_PROBE_SHADOW;
-                        shadow.coneWidth = 0.0f;
                         Payload shadowPayload{};
+                        shadow.ox = origin.x; shadow.oy = origin.y; shadow.oz = origin.z; shadow.dx = toLight.x; shadow.dy = toLight.y; shadow.dz = toLight.z;
+                        shadow.tmin = 0.0f; shadow.tmax = distance > 1e29f ? 1e30f : max(distance - 1e-3f, 0.0f); shadow.mask = RT_MASK_SHADOW; shadow.type = swShadowType(shadowPayload);
+                        shadow.coneWidth = 0.0f;
                         const GPURtHit blocked = rtTrace(shadow, as, ift, instances, p.slotCount, shadowPayload);
                         if (blocked.hit || blocked.t == -2.0f) visibility = 0.0f;
+                        else visibility = rtShadowTransmittance(shadowPayload, distance > 1e29f ? 0.0f : shadow.tmax)[channel]; // 1 for the lite payload
                     }
                     radiance += weight * f * irradiance[channel] * lightScale * visibility;
                 }
@@ -228,7 +242,7 @@ inline float swWalk(float3 entryPoint, float3 entryNormalGeometric, float3 entry
     return radiance;
 }
 
-kernel void subsurface_walk(constant GPUSubsurfaceWalkParams& p [[buffer(0)]], constant FrameConstants& frame [[buffer(1)]],
+kernel void SSS_WALK_KERNEL(constant GPUSubsurfaceWalkParams& p [[buffer(0)]], constant FrameConstants& frame [[buffer(1)]],
                             const device GPUMaterial* materials [[buffer(2)]], instance_acceleration_structure as [[buffer(3)]],
                             intersection_function_table<triangle_data, instancing> ift [[buffer(4)]], const device GPUInstance* instances [[buffer(5)]],
                             const device GPURtMesh* meshes [[buffer(6)]], const device GPUVertex* vertices [[buffer(7)]],
@@ -260,7 +274,7 @@ kernel void subsurface_walk(constant GPUSubsurfaceWalkParams& p [[buffer(0)]], c
     GPURtRay cameraRay{};
     cameraRay.ox = origin.x; cameraRay.oy = origin.y; cameraRay.oz = origin.z; cameraRay.dx = direction.x; cameraRay.dy = direction.y; cameraRay.dz = direction.z;
     cameraRay.tmin = 0.0f; cameraRay.tmax = 1e30f; cameraRay.mask = RT_MASK_ALL; cameraRay.type = RT_PROBE_PRIMARY; cameraRay.coneWidth = 0.0f;
-    RtPayloadLite cameraPayload{};
+    SwPayload cameraPayload{};
     const GPURtHit cameraHit = rtTraceSurface(cameraRay, as, ift, instances, p.slotCount, cameraPayload, meshes, vertices, indices, p.meshCount);
     if (!cameraHit.hit || cameraHit.slot >= p.slotCount || instances[cameraHit.slot].materialIndex != material - 1u) {
         result.write(base, pixel);
@@ -310,7 +324,7 @@ kernel void subsurface_walk(constant GPUSubsurfaceWalkParams& p [[buffer(0)]], c
         const float3 d = normalize(tangent * refracted.x + bitangent * refracted.y + shading * refracted.z);
         if (dot(d, entry.ng) >= 0.0f) continue;
         float transfer = 0.0f;
-        const float walk = swWalk<RtPayloadLite>(entry.point, entry.ng, d, entryWeight, sigmaT[channel], albedo[channel], e2.anisotropy, alpha, channel, transfer, p,
+        const float walk = swWalk<SwPayload>(entry.point, entry.ng, d, entryWeight, sigmaT[channel], albedo[channel], e2.anisotropy, alpha, channel, transfer, p,
                                                  lights, as, ift, instances, meshes, vertices, indices, seed);
         sum[channel] += 3.0f * (walk + transfer * ambientDome[channel]);
         transferSum[channel] += 3.0f * transfer;

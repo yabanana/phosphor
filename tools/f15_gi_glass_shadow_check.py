@@ -52,7 +52,11 @@ PANE_FRESNEL = F0 + (1.0 - F0) * (1.0 - math.cos(math.radians(SUN_DEGREES))) ** 
 TRANSMITTANCE = tuple((1.0 - PANE_FRESNEL) * c for c in TINT)
 
 # camera of the bench (spec): target, distance, elevation (degrees above the floor, looking from +Z), 60 degree vertical field of view
-CAMERAS = {"gi": ((0.0, 0.4, 0.3), 4.0, 30.0), "refl": ((0.0, 0.5, 1.0), 5.0, 25.0)}
+CAMERAS = {"gi": ((0.0, 0.4, 0.3), 4.0, 30.0), "refl": ((0.0, 0.5, 1.0), 5.0, 25.0), "sss": ((0.0, 0.4, 0.0), 2.0, 25.0)}
+SSS_SUN = (0.0, math.cos(math.radians(SUN_DEGREES)), math.sin(math.radians(SUN_DEGREES)))  # the subsurface fixture: sun from +Z (towards the camera)
+SSS_SPHERE = ((0.0, 0.4, 0.0), 0.4)
+SSS_MIN_COS = 0.35        # region: sphere pixels whose normal faces the camera by more than this and the sun by more than this (no limb, no terminator)
+WALK_ARGS = ["--subsurface-mode", "rt-walk", "--subsurface-accumulate", "off", "--subsurface-samples", "64", "--subsurface-steps", "512"]
 CUBE_FACE = {"z": 0.5, "x": (-0.3, 0.3), "y": (0.2, 0.8)}        # inner 60 % of the +Z face of the 1 m cube
 MIRROR = {"z": -1.5 + 0.025, "box": ((-3.0, 0.0, -1.525), (3.0, 2.0, -1.475)), "x": (-2.6, 2.6), "y": (0.1, 1.9)}
 FLOOR_LIMIT = 5.0
@@ -65,6 +69,7 @@ KEYS = {
     "gi-cache": ("gi", ["--gi", "cache", *GI_ARGS]),
     "gi-restir": ("gi", ["--gi", "restir", *GI_ARGS]),
     "refl": ("refl", []),
+    "sss": ("sss", WALK_ARGS),
 }
 CONTROL_ARGS = ["--debug-transmittance-inject", "--debug-transmittance-dedup", "off"]
 EXPECTATIONS = {  # name -> per-channel expected ratio (wrong expectations on the same data)
@@ -77,7 +82,7 @@ def scenario(family, pane):
     return f"transmissive-shadow-{family}-{'pane' if pane else 'open'}"
 
 
-def capture_command(binary, key, pane, folder, control=False):
+def capture_command(binary, key, pane, folder, control=False, harvest=None):
     family, extra = KEYS[key]
     lighting_gi = ["--lighting", "restir", "--lighting-denoise", "off"] if family == "gi" else ["--lighting", "legacy", "--lighting-denoise", "custom"]
     reflections = ["--reflections", "rt"] if family == "refl" else ["--reflections", "off"]
@@ -88,10 +93,10 @@ def capture_command(binary, key, pane, folder, control=False):
             "--fixed-timestep", "--no-ui", "--no-vsync", "--no-gpu-timing", "--pipeline-sync", "--specular-ms", "on",
             "--capture-linear", str(folder / "engine.pfm"), "--capture-linear-frame", str(FRAMES - 1),
             "--capture-linear-accumulate", str(ACCUMULATE), "--capture-linear-signal", "hdr",
-            *(CONTROL_ARGS if control else []), "--report", str(folder / "report.json")]
+            *(CONTROL_ARGS if control else []), *(["--harvest-pipelines", str(harvest)] if harvest else []), "--report", str(folder / "report.json")]
 
 
-def run_capture(command, folder):
+def run_capture(command, folder, ignore_misses=False):
     folder.mkdir(parents=True, exist_ok=True)
     with (folder / "engine.log").open("wb") as log:
         code = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=900).returncode
@@ -99,10 +104,10 @@ def run_capture(command, folder):
     problems = []
     if code != 0 or "EXIT 0" not in text:
         problems.append(f"exit {code}")
-    if re.search(r"Failed with error:|failed assertion|Validation Error", text):
+    if re.search(r"Failed with error:|failed assertion|Validation Error", text) and not ignore_misses:
         problems.append("archive or validation error line")
     misses = re.findall(r"archive hits (\d+), misses (\d+)", text)
-    if misses and int(misses[-1][1]) != 0:
+    if misses and int(misses[-1][1]) != 0 and not ignore_misses:
         problems.append(f"{misses[-1][1]} archive misses")
     fallback = re.search(r"fallbacks (\d+) \(draws (\d+)\)", text)
     if fallback and int(fallback.group(2)) != 0:
@@ -153,6 +158,17 @@ def ray_hits_box(np, origins, directions, lo, hi):
 
 def region_mask(np, family):
     position, directions = camera_rays(np, family)
+    if family == "sss":
+        centre, radius = np.array(SSS_SPHERE[0]), SSS_SPHERE[1]
+        oc = position - centre
+        b = np.sum(directions * oc, axis=2)
+        disc = b * b - (np.dot(oc, oc) - radius * radius)
+        hit = disc > 0
+        t = -b - np.sqrt(np.where(hit, disc, 0.0))
+        point = position + t[..., None] * directions
+        normal = (point - centre) / radius
+        facing = -np.sum(normal * directions, axis=2)
+        return hit & (t > 0) & (facing > SSS_MIN_COS) & (normal @ np.array(SSS_SUN) > SSS_MIN_COS)
     if family == "gi":
         t = (CUBE_FACE["z"] - position[2]) / directions[..., 2]
         point = position + t[..., None] * directions
@@ -239,7 +255,7 @@ def run(args, keys):
     for key in keys:
         for name, pane, control in (("open", False, False), ("pane", True, False)) + ((("control", True, True),) if args.control else ()):
             folder = args.out / key / name
-            problems = run_capture(capture_command(binary, key, pane, folder, control), folder)
+            problems = run_capture(capture_command(binary, key, pane, folder, control, folder / "harvest.json" if args.harvest else None), folder, ignore_misses=bool(args.harvest))
             if problems:
                 print(f"{key}/{name}: capture failed: {problems} ({folder / 'engine.log'})")
                 return 6
@@ -256,6 +272,7 @@ def main(argv=None):
     parser.add_argument("--out", type=pathlib.Path, default=REPO / "build/f15-gi-glass")
     parser.add_argument("--only", help="comma separated keys: " + ", ".join(KEYS))
     parser.add_argument("--control", action="store_true", help="also capture the engine control (--debug-transmittance-inject, dedup off)")
+    parser.add_argument("--harvest", action="store_true", help="add --harvest-pipelines RAW (targeted archive update) to every capture")
     parser.add_argument("--no-evaluate", action="store_true", help="--run: captures only")
     args = parser.parse_args(argv)
     keys = args.only.split(",") if args.only else list(KEYS)

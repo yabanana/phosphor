@@ -263,7 +263,7 @@ TEST_CASE("F15.3 tickets 14/15: the camera sees the floor shadows and never the 
 
 TEST_CASE("F15.1 ticket 14 round 3: the indirect-light fixtures (tools/f15_gi_glass_shadow_check.py) are valid, outside the planar list, and geometrically closed") {
     const auto names = TransmissiveShadowValidation::indirectScenarios();
-    REQUIRE(names.size() == 4);
+    REQUIRE(names.size() == 6);
     std::string runner;
     {
         std::ifstream in(std::string(PHOSPHOR_SOURCE_DIR) + "/tools/f15_gi_glass_shadow_check.py");
@@ -279,6 +279,24 @@ TEST_CASE("F15.1 ticket 14 round 3: the indirect-light fixtures (tools/f15_gi_gl
         CHECK(s.sun);
         CHECK(s.towardSun.y == doctest::Approx(std::cos(glm::radians(30.0f))));
         const bool pane = std::string_view(name).ends_with("-pane");
+        if (std::string_view(name).find("-sss-") != std::string_view::npos) {
+            // The subsurface receiver (rt-walk): sun from +Z (the lit side faces the camera), the pane mirrored to -Z, a volumetric sphere.
+            CHECK(s.towardSun.z > 0.0f);
+            REQUIRE(s.casters.size() == (pane ? 2u : 1u));
+            CHECK(s.casters.back().sss);
+            CHECK(s.casters.back().opaque);
+            if (pane) {
+                const auto& g = s.casters[0].glass;
+                const glm::vec3 crossing = glm::vec3(0, 0.4f, 0) + s.towardSun * ((g.center.y - 0.4f) / s.towardSun.y);
+                CHECK(std::abs(crossing.z - g.center.z) < 1.0f);
+                CHECK(g.center.y < 90.0f);
+            }
+            CHECK(runner.find("\"sss\": ((0.0, 0.4, 0.0), 2.0, 25.0)") != std::string::npos);
+            CHECK(s.cameraTarget == glm::vec3(0.0f, 0.4f, 0.0f));
+            CHECK(s.cameraDistance == 2.0f);
+            CHECK(s.cameraElevationDegrees == 25.0f);
+            continue;
+        }
         const bool refl = std::string_view(name).find("-refl-") != std::string_view::npos;
         REQUIRE(s.casters.size() == (pane ? 2u : 1u));
         if (pane) {

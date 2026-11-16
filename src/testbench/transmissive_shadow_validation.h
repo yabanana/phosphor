@@ -24,6 +24,7 @@ namespace phosphor {
 struct ShadowCaster {
     GlassObject glass;      // geometry and material factors (Pane: horizontal quad facing +Y; Cube: a slab; Sphere)
     bool opaque = false;    // an ordinary opaque material (base colour only, no extension): the comparison caster
+    bool sss = false;       // F15.1 (ticket 14 round 3): a volumetric subsurface sphere (rt-walk receiver); implies opaque base
     bool mirror = false;    // F15.1 (ticket 14 round 3): an opaque polished metal slab (the reflection-secondary-lighting receiver); implies opaque
 };
 
@@ -58,7 +59,7 @@ public:
     // +Z face the sun never reaches (lit by GI only); `-refl-*`: a polished metal wall reflecting the sunlit floor (secondary lighting of
     // a reflection hit).  `-open` = the same scene without the pane (the reference of the ratio).  Not in scenarios(): the five
     // planar-shadow keys keep their tests; validScenario() and spec() know both lists.
-    [[nodiscard]] static std::span<const std::string_view> indirectScenarios();
+    [[nodiscard]] static std::span<const std::string_view> indirectScenarios();  // + `-sss-*`: a subsurface sphere under the sun, sun from +Z
     // Declared constants of a scenario (throws std::invalid_argument when unknown).
     [[nodiscard]] static const ShadowScenarioSpec& spec(std::string_view scenario);
 
