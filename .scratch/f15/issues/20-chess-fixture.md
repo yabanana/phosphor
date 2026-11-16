@@ -6,7 +6,7 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 13, 14, 17
 
-**Status:** resolved PARTIAL (2026-11-14): criteria 1, 3 and 4 met on M5; criterion 2 PARTIAL: monotone gate met, the ticket-17 bound on the piece masks cannot be built (reference texture-free and homogeneous, scattering weight map not in the pinned subset); (2026-11-16, round 2: the redundant `setDepthStencilState` / `setViewport` notices are removed (65f2f10) and the `setComputePipelineState` notices are gone after the eight reflection samples became one graph pass (0 notices, 0 validation messages on both back-light rigs under API + shader validation); the back-light rig under shader validation is explained (the engine's 5 s frame wait, not a validation message) and validated at 640x360 with `tools/f15_chess_validate.py` (transmission 0 and 1 exit 0); chess binning A/B/A is recorded in ticket 24 (side-light -1.8 %, shadow rig +6.7 %, back-light +9.8 %, the 5 % rule is not met, union stays default); the RT walk subsurface tier is optional and its chess sssbound gate (Mitsuba references rendering, gate not yet evaluated) is pending the orchestrator's final battery)
+**Status:** resolved PARTIAL (2026-11-14): criteria 1, 3 and 4 met on M5; criterion 2 PARTIAL (2026-11-16, round 2, owner decision A: the king/queen subsurface bound on the RT walk is built and evaluated, RED, declared OPEN; see the round-2 section at the end): monotone gate met, the ticket-17 bound on the piece masks cannot be built (reference texture-free and homogeneous, scattering weight map not in the pinned subset); (2026-11-16, round 2: the redundant `setDepthStencilState` / `setViewport` notices are removed (65f2f10) and the `setComputePipelineState` notices are gone after the eight reflection samples became one graph pass (0 notices, 0 validation messages on both back-light rigs under API + shader validation); the back-light rig under shader validation is explained (the engine's 5 s frame wait, not a validation message) and validated at 640x360 with `tools/f15_chess_validate.py` (transmission 0 and 1 exit 0); chess binning A/B/A is recorded in ticket 24 (side-light -1.8 %, shadow rig +6.7 %, back-light +9.8 %, the 5 % rule is not met, union stays default); the RT walk subsurface tier is optional and its chess sssbound gate (Mitsuba references rendering, gate not yet evaluated) is pending the orchestrator's final battery)
 
 - [x] Back-light rig: the scene is visible through the pawn tops; transmission 0 → 1 increases transmitted luminance on the glass mask monotonically; tint changes chroma as specified
 - [ ] Side-light rig: subsurface weight 0 → 1 and scale × 0.5 / × 2 change the terminator softness monotonically (MET, gated); ticket-17 bound on the piece masks (NOT BUILDABLE: the ground truth is texture-free and homogeneous, see the record)
@@ -175,3 +175,30 @@ The N reflection sample passes (`--reflection-samples` > 1) are now ONE graph pa
 textures; each sample keeps its table, seed and output slice).  Evidence: tools/f15_chess_validate.py (any `Redundant call to set...` counts) on both back-light rigs under API + shader validation: 0 notices, 0 validation messages (was 84);
 subsurface-volumetric-sun with 8 samples under the API layer: 0 notices; bit-identical images: cornell RT-reflection capture and an SSR grid capture at `--reflection-samples 8` `cmp` identical to the orchestrator tree's binary, the 5 F13 exactness PFMs `cmp`
 identical, visual_check 8/8 0 px.  No pipeline descriptor changed (no archive update).  Per-pass timing units: the eight "F13 reflection sample k" units became one.
+
+### 2026-11-16 — round 2: king/queen subsurface bound on the RT walk (orchestrator), RED, declared OPEN by the owner (option A)
+
+**Gate.** `tools/f15_chess_check.py --group sssbound` (5d4e982; weight-0 guard fixed in a58df60): views white (King_White, Queen_White) and black (King_Black,
+Queen_Black), `chess-sidelight/view=<w|b>/zoom=3/weight=1`, `--subsurface-mode rt-walk --subsurface-samples 64 --subsurface-steps 512`, 96 accumulated
+frames; the noisy term is pooled 5x5 with the walk-lights-off twin (`f15_check.pool_noisy_term`).  Metric (ticket 17, decision 11): per piece the
+relative luminance error over the piece ROI with a 5 % floor; bound mean <= 0.10 and p95 <= 0.25 for every piece the weight-0 control does not pass.
+Controls: weight 0 (base model) and walk lights off must fail (both fail).
+**Reference.** `tools/f15_chess_subsurface_reference.py` (Mitsuba 3.9.1 volpath, locally homogeneous k-means classes, non-finite repair 00b68a1) at
+**6 classes per piece and 512 spp per grey render** (reduced from the tool default 8 / 2048 by the sss writer for time); snapshot sha256 white
+641068ed…, black 5304ceeb…, identical to the engine captures.  Its own noise in the metric's form (|Y_a - Y_b| / 2 over Y, same floor), mean / p95:
+white King 0.128 / 0.482, white Queen 0.137 / 0.525; black King 0.101 / 0.337, black Queen 0.127 / 0.473: the reference alone exceeds the bound.
+**Engine (pre-check on a09f738, phosphor 4507dc22…; `build/final-b/chess-sss-ms-on`).** Raw (unpooled) worst: white 0.606 / 1.180, black 1.467 / 3.582.
+Pooled per piece: white King 0.197 / 0.636, white Queen 0.543 / 0.921, black King 0.756 / 2.409, black Queen 1.431 / 3.072.  Piece-mean luminance
+engine / reference: white King 0.0830 / 0.0889 (-6.7 %), white Queen 0.1334 / 0.1255 (+6.3 %), black King 0.0621 / 0.0585 (+6.3 %), black Queen
+0.0250 / 0.0192 (+30 %).  MS off (`--specular-ms off`, Mitsuba does not model the compensation; `build/final-b/chess-sss-ms-off`): piece means -0.05 /
+-0.08 / -0.19 / -0.16 %, gate numbers 0.541 / 0.919 and 1.423 / 3.047: the compensation is not the cause.
+**Reading.** The engine errors are 2-11 times the reference noise, so noise explains only part of them.  Two causes stay unresolved: (1) the reference
+approximates the textured medium by k-means homogeneous classes while the engine's walk takes the medium of each entry pixel from the textures;
+(2) a possible low-albedo gap on the black Queen (single-scattering albedo about 0.3-0.4, mean free path about 0.1 mm).  Re-rendering the reference
+with its noise below a third of the gate would need about 17 times the spp (about 50 h at 8 threads) and would very likely stay RED.
+**Owner decision (2026-11-16, option A):** declared OPEN; criterion 2 stays PARTIAL; thresholds unchanged; a noise-compensated judge (option C) is not
+adopted.  The RT walk bounds stay proven on the homogeneous OpenPBR fixtures (ticket 17/18): side-lit 0.0635 / 0.1708 against 0.10 / 0.25, back-lit
+0.0919 / 0.2288 against the 2x bound 0.20 / 0.50, product output 0.0621 / 0.1681, moving-camera clip 0.0703 / 0.1902 (control 0.1400 / 0.4482 fails).
+**Follow-up D (named, not started: owner approval needed):** a chess variant with one homogeneous medium per piece, identical in engine and reference,
+to separate the reference's class approximation from an engine error.  The final battery re-takes the captures on the final tip (numbers added below).
+
