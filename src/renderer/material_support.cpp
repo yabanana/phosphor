@@ -138,7 +138,8 @@ const MaterialSupportTable& currentSupportTable() {
         // probe/environment along the refracted direction with the volume thickness hint as path length (never SSR); the transmission factor
         // applies at the camera-visible surface only (interior crossings are pure dielectric interfaces); an event beyond the 4th ends in the
         // environment; Schlick Fresnel (the exact one differs by <= 1.2 % mean on the fixtures); direct light through two interfaces is
-        // excluded (caustics); non-shadow GI/probe/secondary RT hits see glass as an opaque base reduction; a rough thin-walled surface and the
+        // excluded (caustics); non-shadow GI/probe/secondary RT hits see glass as an opaque base reduction; AO, froxel fog, ReSTIR
+        // reconnection and sky visibility rays see glass as opaque (owner exclusion (a), docs/plans/F15.md); a rough thin-walled surface and the
         // thickness/transmission textures are not validated against an independent reference.
         // F15.1 (ticket 14): RT shadow rays (sun, DI visibility ReSTIR and clustered, GI shadow rays, reflection secondary lighting) cross glass
         // on a straight line and multiply an RGB transmittance: (1 - Schlick F) per surface at the ray angle, transmission x (1 - metallic) x
@@ -151,6 +152,7 @@ const MaterialSupportTable& currentSupportTable() {
         transmission.level                = SupportLevel::Approximated;
         transmission.approximation        = "rt_refraction_one_fresnel_chosen_sample;rt_off_probes_environment_along_refracted_ray;factor_at_visible_surface_only;"
                                             "at_most_4_interface_events;schlick_fresnel;caustics_excluded;secondary_gi_and_probe_hits_ignore_transmission;"
+                                            "ao_fog_reconnection_sky_rays_see_glass_opaque;"
                                             "rt_shadow_rays_attenuate_through_glass_straight_line;csm_shadows_one_transmittance_layer_per_texel;csm_static_cache_keeps_casters_opaque";
         FeatureSupportEntry& volume = t.features[static_cast<u32>(MaterialFeature::Volume)];
         volume.level                = SupportLevel::Approximated;

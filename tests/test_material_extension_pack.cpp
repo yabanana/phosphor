@@ -211,6 +211,8 @@ TEST_CASE("support report: ior/specular, clearcoat and sheen are approximated wi
     CHECK(tr.level == SupportLevel::Approximated);
     CHECK(std::string(tr.approximation).find("rt_off_probes_environment_along_refracted_ray") != std::string::npos);
     CHECK(std::string(tr.approximation).find("at_most_4_interface_events") != std::string::npos);
+    // Owner exclusion (a), docs/plans/F15.md: AO, fog, ReSTIR reconnection and sky rays see glass as opaque.
+    CHECK(std::string(tr.approximation).find("ao_fog_reconnection_sky_rays_see_glass_opaque") != std::string::npos);
     const FeatureSupportEntry& vo = t.features[static_cast<u32>(MaterialFeature::Volume)];
     CHECK(vo.level == SupportLevel::Approximated);
     CHECK(std::string(vo.approximation).find("beer_lambert_along_real_inside_segment_with_rt") != std::string::npos);
