@@ -120,3 +120,15 @@ camera, not from the result; the tolerance was not changed.
   Measured (wall ratio to tilt 0, tilts 0.38 / 0.45 / 0.5 / 0.55): A 0.961 / 0.832 / 0.654 / 0.428; B 0.908 / 0.749 / 0.576 / 0.370 (B / A 0.945 / 0.900 / 0.881 / 0.864, worst 13.6 %: FAIL of the 7 % gate); B' 0.877 / 0.691 / 0.532 / 0.387 (control B' / A worst 18.7 %).  The analytic model of the panel alone is 0.825 / 0.572 / 0.358 / 0.179: the DDGI atlas itself broadens ANY panel pattern (B is already above the model), so the probe kernel, not the falloff, explains most of the DDGI arm's 139 %.
   What remains (A wider than B by 6-14 %) is not separated from a confound of B: the point light also lights the wall directly (1 m, radiance about 57), so B's panel re-radiates a wall bounce that A's panel does not receive.  The gate and the control do not separate the two by a margin (13.6 % vs 18.7 %).
 Status: GI (DDGI) spot falloff NOT PROVEN equal, NOT shown different (no defect found); by reading, `giSecondaryRadiance` uses the same smoothstep as the legacy path and `diSampleLight`; the ReSTIR GI arm agrees with the model to 1-3 % where the signal is large.  A cleaner design needs the point-light wall bounce removed (e.g. the wall hidden from the point light by a light-proof shield that is itself black) and more atlas frames; not done in the time box.
+
+### 2026-11-16 — owner decisions on the round-3 spot-falloff arms (orchestrator)
+
+- **Declared OPEN (owner option a), support table stays Approximated.**  Measured bounds per path against the analytic smoothstep (tools/f15_spot_falloff_check.py
+  `arms-run` / `arms-verify`, gate 7 %, outside-cone ratio <= 1 %): RT reflection lighting PASS up to tilt 0.5 (0.01 / 0.56 / 1.67 %; tilt 0.55: see the
+  final-tip run with the pre-registered patch below); probe capture 1.2-1.8 % up to tilt 0.5 and 16.3 % at 0.55 (ratio 0.12, cube-map filtering of a thin
+  lit sliver suspected, not separated); DDGI not separable (the probe atlas broadens any panel pattern: 13.6 % against the linear control's 18.7 %); ReSTIR
+  GI 1.2 / 3.0 / 7.0 / 19.6 % (weak signal in the steep tail).  Code evidence that every path evaluates the same falloff: `smoothstep(cos outer, cos inner,
+  cos theta)` in `shaders/material_shading.h:1043` (resolve), `shaders/gi_common.h:205` (GI and secondary-hit shading: DDGI, radiance cache, ReSTIR GI,
+  probe capture, reflection secondary lighting), `shaders/restir_common.h:87-91` (the DI light sample, t^2 (3 - 2t) written out), `shaders/subsurface_walk.metal:126`.
+- **Post-hoc change rejected (owner):** the rtrefl patch half-size 0.054 m (camera footprint of the 9 x 9 patch, chosen after a 7.44 % failure at tilt 0.55)
+  is reverted to the pre-registered 0.05 m (95e184e); the final-tip run records tilt 0.55 as an open failure if it exceeds 7 %; tolerance unchanged.

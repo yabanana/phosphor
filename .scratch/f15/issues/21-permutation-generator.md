@@ -247,3 +247,13 @@ A source bisection of 78d173d..24563ce was NOT done: the exact module exists onl
 **Guard added (the check that fails if it comes back).**  `ReflectionPasses::check` (only under `--debug-lighting N`, the hit-metadata buffer is allocated shared only then) fails the lighting check and the run (exit 1) when a reduced record has radiance but no flags.  The same code on the old tree fails 7 of 40 runs (exit 1, "REFLECTION metadata check slot N: K records with radiance but no flags"); on the tip 0 of 60 (EXIT 0, LIGHTING check PASS every frame).  Normal runs are untouched.
 Verification of the commit: `f15_exact.sh`: the 5 PFMs `cmp`-identical to `exact-final-ms`; `visual_check` (`--pipeline-sync`, vs `reference-f15-final`): all 8 benches 0 px; `ctest`: 45 / 45 pass (terrain_materials_verify skipped as before); `f15_permutations.py equivalence` on `corpus:ToyCar` and `corpus:ClearCoatCarPaint` (tip): 0 px, 0 ULP, 8-bit 0, repeated reference 0, controls leave the envelope (101 618 and 173 067 px).
 Open: the writer of the zeroed flags in the old state (next step: a debug copy of the reflection kernel that stores a per-group marker word, or the metadata buffer double-buffered per frame slot, to see whether the late store is the previous frame's or this frame's); the old nondeterminism remains UNEXPLAINED by construction.
+
+### 2026-11-16 — owner decision on the old ToyCar variation (orchestrator)
+
+Declared **localised, not root-caused** (owner option a): reproduced 5-8 of 20 runs on 78d173d + the first exact module; signature: whole aligned 32-pixel
+groups (one SIMD group) of the reflection `GPUSpecularSample` record end with flags / path / slot / pdf 0 but non-zero radiance (23-35 of 480 frame checks in
+the final buffer); needs RT reflections, the exact module and the archived (metal-tt) pipelines (0 of 14 with `--no-pipeline-archive`); excluded: the clear
+pass, an extra barrier, the frame ring, transient aliasing, the a-trous tiles, the lobe guide, the archive entries; the writing store is not found.  The
+tip never produces the record (0 of 480 frame checks, 60 / 60 identical images).  Guard kept: `ReflectionPasses::check` fails the run under
+`--debug-lighting N` for a reduced record with radiance but no flags (old tree 7 / 40 runs fail, tip 0 / 60); the final battery's f15_check captures run
+with `--debug-lighting 1`.  Follow-up (named, not started): a debug copy of the reflection kernel that stores a per-group marker word to find the store.

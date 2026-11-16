@@ -347,3 +347,10 @@ Commits: da2ab3c (visibility_tile), 702ef03 (DI / clustered / fog emitter sites 
 **(3) Archive**: targeted harvest of `f15_vertex_color_check.py` (every path: mesh, overflow, forward, meshforward, tile, new `meshforward-tricull` / `meshforward-direct` paths for `meshlet_mesh_tricull_vc` / `meshlet_mesh_direct_vc`, shadow rt / csm / new `cache` mode for the cache casters) and `f15_vertex_color_secondary.py`; KEPT `.scratch/f15/harvest/color0-spot-1.json` (34 descriptors, additive; filtered by constant 27 plus `--function` for every `*_vc` entry point, because a descriptor of a function without the constant is not specialised by it).  Before the merge the old binary logged archive misses `forward_fs_vc` (Forward v7) and `shadow_cache_depth_fragment_vc`; with the KEPT merged locally every COLOR_0 capture (all paths, shadow cache included) and the probe / emitter-restir fixture logs show 0 archive misses.  Remaining misses are scenes without COLOR_0: the tile control captures (exact visibility_resolve, overflow fallback) and the never-archived options `--meshlet-triangle-cull` / `--meshlet-object off` (generic `meshlet_mesh_tricull` / `_direct` / `_debug`).
 **Featureless**: `f15_exact.sh` 5 PFMs cmp-identical to build/exact-final-ms; `visual_check` (`EXTRA_ARGS=--pipeline-sync`, BENCH8 instances 100000) 0 of 5760000 px on all 8 benches; ctest 45 / 45.
 Open: the CPU RT reference (rt_check) is still unaware of colours.
+
+### 2026-11-16 — owner decision on the COLOR_0 fog emitter fixture (orchestrator)
+
+The sign threshold of `emitter-fog` (tools/f15_vertex_color_secondary.py) lowered from the pre-registered 0.08 to 0.05 after the first measurement is
+rejected as a post-hoc change (owner, 95e184e): the fog case has no sign gate, because 0.08 is infeasible by construction (the baked ground truth itself
+reads 0.067: the fog scatter dilutes the floor contrast); its gate of record is the equivalence gate fixed beforehand (max |color0 - baked| <= 0.10 x
+max |control - baked|; measured error 0.0056 against the limit 0.0118), and th 0.08 still drives its control check.  The other emitter cases keep both gates.
