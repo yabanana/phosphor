@@ -1135,6 +1135,19 @@ class RunnerLogic(unittest.TestCase):
         used = {check.bench_scenario(n) for n, spec in check.SCENARIOS.items() if spec["kind"] in check.LAYER_KINDS}
         self.assertEqual(used, declared)
 
+    def test_layer_equal_comparisons_run_both_sides_in_the_exact_module(self):
+        """F15 closure round 4 (owner decision 2026-11-17): every capture a layer-equal comparison uses forces the exact module; others do not."""
+        for name in ("layers-endpoint-0", "layers-single-0", "layers-single-1", "layers-endpoint-3-cc0", "layers-single-3-cc0", "layers-blk-emissive-e1",
+                     "layers-blk-emissive-s1", "layers-blk-emissive-s0", "layers-blk-emissive-s1x", "layers-hit-gi-e0", "layers-hit-gi-s0",
+                     "layers-hit-probe-own", "layers-weight-zero", "layers-two-layers", "layers-coat-zero", "layers-coat-union"):
+            self.assertIn(name, check.EXACT_ALL_KEYS)
+            args = check.capture_command("phosphor", name, pathlib.Path("/x"))
+            self.assertEqual(args.count("--debug-material-module"), 1, name)
+            self.assertEqual(args[args.index("--debug-material-module") + 1], "exact-all", name)
+        for name in ("layers-ramp", "layers-furnace", "layers-ramp-single-0", "layers-blk-coat-ramp", "base-grid-sun"):
+            self.assertNotIn(name, check.EXACT_ALL_KEYS)
+            self.assertNotIn("--debug-material-module", check.capture_command("phosphor", name, pathlib.Path("/x")), name)
+
     def test_declared_gate_bounds(self):
         masks, spheres = self.synthetic_masks()
         reference = np.full((40, 40, 3), 0.5, dtype=np.float32)

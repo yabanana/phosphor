@@ -58,7 +58,7 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
     }
     clear_ = p.request(compute("visibility_clear"));
     classify_ = p.request(compute("visibility_classify"));
-    generic_ = p.request(compute(lighting_ ? "visibility_lit_resolve" : "visibility_resolve"));
+    generic_ = p.request(pipe::forward::inExactModuleIfAllScenes(compute(lighting_ ? "visibility_lit_resolve" : "visibility_resolve"))); // exact-all: test only
     if (adaptive_ || p.harvesting()) {
         adaptivePipeline_ = p.request(compute("visibility_adaptive"));
         saveHistory_ = p.request(compute("visibility_history"));
@@ -72,7 +72,7 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
     for (u32 i = 0; i < VISIBILITY_CLASSES; ++i) {
         auto d = compute(lighting_ ? "visibility_lit_resolve" : "visibility_resolve");
         d.constant(21, pipe::ConstantType::UInt, i);
-        resolve_[i] = p.request(d);
+        resolve_[i] = p.request(pipe::forward::inExactModuleIfAllScenes(d));
     }
     pipe::PipelineDesc d;
     d.kind = pipe::PipelineKind::Render;

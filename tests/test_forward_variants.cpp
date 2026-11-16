@@ -198,3 +198,15 @@ TEST_CASE("withMaterialFeatures: a union appends constant 22; all-lobes is a dis
     // Stripping constants (the compile fallback of the cache) yields the base generic pipeline.
     CHECK(canonicalString(spec.generic()) == canonicalString(genericDesc(rg::Format::BGRA8Srgb)));
 }
+
+TEST_CASE("exact-all test mode maps base resolve kernels only when on (F15 closure round 4)") {
+    PipelineDesc d;
+    d.functions = {"visibility_resolve", "", ""};
+    CHECK(inExactModuleIfAllScenes(d).functions[0] == "visibility_resolve"); // default: byte-identical
+    setExactModuleAllScenes(true);
+    CHECK(inExactModuleIfAllScenes(d).functions[0] == "phx_exact::visibility_resolve");
+    d.functions[0] = "visibility_clear";
+    CHECK(inExactModuleIfAllScenes(d).functions[0] == "visibility_clear");
+    setExactModuleAllScenes(false);
+    CHECK_FALSE(exactModuleAllScenes());
+}

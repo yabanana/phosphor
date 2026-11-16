@@ -1234,6 +1234,35 @@ def _layer_hit_keys():
 
 SCENARIOS.update(_layer_hit_keys())
 
+# F15.4 TEST CHANGE (F15 closure round 4, owner decision B "Flag ora", 2026-11-17), made AFTER the measurement: the layer-equal comparison compared
+# two maths modes.  The layer stack has material features, so the resolve ran the exact-maths module (phx_exact::*, safe math, contract(off)); the
+# single-material pair is featureless and ran the fast module.  Measured on the final binary c2514d6f: 16 keys failed bitwise (layers-endpoint-0..3,
+# the -cc0 twins, layers-blk-emissive-e0/e1, layers-hit-{refl,probe,gi}-e0/e1: 72,509..259,445 differing px, 0..4,477 differing 8-bit px), and with
+# the STACK forced to the fast module (--debug-material-module fast) all 16 were 0 px against their pairs (build/final2/diag2.log).  Every capture a
+# layer-equal comparison uses (the key, its pair / info_pair, its controls and needs) now runs `--debug-material-module exact-all`, which also puts
+# the featureless resolve on the exact module, so both sides use ONE maths mode.  No threshold, gate, pixel set or fixture changes; the product
+# default is unchanged (the flag is test-only).
+EXACT_ALL_ARGS = ["--debug-material-module", "exact-all"]
+
+
+def _force_exact_all_for_layer_equal():
+    names = set()
+    for name, spec in SCENARIOS.items():
+        if spec.get("kind") == "layer-equal" and spec.get("pair"):
+            names.add(name)
+            for field in ("pair", "info_pair"):
+                if spec.get(field):
+                    names.add(spec[field])
+            names.update(spec.get("controls", []))
+            names.update(spec.get("needs", []))
+    for name in names:
+        spec = SCENARIOS[name]
+        spec["engine_args"] = [*spec.get("engine_args", []), *EXACT_ALL_ARGS]
+    return sorted(names)
+
+
+EXACT_ALL_KEYS = _force_exact_all_for_layer_equal()
+
 def _product_keys():
     """F15.1 (ticket 17/18, RT tier): the keys of the PRODUCT output.  Every walk gate above is the bias check of the converged estimator (64-256 walks x 96
     frames, noisy term pooled over the reference's 5x5 window).  The owner's criterion is that the RT walk meets the bound when enabled, as a user runs it:

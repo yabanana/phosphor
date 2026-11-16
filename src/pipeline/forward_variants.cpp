@@ -76,6 +76,7 @@ u16 materialFeaturesConstantIndex() { return gen::kMaterialFeaturesConstantIndex
 
 namespace {
 std::atomic<bool> g_exactMaterialModule{true};
+std::atomic<bool> g_exactModuleAllScenes{false};
 }
 
 void setExactMaterialModule(bool exact) { g_exactMaterialModule.store(exact, std::memory_order_relaxed); }
@@ -92,6 +93,12 @@ PipelineDesc inExactModule(const PipelineDesc& desc) {
     out.functions[0] = exactModuleKernel(desc.functions[0]);
     return out;
 }
+
+void setExactModuleAllScenes(bool all) { g_exactModuleAllScenes.store(all, std::memory_order_relaxed); }
+
+bool exactModuleAllScenes() { return g_exactModuleAllScenes.load(std::memory_order_relaxed); }
+
+PipelineDesc inExactModuleIfAllScenes(const PipelineDesc& desc) { return exactModuleAllScenes() ? inExactModule(desc) : desc; }
 
 PipelineDesc withMaterialFeatures(const PipelineDesc& desc, u32 mask) {
     if (mask == 0) return desc;

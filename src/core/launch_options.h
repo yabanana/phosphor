@@ -61,10 +61,12 @@ namespace phosphor {
 //                      specialised variants and draws with the generic
 //                      pipeline, the fallback a new variant uses while it
 //                      compiles (F3.2/F3.3 check: same pixels as before F3)
-//   --debug-material-module exact|fast  DEBUG: exact (default) = scenes with
+//   --debug-material-module exact|fast|exact-all  DEBUG: exact (default) = scenes with
 //                      material features use the exact-maths resolve module;
 //                      fast = they keep the base fast-maths kernels (A/B of the
-//                      module's cost inside one binary; needs --pipeline-sync)
+//                      module's cost inside one binary; needs --pipeline-sync);
+//                      exact-all = TEST: scenes without material features use
+//                      the exact module too (layer-equal comparisons, F15.4)
 //   --debug-pipeline-xpc-fail N  the first N pipeline compile attempts of
 //                      the run fail with a synthetic "interrupted connection"
 //                      error (XPC_ERROR_CONNECTION_INTERRUPTED), injected
@@ -323,6 +325,7 @@ struct LaunchOptions {
     bool        debugCompileStorm  = false;
     bool        debugPipelineFallback = false;
     bool        debugMaterialModuleFast = false; // --debug-material-module fast
+    bool        debugMaterialModuleAll  = false; // --debug-material-module exact-all
     u32         debugPipelineXpcFail  = 0;    // --debug-pipeline-xpc-fail N (0 = off)
     bool        debugFlexiblePipelines = false;
     u32         debugMode      = 0;

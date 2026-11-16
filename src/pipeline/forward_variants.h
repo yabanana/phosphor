@@ -85,6 +85,13 @@ void setExactMaterialModule(bool exact);
 [[nodiscard]] std::string exactModuleKernel(const std::string& name);
 /// `desc` with its first function mapped through exactModuleKernel.
 [[nodiscard]] PipelineDesc inExactModule(const PipelineDesc& desc);
+/// TEST ONLY (--debug-material-module exact-all, F15 closure round 4, owner decision 2026-11-17): the BASE resolve pipelines a scene without
+/// material features uses (generic + legacy classes) also come from the exact-maths module, so a layer stack (exact module) and its
+/// featureless single-material pair are compared in one maths mode.  Default false (the product: featureless scenes keep the fast module).
+void setExactModuleAllScenes(bool all);
+[[nodiscard]] bool exactModuleAllScenes();
+/// `desc` through inExactModule when exactModuleAllScenes(), else unchanged (byte-identical descriptor and archive key).
+[[nodiscard]] PipelineDesc inExactModuleIfAllScenes(const PipelineDesc& desc);
 /// F15.1 (ticket 22): reserved constant TEXTURE_TRANSFORM (uint, index 26): 1 = per-slot KHR_texture_transform compiled in.
 [[nodiscard]] u16 textureTransformConstantIndex();
 /// `desc` with TEXTURE_TRANSFORM = 1 (an existing constant is replaced).

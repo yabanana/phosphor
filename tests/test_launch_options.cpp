@@ -1657,4 +1657,14 @@ TEST_CASE("launch options: --debug-material-module (F15.4 attribution)") {
     REQUIRE(parse({"--debug-material-module", "exact"}, o, err));
     CHECK_FALSE(o.debugMaterialModuleFast);
     CHECK_FALSE(parse({"--debug-material-module", "other"}, o, err));
+    // F15 closure round 4 (owner decision 2026-11-17): exact-all forces the exact module on featureless scenes too; the default stays off.
+    CHECK_FALSE(o.debugMaterialModuleAll);
+    REQUIRE(parse({"--debug-material-module", "exact-all"}, o, err));
+    CHECK(o.debugMaterialModuleAll);
+    CHECK_FALSE(o.debugMaterialModuleFast);
+    REQUIRE(parse({"--debug-material-module", "fast"}, o, err));
+    CHECK_FALSE(o.debugMaterialModuleAll);
+    CHECK(o.debugMaterialModuleFast);
+    REQUIRE(parse({"--debug-material-module", "exact"}, o, err));
+    CHECK_FALSE(o.debugMaterialModuleAll);
 }
