@@ -35,11 +35,16 @@ struct RtPayload {
     float lnTransmittance[3];
     float openSigma[3];                 // net open sigma_t of the media entered and not left (ticket 14 closure: a segment that ends inside a volume)
     uint listCount;
-    uint payloadPad;                    // padding: sizeof(RtPayload) must stay a multiple of 8 (132 bytes makes metal-tt/applegpu-nt fail with an internal compiler error on reflection_rt_lobe + rt_alpha_generic, constant 22 = 1)
+    uint payloadPad;                    // padding: keeps the validated 144-byte layout (see the static_assert below: the 136-byte layout makes the Apple GPU compiler fail)
     uint ifInvocations, ifDistinct, listOverflows;
     uint2 listed[kRtTransmitList];      // (slot, primitive)
     float direction[3];                 // the world ray direction (set by rtTrace for the intersection function)
 };
+// F15 ticket 24: the Apple GPU compiler (MetalToolchain 27.2.47) fails with an internal compiler error on reflection_rt_lobe with rt_alpha_generic
+// linked (constant 22 = 1) when this payload is laid out at 136 bytes (the layout after the dead noDedup word was removed); the 144-byte layout
+// with payloadPad compiles.  The trigger is not a simple alignment rule, so the validated layout is pinned: a change here must be re-validated by
+// the archive translation (metal-tt in the build) AND a runtime JIT of that pipeline (--no-pipeline-archive, a specular-ior scene with RT reflections).
+static_assert(sizeof(RtPayload) == 144, "RtPayload layout changed: re-validate metal-tt + runtime JIT of reflection_rt_lobe (Apple GPU compiler ICE), then update this pin");
 
 // F15 ticket 24: the payload of a kernel that never needs the transmittance of a ray (no transmittance, no dedup list, no direction): the
 // pre-ticket-14 16 bytes.  The payload size alone slows every traversal of the pipeline (RTAO +0.43 ms on Sponza D2, docs/opt-log.md), so a
