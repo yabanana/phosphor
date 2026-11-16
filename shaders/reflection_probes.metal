@@ -149,6 +149,9 @@ kernel void reflection_probe_prefilter(constant GPUProbeFilterParams& p [[buffer
     filtered.write(float4(valid?value:float3(0),valid?alpha:-1.0f),pixel.xy,6*p.cubeIndex+pixel.z);
 }
 #endif // !PHOSPHOR_REFL_LOBE
+#ifdef PHOSPHOR_REFL_LOBE
+constant constexpr uint kProbeSpecularMs=1u<<15; // F15 closure round 4: --specular-ms under probe reflections (set by reflection_passes.cpp)
+#endif
 // Deterministic prefiltered-probe fallback uses split-sum receiver BRDF. It is
 // a separate mode, not a prefilter applied AGAIN to an already GGX sampled ray.
 kernel void REFL_KERNEL(reflection_probe_only)(constant GPUReflectionParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
@@ -203,6 +206,17 @@ const bool finiteFit=all(isfinite(fitWeight));
             if(sheenLobe.sheen){uint sheenPath;float sheenCoatAtt=1.0f;
                 if(sheenLobe.coat)sheenCoatAtt=1.0f-sheenLobe.coatFactor*bsdfCoatFresnel(abs(dot(sheenLobe.coatNormal,v)));
                 result+=reflectionProbeRadiance(diVec(s.position),n,1.0f,true,p,probes,atlas,sheenPath)*sheenLobe.sheenColor*(sheenLobe.sheenAlbedo*sheenCoatAtt);}}
+        // F15 closure round 4 (ADR-0007): the multiple-scattering term F_ms L, lit like the sheen by the PROBE radiance at N (roughest level); the composite skips
+        // its environment-lit copy under REFLECT_COMPOSE_SHEEN_FROM_PROBE.  The term is the composite's (same lobe, sheen scale, coat attenuation, coat lobe).
+        if((p.flags&kProbeSpecularMs)&&!(p.flags&REFLECTION_ENABLE_GI)&&dot(n,v)>0.0f){const auto msLobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid,s);
+            if(!msLobe.aniso){const float msNV=max(dot(n,v),1e-4f);const float3 msAlbedo=diVec(s.albedo);const float msMetal=saturate(s.metallic);
+                const BsdfMs ms=bsdfMsPrepare(msLobe.extended?mix(msLobe.spec.f0,msAlbedo,msMetal):bsdfBaseF0(msAlbedo,msMetal),msLobe.extended?mix(msLobe.spec.f90,1.0f,msMetal):1.0f,
+                    msLobe.envRoughness,msNV,phosphor::MsLogLossAvgTable,phosphor::MsLogLostTable);
+                float3 w=bsdfMsEnv(ms);float msCoatAtt=1.0f;
+                if(msLobe.sheen)w*=msLobe.sheenScale;
+                if(msLobe.coat){msCoatAtt=1.0f-msLobe.coatFactor*bsdfCoatFresnel(abs(dot(msLobe.coatNormal,v)));
+                    w=w*msCoatAtt+msLobe.coatFactor*bsdfMsEnv(bsdfMsPrepare(float3(0.04f),1.0f,msLobe.coatRoughness,max(dot(msLobe.coatNormal,v),1e-4f),phosphor::MsLogLossAvgTable,phosphor::MsLogLostTable));}
+                if(any(w>0)){uint msPath;result+=reflectionProbeRadiance(diVec(s.position),n,1.0f,true,p,probes,atlas,msPath)*w;}}}
         // F15.1 (ticket 13): the declared transmitted term of a transmissive pixel (probes/environment along the refracted direction).
         {const auto transLobe=REFL_LOBE(p.flags,REFLECTION_LOBE_GUIDE_VALID,tid,s);uint transmittedPath;
             if(transLobe.trans){const float3 Lt=reflectionDeclaredTransmission(s,transLobe,p,probes,atlas,transmittedPath);if(!all(isfinite(Lt))||any(Lt<0))result=as_type<float>(0x7fc00000u);else result+=Lt;}}

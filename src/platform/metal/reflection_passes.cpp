@@ -245,7 +245,9 @@ struct ReflectionPasses::Impl {
                 const auto composeLobe=features.serve(p,213,compose,mask,[&]{return lighting::kernel("reflection_composite_lobe");});
                 if(direct.lobeGuideValid()&&composeLobe!=compose&&(!transport||served!=baseTransport)){transportServed=served;composeServed=composeLobe;lobeGuide=true;}}
             if(lobeGuide)params.flags|=REFLECTION_LOBE_GUIDE_VALID;
-            if(lobeGuide&&options.debugTransmissionBothBranches)params.flags|=REFLECTION_DEBUG_BOTH_BRANCHES;}
+            if(lobeGuide&&options.debugTransmissionBothBranches)params.flags|=REFLECTION_DEBUG_BOTH_BRANCHES;
+            // F15 closure round 4 (ADR-0007): under probe reflections the lobe probe kernel lights the multiple-scattering term with the probe radiance (like the sheen); the bit mirrors kProbeSpecularMs of reflection_probes.metal (not in gpu_types.h: no ABI change).
+            if(lobeGuide&&options.specularMs&&options.reflections==ReflectionMode::Probes)params.flags|=(1u<<15);}
         paramsAddress=lighting::upload(c,params);probeAddress=lighting::upload(c,probe);
         for(u32 i=0;i<options.reflectionSamples;++i){auto sample=params;sample.seed=options.lightingSeed+i*0x9e3779b9u;sampleAddress[i]=lighting::upload(c,sample);}
         aoParams={};std::memcpy(aoParams.viewProjection,params.viewProjection,64);std::memcpy(aoParams.inverseViewProjection,params.inverseViewProjection,64);
