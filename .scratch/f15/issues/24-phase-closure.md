@@ -249,3 +249,26 @@ of the closure run) exit 0, 89 / 89 executed, gating control 30/30, cross-check 
 partial" section, plus earlier-phase fixes, in parallel; owner decisions of the same day: implement multiple-scattering compensation,
 multi-bounce reflections, non-uniform texture transforms and back-lit thick subsurface; RT random walk as an optional subsurface tier; class
 pipelines bit-identical within the D2 budget; optimise the transmission cost in F15. Work in progress on branches `f15c-*` (round 2).
+
+### 2026-11-16 — closure log: visual_check references per bench (ticket 03 criterion 2)
+
+`image_diff` of the committed-history references (8 benches, 2400x2400, tolerance 0; `BENCH8_ARGS="--instances 100000"`):
+`build/reference-f15base` (2026-11-13 11:08, before ticket 03) -> `build/reference-f15-appB` (11:59, glTF Appendix B base model, ADR-0006) ->
+`build/reference-f15-final` (2026-11-16 01:35, round 2: specular multiple-scattering compensation on by default, ADR-0007, and the other intended
+round-2 image changes).  The final battery (`build/final2`, final tip) compares 0 px against `reference-f15-final` on all 8 benches.
+
+| bench | base -> appB: pixels differ / max delta / PSNR | appB -> final: pixels differ / max delta / PSNR |
+|---|---|---|
+| 1 | 3 635 504 / 14 / 38.76 dB | 2 755 646 / 34 / 42.71 dB |
+| 2 | 561 787 / 49 / 41.11 dB | 366 387 / 69 / 42.05 dB |
+| 3 | 3 121 293 / 57 / 31.59 dB | 2 374 495 / 71 / 35.08 dB |
+| 4 | 1 409 236 / 30 / 45.49 dB | 1 473 054 / 58 / 41.85 dB |
+| 5 | 2 229 852 / 2 / 55.13 dB | 731 856 / 1 / 61.62 dB |
+| 6 | 2 088 863 / 7 / 48.58 dB | 1 037 935 / 2 / 57.59 dB |
+| 7 | 3 809 999 / 10 / 45.83 dB | 2 201 844 / 1 / 56.31 dB |
+| 8 | 4 379 566 / 64 / 29.85 dB | 3 181 013 / 43 / 34.63 dB |
+
+base -> appB is the expected change of ticket 03 (diffuse weighted by the dielectric Fresnel F(0.04), metals through the DFG table: intermediate
+metallic and ambient / GI diffuse; ticket 03 recorded PSNR 29.9-55.1 dB, max delta 2-64, the same numbers).  appB -> final is not attributed
+per bench to individual round-2 commits here (MS compensation is the change that touches every bench's specular energy).
+
