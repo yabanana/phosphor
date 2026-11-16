@@ -19,6 +19,8 @@ namespace {
 // transmissive-shadow-curved (the last) is the report-only curved-glass case.
 constexpr std::array<std::string_view, 5> kAll{"transmissive-shadow-pane-sun", "transmissive-shadow-water-sun", "transmissive-shadow-volume-pane",
                                                "transmissive-shadow-point", "transmissive-shadow-curved"};
+constexpr std::array<std::string_view, 4> kIndirect{"transmissive-shadow-gi-pane", "transmissive-shadow-gi-open", "transmissive-shadow-refl-pane",
+                                                    "transmissive-shadow-refl-open"};
 constexpr float pi = 3.14159265358979323846f;
 
 glm::quat orientLight(glm::vec3 towardLight) {
@@ -78,6 +80,24 @@ glm::vec3 towardSun(float degreesFromVertical) {
     // glass on the screen, so the camera never looks at the floor through a caster.
     const float a = glm::radians(degreesFromVertical);
     return {0.0f, std::cos(a), -std::sin(a)};
+}
+
+// F15.1 (ticket 14, round 3): the huge pane of the indirect fixtures.  60 m above the origin (the probe rays reach 100 m but the grid of the
+// fixture ends below 10 m: the atlas lookup at the pane is 0, so the pane adds no bounce), centred where the sun ray from the scene meets
+// its height (towardSun 30 degrees from the vertical: 60 m x tan 30 = 34.64 m towards -Z); 120 m wide: every sun ray of the scene crosses it.
+ShadowCaster hugePane(glm::vec3 tint, float degrees) {
+    ShadowCaster c = thinPane(0.0f, 120.0f, tint);
+    c.glass.center = {0.0f, 60.0f, -60.0f * std::tan(glm::radians(degrees))};
+    return c;
+}
+ShadowCaster mirrorWall() {
+    ShadowCaster c = slab(0.0f, 1.0f, 1.0f, 1.0f, 1.5f);
+    c.glass.center = {0.0f, 1.0f, -1.5f};
+    c.glass.scale = {6.0f, 2.0f, 0.05f};
+    c.opaque = true;
+    c.mirror = true;
+    c.glass.thickness = 0.0f;
+    return c;
 }
 
 std::vector<ShadowScenarioSpec> specs() {
@@ -142,6 +162,31 @@ std::vector<ShadowScenarioSpec> specs() {
         s.towardSun = towardSun(25.0f);
         all.push_back(std::move(s));
     }
+    // 6. The indirect-light fixtures (see the header): sun 30 degrees from the vertical, green pane, camera 30 degrees above the floor.
+    const glm::vec3 green2(0.4f, 0.9f, 0.45f);
+    for (const bool refl : {false, true}) {
+        for (const bool withPane : {true, false}) {
+            ShadowScenarioSpec s;
+            s.name = refl ? (withPane ? "transmissive-shadow-refl-pane" : "transmissive-shadow-refl-open")
+                          : (withPane ? "transmissive-shadow-gi-pane" : "transmissive-shadow-gi-open");
+            if (withPane) s.casters.push_back(hugePane(green2, 30.0f));
+            if (refl) {
+                s.casters.push_back(mirrorWall());
+                s.cameraTarget = {0.0f, 0.5f, 1.0f};
+                s.cameraDistance = 5.0f;
+                s.cameraElevationDegrees = 25.0f;
+            } else {
+                s.casters.push_back(opaqueSlab(0.0f, 0.5f, 1.0f, 1.0f));
+                s.cameraTarget = {0.0f, 0.4f, 0.3f};
+                s.cameraDistance = 4.0f;
+                s.cameraElevationDegrees = 30.0f;
+            }
+            s.sun = true;
+            s.sunIrradiance = 3.0f;
+            s.towardSun = towardSun(30.0f);
+            all.push_back(std::move(s));
+        }
+    }
     return all;
 }
 const std::vector<ShadowScenarioSpec>& table() {
@@ -155,9 +200,10 @@ TransmissiveShadowValidation::TransmissiveShadowValidation(std::string scenario)
     name_ = "Transmissive shadow validation: " + scenario_;
 }
 bool TransmissiveShadowValidation::validScenario(std::string_view scenario) {
-    return std::find(kAll.begin(), kAll.end(), scenario) != kAll.end();
+    return std::find(kAll.begin(), kAll.end(), scenario) != kAll.end() || std::find(kIndirect.begin(), kIndirect.end(), scenario) != kIndirect.end();
 }
 std::span<const std::string_view> TransmissiveShadowValidation::scenarios() { return kAll; }
+std::span<const std::string_view> TransmissiveShadowValidation::indirectScenarios() { return kIndirect; }
 const ShadowScenarioSpec& TransmissiveShadowValidation::spec(std::string_view scenario) {
     for (const auto& s : table())
         if (s.name == scenario) return s;
@@ -211,7 +257,11 @@ void TransmissiveShadowValidation::setup(ECS& ecs, GpuScene& scene, TextureManag
         instance.setStatic(true);
         ecs.addComponent(e, std::move(instance));
         MaterialComponent material;
-        if (caster.opaque) {
+        if (caster.mirror) {
+            material.baseColorFactor = glm::vec4(1.0f);
+            material.metallicFactor = 1.0f;
+            material.roughnessFactor = 0.02f; // below the engine's mirror band (0.1): the ideal mirror direction
+        } else if (caster.opaque) {
             material.baseColorFactor = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);
             material.metallicFactor = 0.0f;
             material.roughnessFactor = 1.0f;

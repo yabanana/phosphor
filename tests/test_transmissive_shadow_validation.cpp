@@ -260,3 +260,52 @@ TEST_CASE("F15.3 tickets 14/15: the camera sees the floor shadows and never the 
         }
     }
 }
+
+TEST_CASE("F15.1 ticket 14 round 3: the indirect-light fixtures (tools/f15_gi_glass_shadow_check.py) are valid, outside the planar list, and geometrically closed") {
+    const auto names = TransmissiveShadowValidation::indirectScenarios();
+    REQUIRE(names.size() == 4);
+    std::string runner;
+    {
+        std::ifstream in(std::string(PHOSPHOR_SOURCE_DIR) + "/tools/f15_gi_glass_shadow_check.py");
+        std::stringstream text;
+        text << in.rdbuf();
+        runner = text.str();
+    }
+    REQUIRE_FALSE(runner.empty());
+    for (auto name : names) {
+        CHECK(TransmissiveShadowValidation::validScenario(name));
+        for (auto planar : TransmissiveShadowValidation::scenarios()) CHECK(name != planar);
+        const auto& s = TransmissiveShadowValidation::spec(name);
+        CHECK(s.sun);
+        CHECK(s.towardSun.y == doctest::Approx(std::cos(glm::radians(30.0f))));
+        const bool pane = std::string_view(name).ends_with("-pane");
+        const bool refl = std::string_view(name).find("-refl-") != std::string_view::npos;
+        REQUIRE(s.casters.size() == (pane ? 2u : 1u));
+        if (pane) {
+            const auto& g = s.casters[0].glass;
+            CHECK(g.shape == GlassObject::Shape::Pane);
+            CHECK(g.thickness == 0.0f);
+            CHECK(g.baseColor == glm::vec3(0.4f, 0.9f, 0.45f));
+            // Inside the 100 m ray range of the sun shadow ray of a secondary hit, above the 8 m of the probe grid, and every sun ray from
+            // the scene (|x|, |z| <= 8 m, y <= 2 m) crosses it: the crossing point lies inside the quad.
+            CHECK(g.center.y > 10.0f);
+            CHECK(g.center.y < 90.0f);
+            for (const glm::vec3 p : {glm::vec3(-8, 0, -8), glm::vec3(8, 0, 8), glm::vec3(-8, 2, 8), glm::vec3(8, 2, -8)}) {
+                const glm::vec3 crossing = p + s.towardSun * ((g.center.y - p.y) / s.towardSun.y);
+                CHECK(std::abs(crossing.x - g.center.x) < 0.5f * g.scale.x);
+                CHECK(std::abs(crossing.z - g.center.z) < 0.5f * g.scale.z);
+                CHECK(glm::length(crossing - p) < 100.0f);
+            }
+        }
+        const auto& receiver = s.casters.back();
+        CHECK(receiver.opaque);
+        CHECK(receiver.mirror == refl);
+        // The runner mirrors the camera of the spec.
+        const auto camera = TransmissiveShadowValidation(std::string(name)).getDefaultCamera();
+        CHECK(camera.target == s.cameraTarget);
+        CHECK(runner.find(refl ? "\"refl\": ((0.0, 0.5, 1.0), 5.0, 25.0)" : "\"gi\": ((0.0, 0.4, 0.3), 4.0, 30.0)") != std::string::npos);
+        CHECK(s.cameraTarget == (refl ? glm::vec3(0.0f, 0.5f, 1.0f) : glm::vec3(0.0f, 0.4f, 0.3f)));
+        CHECK(s.cameraDistance == (refl ? 5.0f : 4.0f));
+        CHECK(s.cameraElevationDegrees == (refl ? 25.0f : 30.0f));
+    }
+}
