@@ -245,7 +245,7 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
                 features_.requestBoth(pipelines_, 500 + so + (std::string_view(k) == "visibility_lit_resolve" ? 100u : 0u), shadeMask,
                                       [&] { return sssConstant(compute(k)); });
         }
-        servedTile_ = tile_ == pipe::INVALID_PIPELINE ? tile_ : features_.serve(pipelines_, 111, tile_, mask, [&] {
+        servedTile_ = tile_ == pipe::INVALID_PIPELINE ? tile_ : features_.serve(pipelines_, 111, tile_, shadeMask, [&] { // round 3 (COLOR_0): shadeMask carries the markers
             auto d = compute("visibility_tile");
             d.kind = pipe::PipelineKind::Tile;
             d.output(0, rg::Format::R32Uint);

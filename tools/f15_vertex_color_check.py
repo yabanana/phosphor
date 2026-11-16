@@ -184,6 +184,12 @@ PATHS = {
     "overflow": {"extra": ["--debug-meshlets", "1", "--debug-meshlets-corrupt", "count"], "linear": True},
     "forward": {"extra": [], "linear": False},
     "meshforward": {"extra": [], "linear": False},  # --render-path forward --geometry-path mesh: meshlet_mesh + forward_fs (the _vc twins)
+    # F15 closure round 3: `visibility_tile` (--tile-resolve, the on-tile material resolve) read no COLOR_0 (its pipeline was served with the lobe-only
+    # mask): the same kernel body as the compute resolve, a different pipeline.  Legacy lights (the tile path has no lit-resolve lighting), linear capture.
+    "tile": {"extra": ["--tile-resolve"], "linear": True},
+    # round 3 (archive): the meshlet forward mesh stages that only an option selects, so the `_vc` twins have an archive entry
+    "meshforward-tricull": {"extra": ["--meshlet-triangle-cull", "on"], "linear": False},                             # meshlet_mesh_tricull_vc
+    "meshforward-direct": {"extra": ["--meshlet-object", "off", "--meshlet-cull", "off"], "linear": False},          # meshlet_mesh_direct_vc
 }
 
 
@@ -191,13 +197,18 @@ def capture(binary, folder, path, name, gltf, pitch=0, shadows="rt"):
     folder.mkdir(parents=True, exist_ok=True)
     spec = PATHS[path]
     out = folder / f"{path}-{name}"
-    if path in ("forward", "meshforward"):
+    if path == "tile":
+        cmd = [str(binary), "--bench", "4", "--scene", str(gltf), "--corpus-rig", "0,0", "--render-path", "visibility", "--geometry-path", "mesh", "--rt", "off",
+               "--lighting", "legacy", "--gi", "off", "--reflections", "off", "--ao", "off", "--lighting-denoise", "off", "--post", "--upscaler", "native",
+               "--resolution", f"{RES[0]}x{RES[1]}", "--warmup", "16", "--frames", "2", "--fixed-timestep", "--offscreen", "--no-ui", "--no-vsync", "--no-gpu-timing",
+               "--pipeline-sync", "--report", str(out) + ".json", "--capture-linear", str(out) + ".pfm", *spec["extra"]]
+    elif path == "forward" or path.startswith("meshforward"):
         cmd = [str(binary), "--bench", "4", "--scene", str(gltf), "--corpus-rig", "0,0", "--render-path", "forward", "--geometry-path", "indexed" if path == "forward" else "mesh", "--rt", "off",
                "--lighting", "legacy", "--gi", "off", "--reflections", "off", "--ao", "off", "--lighting-denoise", "off",
                "--resolution", f"{RES[0]}x{RES[1]}", "--warmup", "16", "--frames", "2", "--fixed-timestep", "--offscreen", "--no-ui", "--no-vsync", "--no-gpu-timing",
-               "--pipeline-sync", "--report", str(out) + ".json", "--capture", str(out) + ".png"]
+               "--pipeline-sync", "--report", str(out) + ".json", "--capture", str(out) + ".png", *spec["extra"]]
     else:
-        cmd = [str(binary), "--bench", "4", "--scene", str(gltf), "--corpus-rig", f"0,{pitch}", "--rt", "on", "--shadows", shadows, "--lighting", "restir", "--gi", "off",
+        cmd = [str(binary), "--bench", "4", "--scene", str(gltf), "--corpus-rig", f"0,{pitch}", "--rt", "on", *(["--shadows", "csm", "--shadow-cache", "on"] if shadows == "cache" else ["--shadows", shadows]), "--lighting", "restir", "--gi", "off",
                "--reflections", "rt", "--ao", "off", "--lighting-denoise", "custom", "--tonemap", "aces", "--post", "--upscaler", "native",
                "--render-path", "visibility", "--geometry-path", "mesh", "--resolution", f"{RES[0]}x{RES[1]}", "--warmup", "48", "--frames", "1",
                "--fixed-timestep", "--offscreen", "--no-ui", "--no-vsync", "--no-gpu-timing", "--pipeline-sync", "--capture-linear", str(out) + ".pfm", *spec["extra"]]
@@ -415,7 +426,9 @@ def mirror_error(out, name, pitch=30.0):
 
 def verify(out):
     ok, lines = True, []
-    if (out / "mesh-mirror.pfm").exists():
+    if "mesh" not in PATHS:
+        pass
+    elif (out / "mesh-mirror.pfm").exists():
         e, bias, _ = mirror_error(out, "mirror")
         c, _, _ = mirror_error(out, "mirror-control")
         score = e / c if c > 0 else 1.0
@@ -428,6 +441,10 @@ def verify(out):
         have = all((out / f"{path}-{n}.{'pfm' if PATHS[path]['linear'] else 'png'}").exists() for n in CASES if not n.startswith("mirror"))
         if not have:
             lines.append(f"{path}: captures missing"); ok = False; continue
+        if path == "tile":  # the on-tile resolve must really run (--tile-resolve selects the visibility path)
+            got = json.loads((out / "tile-unlit.json").read_text()).get("rendering", {}).get("path")
+            if got != "visibility-tile":
+                lines.append(f"tile: rendering path {got!r}, expected 'visibility-tile' -> FAIL"); ok = False; continue
         if not PATHS[path]["linear"]:  # the forward captures must really run the forward path (--tonemap / --post silently select the visibility path)
             want_path = "forward-indexed" if path == "forward" else "forward-mesh"
             got = json.loads((out / f"{path}-unlit.json").read_text()).get("rendering", {}).get("path")
@@ -447,7 +464,7 @@ def verify(out):
         good = a >= 0.995 and ca < 0.9
         lines.append(f"{path} CUTOUT: mask agreement {a * 100:.2f} % of {n} pixels (>= 99.5), control {ca * 100:.2f} % (must be < 90) -> {'PASS' if good else 'FAIL'}")
         ok = ok and good
-    for mode in ("rt", "csm"):
+    for mode in ("rt", "csm", "cache") if "mesh" in PATHS else ():
         if not (out / f"mesh-shadow-{mode}.pfm").exists():
             lines.append(f"mesh SHADOW {mode}: captures missing"); ok = False; continue
         cut, vis, lit, ccut = shadow_scores(out, mode)
@@ -516,7 +533,12 @@ def main():
     parser.add_argument("mode", choices=["run", "verify"])
     parser.add_argument("out", type=pathlib.Path)
     parser.add_argument("binary", type=pathlib.Path, nargs="?", default=REPO / "build/release/phosphor")
+    parser.add_argument("--paths", help="comma list of the paths to capture / verify (default: every path; the mirror and shadow cases belong to `mesh`)")
     args = parser.parse_args()
+    if args.paths:
+        for name in list(PATHS):
+            if name not in args.paths.split(","):
+                del PATHS[name]
     out = args.out
     out.mkdir(parents=True, exist_ok=True)
     if args.mode == "run":
@@ -528,7 +550,7 @@ def main():
                     continue
                 code = capture(args.binary, out, path, name, out / f"{name}.gltf", pitch=30 if name.startswith("mirror") else 0)
                 print(f"{path}-{name}: exit {code}", flush=True)
-        for mode in ("rt", "csm"):
+        for mode in ("rt", "csm", "cache") if "mesh" in PATHS else ():
             for control in (False, True):
                 name = f"shadow-{mode}" + ("-control" if control else "")
                 (out / f"{name}.gltf").write_text(json.dumps(scene_shadow(not control)))
