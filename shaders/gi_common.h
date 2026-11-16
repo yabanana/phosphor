@@ -101,6 +101,7 @@ constant uint GI_SLOT_ESCAPED=~0u;
 // resolve) for GI, reflection and probe-capture hits: level-0 sampling of the mask (clamped) and of every layer texture at uv * uvScale.  A
 // stack's feature blocks are not evaluated at secondary hits (no material's are: declared reduction of ADR-0002), its emission is.
 struct LayerLod0Samples {
+    static bool transforms() { return true; }
     template <typename T>
     static half4 sample(const device T* table,uint index,float2 uv,half4 fallback,float2 dx,float2 dy) {
         return index==INVALID_TEXTURE_INDEX?fallback:half4(table[index].tex.sample(kGiMaterialSampler,uv,level(0.0f)));

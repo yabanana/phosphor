@@ -29,6 +29,7 @@ static half4 probeSlotSample(const device DITextureHandle* textures,uint index,c
     return half4(textures[index].tex.sample(kGiMaterialSampler,uv,gradient2d(dx,dy)));
 }
 struct LayerGradSamples {
+    static bool transforms() { return true; }
     template <typename T>
     static half4 sample(const device T* table,uint index,float2 uv,half4 fallback,float2 dx,float2 dy){return index==INVALID_TEXTURE_INDEX?fallback:half4(table[index].tex.sample(kGiMaterialSampler,uv,gradient2d(dx,dy)));}
     template <typename T>

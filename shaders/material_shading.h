@@ -449,6 +449,20 @@ static float3 tonemapACES(float3 x) {
 // (layer_resolve.h); here the sampler policy of the primary resolve (derivative gradients, repeat layer textures, clamped mask) and the
 // blend of the layers' FEATURE blocks, which happens at the same weights and ends in the ONE existing BSDF evaluation.
 struct LayerRasterSamples {
+    static bool transforms() { return kTextureTransform != 0u; }
+    template <typename T>
+    static half4 sample(const device T *table, uint index, float2 uv, half4 fallback, float2 dx, float2 dy) {
+        return sampleOr(table, index, uv, fallback, dx, dy);
+    }
+    template <typename T>
+    static half4 mask(const device T *table, uint index, float2 uv, half4 fallback, float2 dx, float2 dy) {
+        return sampleMaskOr(table, index, uv, fallback, dx, dy);
+    }
+};
+// The same sampling for the entry points that never reference kTextureTransform (the receiver prepass alpha tests: metal-tt cannot lower an
+// unspecialised descriptor whose function references a function constant): the in-stack transforms stay a runtime flag test there.
+struct LayerRasterOnSamples {
+    static bool transforms() { return true; }
     template <typename T>
     static half4 sample(const device T *table, uint index, float2 uv, half4 fallback, float2 dx, float2 dy) {
         return sampleOr(table, index, uv, fallback, dx, dy);

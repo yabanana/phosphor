@@ -17,6 +17,7 @@
 // repeat-addressed layer textures and a clamp-to-edge mask, either at level 0 (`LayerAlphaLevel0`) or with the caller's derivative gradients
 // (`LayerAlphaGrad`).  T is any bindless element with a `tex` member.
 struct LayerAlphaLevel0 {
+    static bool transforms() { return true; }
     template <typename T>
     static half4 sample(const device T *table, uint index, float2 uv, half4 fallback, float2 dx, float2 dy) {
         constexpr sampler s(filter::linear, mip_filter::linear, address::repeat);
@@ -29,6 +30,7 @@ struct LayerAlphaLevel0 {
     }
 };
 struct LayerAlphaGrad {
+    static bool transforms() { return true; }
     template <typename T>
     static half4 sample(const device T *table, uint index, float2 uv, half4 fallback, float2 dx, float2 dy) {
         constexpr sampler s(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
@@ -41,15 +43,29 @@ struct LayerAlphaGrad {
     }
 };
 
+// Every sampler policy has `static bool transforms()`: whether the per-slot texture transforms of the stack and its layers are applied.  The
+// secondary sites say true (a runtime flag test per slot); the primary resolve says kTextureTransform, so a scene without any transformed
+// material (the scene store counts both transform flags) compiles the whole in-stack transform code out (it was dead there: no material has
+// either flag, so the images are identical).
+//
 // F15.1 (ticket 22): per-slot texture transforms of a stack.  The mask goes through the stack material's block (slot TT_SLOT_LAYER_MASK), a layer's
 // height through the same block (TT_SLOT_LAYER_HEIGHT0 + i, applied to uv * uvScale), and every texture of layer i through the block of ITS
 // sub-material (applied to uv * uvScale; the normal vector is rotated into the mesh frame).  `extensions` = the extension buffer (null: none),
 // `stackFlags` / `stackIndex` = the stack material's flags and textureTransformIndex.  A material without MATERIAL_FLAG_TEXTURE_TRANSFORM
 // hands the sampler the very uv it always did.
+template <typename Samples>
+static void layerXfUv(const device GPUMaterialExtRecord *extensions, uint flags, uint index, uint slot, thread float2 &uv, thread float2 &dx, thread float2 &dy) {
+    if (Samples::transforms()) texXfSlotUvDd(extensions, flags, index, slot, uv, dx, dy);
+}
+template <typename Samples>
+static float3 layerXfTn(const device GPUMaterialExtRecord *extensions, uint flags, uint index, uint slot, float3 tn) {
+    return Samples::transforms() ? texXfRotateTn(extensions, flags, index, slot, tn) : tn;
+}
+
 template <typename T, typename Samples>
 static half4 layerSlotSample(const device T *table, uint index, const device GPUMaterialExtRecord *extensions, const device GPUMaterial &lm,
                              uint slot, float2 uv, float2 dx, float2 dy, half4 fallback) {
-    texXfSlotUvDd(extensions, lm.flags, lm.textureTransformIndex, slot, uv, dx, dy);
+    layerXfUv<Samples>(extensions, lm.flags, lm.textureTransformIndex, slot, uv, dx, dy);
     return Samples::sample(table, index, uv, fallback, dx, dy);
 }
 
@@ -68,7 +84,7 @@ static LayerWeights resolveLayerWeights(GPUMaterialExt3 e3, const device T *text
                                         const device GPUMaterialExtRecord *extensions, uint stackFlags, uint stackIndex) {
     const uint count = min(e3.layerCount, LAYER_STACK_MAX);
     float2 uvm = uv, dxm = dx, dym = dy;
-    texXfSlotUvDd(extensions, stackFlags, stackIndex, TT_SLOT_LAYER_MASK, uvm, dxm, dym);
+    layerXfUv<Samples>(extensions, stackFlags, stackIndex, TT_SLOT_LAYER_MASK, uvm, dxm, dym);
     const float4 mask = float4(Samples::mask(textures, e3.maskTex, uvm, half4(1.0h), dxm, dym));
     LayerWeights raw{{0.0f, 0.0f, 0.0f, 0.0f}};
     bool heightOn = false;
@@ -85,7 +101,7 @@ static LayerWeights resolveLayerWeights(GPUMaterialExt3 e3, const device T *text
             if (i < count && w.w[i] > 0.0f && e3.heightContrast[i] >= 0.0f) {
                 const float s = e3.uvScale[i];
                 float2 uvh = uv * s, dxh = dx * s, dyh = dy * s;
-                texXfSlotUvDd(extensions, stackFlags, stackIndex, TT_SLOT_LAYER_HEIGHT0 + i, uvh, dxh, dyh);
+                layerXfUv<Samples>(extensions, stackFlags, stackIndex, TT_SLOT_LAYER_HEIGHT0 + i, uvh, dxh, dyh);
                 const float texel = float(Samples::sample(textures, e3.heightTex[i], uvh, half4(0.5h), dxh, dyh).r);
                 heights.h[i] = layerHeight(e3.heightContrast[i], texel);
             }
@@ -141,7 +157,7 @@ static LayerSurface resolveLayerBase(GPUMaterialExt3 e3, const device GPUMateria
             occ[i] = mix(1.0, float(aoTex.r), lm.occlusionStrength);
             float3 tn = float3(nTex.xyz) * 2.0 - 1.0;
             tn.xy *= lm.normalScale;
-            tn = texXfRotateTn(extensions, lm.flags, lm.textureTransformIndex, TT_SLOT_NORMAL, tn); // the layer's transform rotates its texel axes
+            tn = layerXfTn<Samples>(extensions, lm.flags, lm.textureTransformIndex, TT_SLOT_NORMAL, tn); // the layer's transform rotates its texel axes
             normals.tx[i] = tn.x;
             normals.ty[i] = tn.y;
             normals.tz[i] = tn.z;

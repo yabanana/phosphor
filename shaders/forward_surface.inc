@@ -80,7 +80,7 @@ fragment ShadowReceiverOutput SFV_NAME(forward_shadow_receiver_fs)(
                                                              dfdy(in.uv)*exp2(temporal.mipBias)).a);
     {   // F15.4 (ticket 23): a layer stack's coverage (own alpha x the blended layer alpha), tested against the stack's cutoff
         const float2 sdx = dfdx(in.uv) * exp2(temporal.mipBias), sdy = dfdy(in.uv) * exp2(temporal.mipBias);
-        alpha *= layerCoverage<TextureHandle, LayerRasterSamples>(material, materials, textures, in.uv, sdx, sdy, temporal.materialExtensions);
+        alpha *= layerCoverage<TextureHandle, LayerRasterOnSamples>(material, materials, textures, in.uv, sdx, sdy, temporal.materialExtensions);
     }
 #if SFV_VC
     if (alpha * in.color.a < material.alphaCutoff) discard_fragment(); // F15 closure (COLOR_0 alpha)
@@ -109,7 +109,7 @@ fragment ShadowReceiverOutput SFV_NAME(forward_shadow_receiver_tt_fs)(
     float alpha = material.baseColor[3] * float(sampleOr(textures, material.baseColorTex, uv, half4(1), dx, dy).a);
     {   // F15.4 (ticket 23): a layer stack's coverage (own alpha x the blended layer alpha), tested against the stack's cutoff
         const float2 sdx = dfdx(in.uv) * exp2(temporal.mipBias), sdy = dfdy(in.uv) * exp2(temporal.mipBias);
-        alpha *= layerCoverage<TextureHandle, LayerRasterSamples>(material, materials, textures, in.uv, sdx, sdy, temporal.materialExtensions);
+        alpha *= layerCoverage<TextureHandle, LayerRasterOnSamples>(material, materials, textures, in.uv, sdx, sdy, temporal.materialExtensions);
     }
 #if SFV_VC
     if (alpha * in.color.a < material.alphaCutoff) discard_fragment(); // F15 closure (COLOR_0 alpha)
