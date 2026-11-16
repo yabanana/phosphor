@@ -102,6 +102,8 @@ bool ChessFixture::parse(std::string_view scenario, ChessOptions& out, std::stri
         } else if (key == "sss" && side) {
             if (value != "on" && value != "off") return bad();
             out.sss = value == "on";
+        } else if (key == "zoom" && side) {
+            if (!parseFloat(value, out.zoom) || !(out.zoom >= 1.0f) || out.zoom > 8.0f) return bad();
         } else if (key == "view" && side) {
             if (value != "black" && value != "white") return bad();
             out.viewWhite = value == "white";
@@ -148,7 +150,10 @@ CameraSetup ChessFixture::camera(const ChessOptions& o) {
         return {{0.0f, 0.16f, -0.40f}, {0.0f, 0.07f, 0.156f}, 0.56f, false};
     case ChessOptions::Rig::Sidelight: {
         const float z = o.viewWhite ? -1.0f : 1.0f;
-        return {{0.0f, 0.10f, 0.53f * z}, {0.0f, 0.095f, 0.22f * z}, 0.31f, false};
+        // zoom (ticket 20, RT tier): the camera moves towards the target along the view axis (the mean free paths of the pieces are
+        // 0.3-0.9 mm: below one pixel at 0.31 m, several pixels at zoom 3)
+        const glm::vec3 target{0.0f, 0.095f, 0.22f * z}, base{0.0f, 0.10f, 0.53f * z};
+        return {target + (base - target) / o.zoom, target, 0.31f / o.zoom, false};
     }
     case ChessOptions::Rig::Shadow:
         return {{0.0f, 0.35f, -0.20f}, {0.0f, 0.0185f, 0.10f}, 0.45f, false};

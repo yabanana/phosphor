@@ -307,5 +307,45 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(cc.verdict([{"pass": False, "controls_fail": True}], "red"), ("RED", cc.EXIT_OK))
 
 
+class SssBound(unittest.TestCase):
+    """Ticket 20, RT tier: the textured subsurface bound captures of the kings and queens."""
+
+    def test_the_captures_per_view(self):
+        for prefix, view in (("rw", "white"), ("rb", "black")):
+            main, twin, control = (cc.CAPTURES[f"{prefix}-{k}"] for k in ("w100", "off", "w000"))
+            self.assertEqual(main["scenario"], f"chess-sidelight/view={view}/zoom=3/weight=1")
+            self.assertTrue(main["flags"].get("export"))  # the snapshot the Mitsuba reference reads
+            self.assertIn("--debug-subsurface-walk-lights", twin["flags"]["extra"])  # the noise twin and negative control
+            self.assertEqual(control["scenario"], f"chess-sidelight/view={view}/zoom=3/weight=0")  # the base model: negative control
+            for spec in (main, twin, control):
+                self.assertEqual(spec["group"], "sssbound")
+                self.assertTrue(spec["flags"]["rt"])
+                self.assertIn("rt-walk", spec["flags"]["extra"])
+
+    def test_the_command_exports_the_snapshot_only_for_the_reference_capture(self):
+        folder = pathlib.Path("/tmp/x")
+        main = cc.capture_command(pathlib.Path("phosphor"), pathlib.Path("g.gltf"), pathlib.Path("o.json"), "rw-w100", folder)
+        twin = cc.capture_command(pathlib.Path("phosphor"), pathlib.Path("g.gltf"), pathlib.Path("o.json"), "rw-off", folder)
+        self.assertIn("--export-reference", main)
+        self.assertNotIn("--export-reference", twin)
+        self.assertIn("--subsurface-mode", main)
+        self.assertEqual(main[main.index("--rt") + 1], "on")
+
+    def test_a_capture_that_rendered_the_diffusion_is_a_capture_error(self):
+        import json, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = pathlib.Path(tmp)
+            (folder / "report.json").write_text(json.dumps({"subsurface": {"requested": "rt-walk", "effective": "diffusion", "fallback_reason": "--rt off"}}))
+            with self.assertRaises(cc.fc.CaptureFailed) as raised:
+                cc.require_walk(folder, "rw-w100")
+            self.assertIn("--rt off", str(raised.exception))
+            (folder / "report.json").write_text(json.dumps({"subsurface": {"requested": "rt-walk", "effective": "rt-walk", "fallback_reason": ""}}))
+            cc.require_walk(folder, "rw-w100")
+
+    def test_the_default_groups_do_not_run_the_rt_tier(self):
+        self.assertNotIn("sssbound", ["backlight", "sidelight", "shadow"])
+        self.assertTrue(any(s["group"] == "sssbound" for s in cc.CAPTURES.values()))
+
+
 if __name__ == "__main__":
     unittest.main()

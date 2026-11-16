@@ -75,6 +75,18 @@ TEST_CASE("F15.1 ticket 20: the chess scenarios parse, reject unknown keys and d
     CHECK(o.viewWhite);
     CHECK_FALSE(o.sss);
     CHECK_FALSE(o.pawnsOnly);
+    // ticket 20 (RT tier): zoom moves the sidelight camera towards its target (1..8), side-light rigs only
+    REQUIRE(ChessFixture::parse("chess-sidelight/zoom=3", o, error));
+    CHECK(o.zoom == doctest::Approx(3.0f));
+    const auto near = ChessFixture::camera(o);
+    ChessOptions plain;
+    plain.rig = ChessOptions::Rig::Sidelight;
+    const auto far = ChessFixture::camera(plain);
+    CHECK(near.target == far.target);
+    CHECK(glm::length(near.position - near.target) == doctest::Approx(glm::length(far.position - far.target) / 3.0f).epsilon(1e-4));
+    CHECK_FALSE(ChessFixture::validScenario("chess-sidelight/zoom=0.5"));
+    CHECK_FALSE(ChessFixture::validScenario("chess-sidelight/zoom=9"));
+    CHECK_FALSE(ChessFixture::validScenario("chess-backlight/zoom=2"));
     REQUIRE(ChessFixture::parse("chess-shadow/tops=opaque", o, error));
     CHECK(o.tops == ChessOptions::Tops::Opaque);
     CHECK(ChessFixture::parse("chess-shadow/tops=hidden/tint=white", o, error));

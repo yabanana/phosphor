@@ -24,7 +24,7 @@ namespace phosphor {
 //                     their own end of the board under one grazing sun, environment 0, shadows must be off (the pieces would shade each
 //                     other).  Options: weight=F (subsurface weight of the four override materials, default the file's 1), scale=F
 //                     (multiplier of the subsurface scale, default 1), sss=on|off (off: the override file is not applied: the asset's
-//                     plain metal-rough pieces), view=black|white.
+//                     plain metal-rough pieces), view=black|white, zoom=F (camera distance / F, 1..8).
 //   chess-shadow      the pawns and the board under one sun from behind the black pawn row; the camera looks down at the empty rank in
 //                     front of the row where the pawn-top shadows fall.  Options: tops=on|opaque|hidden (the pawn-top materials as
 //                     authored, transmission forced to 0, or the pawn tops invisible), tint=asset|white.
@@ -47,6 +47,7 @@ struct ChessOptions {
     float scale = 1.0f;           // multiplier of subsurface.radius
     bool sss = true;              // apply the override file
     bool viewWhite = false;       // sidelight: the white pieces
+    float zoom = 1.0f;            // sidelight: camera distance divided by this (1..8)
     Tops tops = Tops::AsAuthored; // shadow
     bool pawnsOnly = false;       // hide kings, queens, castles, knights and bishops (declared by the rig)
 };

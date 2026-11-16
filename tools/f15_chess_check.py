@@ -93,6 +93,15 @@ SHADOW_RT_FLAGS = {"rt": True, "shadows": "rt", "reflections": "off", "denoise":
 # transmittance of the tops vanishes (T = 1.03 measured, ticket 20 record); the fixture is a 1 m scene, so its CSM map is 8192.
 SHADOW_CSM_FLAGS = {"rt": False, "shadows": "csm", "reflections": "off", "denoise": "custom", "accumulate": 8, "shadow_map_size": 8192}
 
+# F15.1/F15.3 (ticket 20, RT tier): the textured subsurface bound of the kings and queens against the Mitsuba ground truth of
+# tools/f15_chess_subsurface_reference.py.  The rt-walk captures accumulate WALK_ACCUMULATE frames of WALK_SAMPLES walks per pixel; the capture of
+# weight 1 exports the snapshot the reference reads; `-off` (the walk lights nothing) is the noise twin of the pooled estimator and a negative
+# control; `-w000` (weight 0, the base model) is the second negative control.
+WALK_ACCUMULATE, WALK_SAMPLES = 96, 64
+WALK_FLAGS = {"rt": True, "shadows": "off", "reflections": "off", "denoise": "custom", "accumulate": WALK_ACCUMULATE,
+              "extra": ["--subsurface-mode", "rt-walk", "--subsurface-accumulate", "off", "--subsurface-samples", str(WALK_SAMPLES), "--subsurface-steps", "512"]}
+WALK_TWIN_FLAGS = {**WALK_FLAGS, "accumulate": 8, "extra": WALK_FLAGS["extra"] + ["--debug-subsurface-walk-lights", "off"]}
+WALK_CONTROL_FLAGS = {**WALK_FLAGS, "accumulate": 8}
 CAPTURES = {}
 
 
@@ -121,6 +130,11 @@ for _mode, _flags in (("rt", SHADOW_RT_FLAGS), ("csm", SHADOW_CSM_FLAGS)):
     _add("shadow", f"sh-{_mode}-hidden", "chess-shadow/tops=hidden", _flags)
     _add("shadow", f"sh-{_mode}-white", "chess-shadow/tint=white", _flags)
 
+for _view, _prefix in (("white", "rw"), ("black", "rb")):
+    _add("sssbound", f"{_prefix}-w100", f"chess-sidelight/view={_view}/zoom=3/weight=1", {**WALK_FLAGS, "export": True})
+    _add("sssbound", f"{_prefix}-off", f"chess-sidelight/view={_view}/zoom=3/weight=1", WALK_TWIN_FLAGS)
+    _add("sssbound", f"{_prefix}-w000", f"chess-sidelight/view={_view}/zoom=3/weight=0", WALK_CONTROL_FLAGS)
+
 # One process per rig for the O7 / archive check (--warmup 64, no capture).
 O7_SCENARIOS = {"o7-backlight": ("chess-backlight", BACKLIGHT_FLAGS), "o7-sidelight": ("chess-sidelight", SIDELIGHT_FLAGS),
                 "o7-shadow-rt": ("chess-shadow", SHADOW_RT_FLAGS), "o7-shadow-csm": ("chess-shadow", SHADOW_CSM_FLAGS)}
@@ -137,7 +151,8 @@ def command_flags(binary, gltf, overrides, scenario, flags, seed=1):
             "--lighting", "legacy", "--gi", "off", "--reflections", flags.get("reflections", "off"), "--ao", "off",
             "--lighting-denoise", flags.get("denoise", "custom"), "--reflection-samples", "8", "--lighting-seed", str(seed),
             "--post", "--upscaler", "native", "--resolution", RESOLUTION, "--no-ui", "--no-vsync", "--no-gpu-timing", "--debug-lighting", "1",
-            "--pipeline-sync", *(["--shadow-map-size", str(flags["shadow_map_size"])] if flags.get("shadow_map_size") else [])]
+            "--pipeline-sync", *(["--shadow-map-size", str(flags["shadow_map_size"])] if flags.get("shadow_map_size") else []),
+            *flags.get("extra", [])]
 
 
 def capture_command(binary, gltf, overrides, name, folder, seed=1):
@@ -148,6 +163,8 @@ def capture_command(binary, gltf, overrides, name, folder, seed=1):
                 "--capture-linear", str(folder / "engine.pfm"), "--capture-linear-frame", last]
     if spec["flags"].get("accumulate"):
         command += ["--capture-linear-accumulate", str(spec["flags"]["accumulate"])]
+    if spec["flags"].get("export"):
+        command += ["--export-reference", str(folder / "snapshot"), "--export-reference-frame", last]
     return command + ["--capture-linear-signal", "hdr", "--report", str(folder / "report.json")]
 
 
@@ -486,6 +503,64 @@ def evaluate_group_shadow(np, out):
             "controls_fail": all(e["controls_fail"] for e in entries.values())}
 
 
+SSS_VIEWS = (("white", "rw"), ("black", "rb"))
+
+
+def reference_command(folder, classes=8, spp=2048):
+    return ["uv", "run", "--offline", "--no-project", "--python", "3.13", "--with", "mitsuba==3.9.1", "--with", "numpy", "python", "-I",
+            str(REPO / "tools" / "f15_chess_subsurface_reference.py"), "render", str(folder / "snapshot"), "--out", str(folder / "reference"),
+            "--classes", str(classes), "--spp", str(spp)]
+
+
+def require_walk(folder, label):
+    """STRUCTURAL guard (orchestrator): every sssbound capture must have been rendered by the RT walk (report subsurface.effective); a fallback
+    to the screen-space diffusion is a capture error with the reported reason, never an evaluation under the walk's name."""
+    path = pathlib.Path(folder) / "report.json"
+    section = (json.loads(path.read_text()).get("subsurface") or {}) if path.is_file() else {}
+    if section.get("effective") != "rt-walk":
+        raise fc.CaptureFailed(f"{label}: subsurface.effective is {section.get('effective')!r}, the key requires 'rt-walk' "
+                               f"(requested {section.get('requested')!r}, fallback reason: {section.get('fallback_reason') or 'none reported'})")
+
+
+def evaluate_group_sssbound(np, out):
+    """The textured volumetric subsurface bound of the RT tier: per view, the pieces the weight-0 control does NOT pass are gated at the side-lit
+    bound (mean 0.10, p95 0.25, 5 % floor; ticket 17 / decision 11) on the pooled estimator (tools/f15_check.py pool_noisy_term with the lights-off
+    twin).  A piece that the base model (weight 0) already satisfies does not discriminate subsurface: it is reported, not gated (the fixture
+    decision is taken from the control, before the walk image is compared)."""
+    import subprocess
+    from f12_reference import read_pfm
+    entries = {}
+    for view, prefix in SSS_VIEWS:
+        for suffix in ("w100", "off", "w000"):
+            require_walk(out / f"{prefix}-{suffix}", f"{prefix}-{suffix}")
+        folder = out / f"{prefix}-w100"
+        reference_dir = folder / "reference"
+        if not (reference_dir / "reference.json").is_file():
+            subprocess.run(reference_command(folder), check=True)
+        reference = read_pfm(reference_dir / "reference.pfm")
+        masks = dict(np.load(reference_dir / "masks.npz"))
+        report = json.loads((reference_dir / "reference.json").read_text())
+        engine = read_pfm(folder / "engine.pfm")
+        twin = read_pfm(out / f"{prefix}-off" / "engine.pfm")
+        control = read_pfm(out / f"{prefix}-w000" / "engine.pfm")
+        pooled = fc.pool_noisy_term(np, engine, twin, masks, 5)
+        spheres = [{"instance": p["instance"], "weight": p["weight"], "radius": None, "series": None, "diffusion_regime": True}
+                   for p in report["pieces"].values()]
+        control_result = fc.evaluate_subsurface(np, control, reference, masks, spheres)
+        gated = {p["instance"]: not p["bound_met"] for p in control_result["pieces"]}  # the control fails the bound = the piece discriminates
+        for sphere in spheres:
+            sphere["diffusion_regime"] = bool(gated.get(sphere["instance"], False))
+        result = fc.evaluate_subsurface(np, pooled, reference, masks, spheres)
+        unpooled = fc.evaluate_subsurface(np, engine, reference, masks, spheres)
+        twin_result = fc.evaluate_subsurface(np, twin, reference, masks, spheres)
+        entries[view] = {"result": result, "unpooled": {k: unpooled[k] for k in ("worst_mean", "worst_p95")},
+                         "controls": {"subsurface-off (weight 0)": control_result["pass"], "walk lights off": twin_result["pass"]},
+                         "gated_pieces": [k for k, v in gated.items() if v], "report_noise": {k: [p["noise_mean"], p["noise_p95"]] for k, p in report["pieces"].items()},
+                         "pass": bool(result["pass"])}
+    discriminating = all(e["gated_pieces"] and not e["controls"]["walk lights off"] for e in entries.values())
+    return {"group": "sssbound", "views": entries, "pass": all(e["pass"] for e in entries.values()), "controls_fail": bool(discriminating)}
+
+
 REQUIRED_FEATURES = {"Pawn_Top_Black": ["transmission", "volume"], "Pawn_Top_White": ["transmission", "volume"],
                      "King_Black": ["subsurface", "volume"], "King_White": ["subsurface", "volume"],
                      "Queen_Black": ["subsurface", "volume"], "Queen_White": ["subsurface", "volume"]}
@@ -538,7 +613,7 @@ def build_parser():
     parser.add_argument("--out", type=pathlib.Path, default=REPO / "build/f15-chess")
     parser.add_argument("--gltf", default=None, help="ABeautifulGame.gltf (default: $PHOSPHOR_CHESS_GLTF or build/khronos-corpus)")
     parser.add_argument("--overrides", type=pathlib.Path, default=OVERRIDES)
-    parser.add_argument("--group", action="append", default=[], choices=["backlight", "sidelight", "shadow"])
+    parser.add_argument("--group", action="append", default=[], choices=["backlight", "sidelight", "shadow", "sssbound"])
     parser.add_argument("--only", action="append", default=[], choices=sorted(CAPTURES),
                         help="with --run: capture only these keys (the others must already exist in --out); evaluation covers the groups")
     mode = parser.add_mutually_exclusive_group()
@@ -585,7 +660,7 @@ def evaluate_o7(out):
 def run(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
-    groups = args.group or ["backlight", "sidelight", "shadow"]
+    groups = args.group or ["backlight", "sidelight", "shadow"]  # sssbound (RT tier, needs Mitsuba through uv) is selected with --group
     out = args.out.resolve()
     binary = args.binary.resolve()
     gltf = find_gltf(args.gltf)
@@ -622,6 +697,8 @@ def run(argv=None):
         entries.append(evaluate_group_sidelight(np, out))
     if "shadow" in groups:
         entries.append(evaluate_group_shadow(np, out))
+    if "sssbound" in groups:
+        entries.append(evaluate_group_sssbound(np, out))
     if set(groups) == {"backlight", "sidelight", "shadow"}:
         entries.append({**evaluate_support_group(out), "controls_fail": True})
     pipelines = evaluate_pipelines(out, names)
