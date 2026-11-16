@@ -89,3 +89,27 @@ support table (`punctualLights`, Approximated, `spot_falloff_smoothstep_not_info
 ## 2026-11-15 — COLOR_0 support level
 
 `KHR_materials_unlit` is now `SupportLevel::Implemented` (the vertex colour factor is applied); COLOR_0 loading, stream and sites: see ticket 22, same date.
+
+## 2026-11-16 round 3 — spot falloff measured at the secondary lighting sites (branch f15c-color0-spot)
+
+The 2026-11-15 statement "RT reflection secondary lighting, probes and GI were not captured separately (shared evaluators, argued from the code)" is replaced by measurements
+(`tools/f15_spot_falloff_check.py arms-run|arms-verify|selftest`, doc string of the tool).  Design: default glTF camera (no rig: lights are ignored under `--corpus-rig`), a small
+panel P (front facing -Z, back culled so the camera never sees it) at (0,3,-2.5), the spot at (0,3,-4) pointing +Z (D = 1.5 m), the LIGHT NODE TILTED about X by 0 / 0.38 / 0.45 / 0.5 / 0.55 rad
+(0.85 = outside) so only the angle to the axis changes (geometry term identical, it cancels), a wall at z = -5 the spot never lights.  DELTA (light on - intensity 0, linear PFM,
+mean RGB) of a patch divided by the delta at tilt 0, against the independent model (mean over the panel of cos(panel)/d^2 x falloff; smoothstep = engine convention; linear and the
+informative t^2 as controls).  Thresholds fixed before the first comparison: in-cone tilts within 7 % (relative) of the smoothstep model, outside ratio <= 1 %, both controls must miss
+a tilt by > 7 % (`selftest`: model control miss linear 68.7 % / t^2 59.6 % mirror arms, 21.5 % / 53.3 % gi arms, all above 2 x 7 %).
+
+| arm | site | measured ratios 0.38 / 0.45 / 0.5 / 0.55 | smoothstep model | worst error | verdict |
+|---|---|---|---|---|---|
+| rtrefl | RT reflection secondary lighting (mirror wall, `--reflections rt`) | 0.8820 / 0.6127 / 0.3601 / 0.1300 | 0.8819 / 0.6093 / 0.3541 / 0.1223 | 6.24 % (tilt 0.55), 0.01 / 0.56 / 1.67 % before | PASS; outside 0.00000; linear misses 11.4 / 6.6 / 9.8 / 37 %, t^2 40-163 % |
+| probe | probe capture lighting (roughness 0.05 wall, `--reflections probes --reflection-capture-probe`) | 0.8658 / 0.6021 / 0.3600 / 0.1423 | same | 1.83 / 1.19 / 1.66 % up to 0.5, **16.27 % at 0.55** | PARTIAL: formula equal to 1.8 % where the signal is large; at the steep tail (ratio 0.12) the cube-map footprint / prefilter blurs the sliver (not separated from a real difference) |
+| gi (DDGI) | GI hit shading, probe grid | 0.9610 / 0.8323 / 0.6541 / 0.4284 | 0.8251 / 0.5722 / 0.3576 / 0.1791 | 139 % | FAIL as a measurement: the response is wider than ANY falloff (also than linear 0.77 / 0.56 / 0.38 / 0.22); linear in intensity (x0.05 gives the same ratios), so not a saturation; the DDGI atlas + trilinear probe interpolation weights the panel with its own kernel, which the form-factor model does not know.  Not a proof that the GI falloff differs |
+| girestir | GI hit shading, `--gi restir` (path sampling, no grid kernel) | 0.8155 / 0.5552 / 0.3327 / 0.1440 | same as gi | 1.17 / 2.96 / 6.97 / 19.6 % | PARTIAL: 1-3 % at the two large-signal tilts, drifts low at the tail (delta at tilt 0 only 0.005, ReSTIR GI noise not separated) |
+
+Code facts that support equality (not a measurement): reflections.metal, reflection_probes.metal and the sampled-light branch of gi_common.h call `diSampleLight` (restir_common.h smoothstep) with the
+same cone constants; the punctual branch of gi_common.h calls the built-in `smoothstep(cos(outer), cos(inner), cos)` (same function as legacy).  No code path with a different falloff was found, so no fix was made: nothing differs
+measurably where the measurement is clean (rtrefl, probe up to tilt 0.5, girestir up to tilt 0.45).
+Open: the probe tail (0.55) and the two GI arms; proposed follow-up: an emissive-pattern equivalence for GI (the same wall response for an emissive panel whose texture encodes the analytic lit pattern, which cancels the probe kernel).
+Model note: the first rtrefl run used the central patch half-size 0.05 m (7.44 % at tilt 0.55, over the 7 % gate); the footprint of the 9 x 9 pixel patch at the mirror image is 0.054 m (4.5 px x 2 tan 30 deg / 720 x 7.5 m), derived from the
+camera, not from the result; the tolerance was not changed.
