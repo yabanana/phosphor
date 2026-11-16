@@ -6,7 +6,7 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 07, 08
 
-**Status:** resolved with declared limits (2026-11-16, round 2: direction/strength texture fixture `texture-aniso-sun` / `-env-resolve` GREEN (sun worst p99 0.65 %, controls fail); narrow-lobe sun fixture `aniso-narrow-sun` GREEN against an exact disk integration; bent-normal fixture `aniso-bent-env` GREEN on the legacy hemisphere (`--legacy-environment`, worst sphere mean 0.059 %); tangent-frame repair for degenerate supplied tangents (e8b6399); the declared-environment fit gap at strength 1 stays DECLARED with a measured bound (rms 6.5 % at r 0.3, the best single isotropic roughness still leaves 4.0-4.8 %, so the decision-11 5 % needs the 4-D table; the roughness x ~0.97 tweak is left as an owner decision) and the composite complement fit is bounded on the sphere average only, per-pixel evidence stays fixture-bound (furnace 1.0022); still not covered: the denoiser lobe-id criterion for anisotropic highlights; a bench-built anisotropy primitive without tangents gets (1, 0, 0, 1))
+**Status:** resolved with declared limits (2026-11-16, round 3: the declared environment of anisotropic lobes reads a 4-D anisotropic albedo table, 0.08 % against the exact albedo where the rms fit left 6.5 %; the denoiser lobe-id criterion is measured on the GPU (history 40 / 40, flip control 0.0); `aniso-narrow-sun` RED on the exact resolve module of F15.2 option (a) (one pixel 3.77 % against the 3 % max), declared OPEN by the owner, follow-up E; see the round-3 section. Round 2: direction/strength texture fixture `texture-aniso-sun` / `-env-resolve` GREEN (sun worst p99 0.65 %, controls fail); narrow-lobe sun fixture `aniso-narrow-sun` GREEN against an exact disk integration; bent-normal fixture `aniso-bent-env` GREEN on the legacy hemisphere (`--legacy-environment`, worst sphere mean 0.059 %); tangent-frame repair for degenerate supplied tangents (e8b6399); the declared-environment fit gap at strength 1 stays DECLARED with a measured bound (rms 6.5 % at r 0.3, the best single isotropic roughness still leaves 4.0-4.8 %, so the decision-11 5 % needs the 4-D table; the roughness x ~0.97 tweak is left as an owner decision) and the composite complement fit is bounded on the sphere average only, per-pixel evidence stays fixture-bound (furnace 1.0022); still not covered: the denoiser lobe-id criterion for anisotropic highlights; a bench-built anisotropy primitive without tangents gets (1, 0, 0, 1))
 
 - [ ] Anisotropy fixtures (strength, rotation, direction texture) pass decision-11 thresholds; furnace bound holds — strength and rotation fixtures and the furnace pass; the direction-TEXTURE fixture needs textures in the reference → ticket 22 — PARTIAL (audit 2026-11-15): strength and rotation fixtures and furnace met; direction-TEXTURE fixture not built (ticket 22: qualitative only)
 - [x] Rotation direction and tangent handedness correct on mirrored instances (glTF conventions)
@@ -248,3 +248,35 @@ controls `declared-aniso-bent-normal-ignored` (fetch along N) and `declared-anis
 --ao off` (no `--debug-lighting`, which needs F10-F12 lighting); the first attempt with the custom denoiser still used the declared constant environment (the reflection composite owns it there:
 engine = the constant-sky image, 230 % off the hemisphere reference), hence the launch-option rule. Archive: +5 resolve class descriptors (plan update, `perm-harvest2`) and +6 constant-22
 descriptors (`.scratch/f15/harvest/tex-5.json`).
+
+## 2026-11-16 — round 3: anisotropic albedo table, lobe-id on the GPU (writer `f15c-aniso`, orchestrator verification)
+
+Commits be6ea68 (table: `tools/aniso_table.py` -> `src/renderer/aniso_table.h`, 24 N.V x 9 azimuth x 17 roughness x 9 strength, four-linear,
+shared C++/MSL), 141655c (declared environment: resolve and composite diffuse complement read (A, B); reference `aniso_table_lookup`; controls
+`declared-aniso-rms-fit`, `declared-aniso-azimuth-ignored`; decision 06 amended), 96ff4c6 (the MS test passes the view azimuth: the writer's API
+change had left ctest `f15_ms_python` failing, 1 of 46), b6c9b3d (lobe-id runner gates the specular signal 2, fixed before running).
+
+Verification on the integrated tip (`build/aniso3`, orchestrator):
+- ctest 46 / 46; `tools/test_aniso_table.py` worst table error 0.08 % on the ticket grid (old rms fit 6.59 %); `tools/test_f15_reference.py` OK.
+- Denoiser lobe-id criterion (ticket 08, the open item of rounds 1-2): `tools/f15_aniso_lobe_check.py` on the GPU (bench 2 `aniso-grid-env`, 640x360,
+  40 frames, RT reflections, custom denoiser, `PHOSPHOR_DIAGNOSTIC_DENOISE_HISTORY=1`): specular signal reused fraction 1.0 and longest history 40 of 40
+  frames; control `PHOSPHOR_DIAGNOSTIC_DENOISE_LOBE=flip` 0.0 / 1 (discriminates); isotropic base grid 1.0. PASSED. The DI signal (0) does not
+  discriminate (flip 1.0 / 32): the lobe key acts on the specular signal only, as ticket 08 specifies. Observation: the base grid's longest history is
+  89 over 40 frames (counter semantics not investigated; not part of the gate).
+- f15_check, every key with "aniso" (33), Mitsuba environment: 32 pass with every negative control failing (aniso-grid-env-resolve,
+  furnace-aniso@resolve, aniso-bent-env with the two new controls failing; coat / sheen / iridescence / panel combinations; texture-aniso; layer
+  blocks). furnace-aniso mean 1.0001 (round 2: 1.0022).
+- RED: `aniso-narrow-sun` (sun disk only, alpha_b 0.0064..0.04; gate p99 <= 1 %, max outside the quadrature mask <= 3 %): metal row, strength 1,
+  p99 0.36 %, max 3.77 % from one pixel (765,76) of sphere 23 (engine 3.328, reference 3.207). Round 2 (`build/int5/f15-1`) had 3.227 there and
+  passed with max 1.12 %. Attribution, same binary: `--debug-material-module fast` reproduces 3.2268 and passes (max 2.21 %); `--specular-ms off`
+  leaves the pixel unchanged; the albedo table cannot reach this key (sun only). The exact resolve module (fa6786d, F15.2 option (a)) is
+  further from the reference on the narrow metal rows (sphere max exact / fast: 19: 1.09 / 0.23 %, 16: 1.72 / 1.01 %, 23: 3.77 / 0.63 %; pixels
+  above 1 %: 16 / 6). No f15_check run evaluated this key after fa6786d before this one. Rejected hypothesis: float32 cancellation in the sun-disk
+  spiral (`1 - z^2` with z near 1: radial sample error 18.8 % at 128 samples, `1 - cos r` 0.21 %, in a float32 simulation); a prototype with
+  `w (2 - w)`, `2 sin^2(r / 2)` and a reduced golden angle left the exact module at 3.77 % and the fast one unchanged (reverted, diff in
+  `build/aniso3/spiral-prototype.diff`). Unproven hypothesis: the reference shades the engine-exported snapshot frames, the exact module (safe math)
+  rebuilds N / T' with different rounding, and a 0.0064 lobe turns ~1e-4 rad into a few percent.
+- Owner decision (2026-11-16, relayed by the aggregating session, option A): `aniso-narrow-sun` declared OPEN on the exact module with these
+  numbers; no fast-module gate, threshold or pixel-set change. Follow-up E (not started): a per-term dump (N, T', H, D, V, F) of the glint pixel,
+  exact against fast against the snapshot.
+- Still declared: the probe fit and the reflection-weight code keep the rms fit (decision 06); a bench-built primitive without tangents gets (1, 0, 0, 1).
