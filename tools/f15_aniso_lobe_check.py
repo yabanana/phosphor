@@ -38,7 +38,7 @@ BASE_FRACTION = 0.9
 ABSOLUTE_REUSED = 0.5
 FLIP_RATIO = 0.1
 FLIP_LONGEST = 2
-SPECULAR_SIGNAL = 1  # DENOISE_SIGNAL_SPECULAR: checked against the printed signal ids below (the signal with the longest history under reflections)
+SPECULAR_SIGNAL = 2  # DENOISE_SIGNAL_SPECULAR (src/renderer/gpu_types.h: DI 0, GI 1, SPECULAR 2, AO 3); the gate is fixed to this signal before running
 
 
 def cases(binary, out):
@@ -116,9 +116,9 @@ def evaluate(out):
                        "base_reused_fraction": b["reused_fraction"], "base_max_length": b["last"]["max_length"],
                        "control_discriminates": discriminates, "aniso_passes": passes})
     report["checks"] = checks
-    # the gate is the signal on which the control discriminates (the specular signal); a run where none does is not a proof
-    gated = [c for c in checks if c["control_discriminates"]]
-    ok = bool(gated) and all(c["aniso_passes"] for c in gated)
+    # the gate is the specular signal, fixed before running; the flip control must discriminate on it (else the run is not a proof)
+    gated = [c for c in checks if c["signal"] == SPECULAR_SIGNAL]
+    ok = len(gated) == 1 and gated[0]["control_discriminates"] and gated[0]["aniso_passes"]
     report["gated_signals"] = [c["signal"] for c in gated]
     report["passed"] = ok
     (out / "summary.json").write_text(json.dumps(report, indent=2))
