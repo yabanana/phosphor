@@ -10,7 +10,7 @@ Roadmap: F15.2
 
 - [x] Generator determinism: two runs byte-identical (ctest); malformed manifests and schema errors rejected
 - [x] Every generated class pipeline equals the generic all-lobes resolve exactly (0 pixels) on every fixture; negative control (class missing a used lobe) differs -- MET 2026-11-16 (038eb10, exact-maths module, owner option (a)): official `f15_permutations.py equivalence` at RELATIVE_TOLERANCE 0.0, run twice, 200 cases (162 scenes, fixtures + chess + corpus + terrain) bit-identical (0 px, 0 ULP, 8-bit 0), repeated reference 7 of 7, overflow bin 12 runs 0 ULP; the negative control leaves the envelope in 125 of 185 controls with every feature bit 0..8 discriminated by 16..34 scenes. HISTORY (superseded, kept for the record): 2026-11-14 on the fast module only 77 of 116 fixture cases were bit-identical (max 3.1e-6 relative = 37 ULP, 1 LSB in 2 pixels of the 8-bit image), 21 of 73 featured scenes could not discriminate through the resolve colour, the chess/corpus envelope 1e-5 was exceeded on 15 of 24 textured scenes. The final-tip rerun is pending the final battery (ticket 24)
-- [x] Budget: ≤ 64 archived material permutations, ≤ 16 active classes per scene (beyond: logged generic fallback), archive build time +≤ 25 %, 0 render-thread compiles and 0 fallback draws in measured frames
+- [ ] Budget: ≤ 64 archived material permutations, ≤ 16 active classes per scene (beyond: logged generic fallback), archive build time +≤ 25 %, 0 render-thread compiles and 0 fallback draws in measured frames — UNTICKED 2026-11-17 by owner decision (option A): the archive build time is NOT demonstrably met on the final archive (+25.7 % median, +27.4 % on the minima, spread about +-10 %); the other sub-items hold (53 / 64 permutations, <= 16 classes, 0 render-thread compiles, 0 fallback draws)
 - [x] Binning vs union on the chess fixture (A/B/A, 3 replicas, quiet machine) recorded as provisional in opt-log/perf-log — MET 2026-11-15 (cfb9e11, `tools/f15_costs.py`, perf-log / opt-log, ticket 24 'QUIET-MACHINE COSTS'): resolve + classification side-light -1.8 %, shadow rig +6.7 %, back-light +9.8 % (A-A noise 2.6 / 0.9 / 4.3 %); the 5 % rule of decision 05 is not met, binning stays opt-in, union the default (with the terrain, ticket 23). The re-measure on the exact-maths module is pending the final battery (ticket 24)
 - [x] Targeted archive update; `pipelines script` test green
 
@@ -259,3 +259,19 @@ tip never produces the record (0 of 480 frame checks, 60 / 60 identical images).
 with `--debug-lighting 1`.  Follow-up (named, not started): a debug copy of the reflection kernel that stores a per-group marker word to find the store.
 
 2026-11-16 — status reconciliation (closure): the equivalence box (0 px) is ticked on the 2026-11-16 evidence of this ticket (038eb10: 200 cases, 162 scenes, 0 ULP on the exact module; the old '77 of 116 bit-identical' is kept as history in the box); ticket 23 round 3 adds the terrain (19 cases, 0 px / 0 ULP, e0f6ea0). The chess binning box is ticked on the 2026-11-15 record (cfb9e11); both note that the rerun on the final tip / exact module is pending the final battery (ticket 24). The old ToyCar variation stays localised, not root-caused (owner option a, 2026-11-16).
+
+### 2026-11-17 — owner decisions on the final battery (relayed by the aggregating session)
+
+- Archive build time (option A, "Non rispettato"): declared NOT demonstrably met.  metal-tt on the final archive (2655 pipelines, 494 MB)
+  62.16 s median (57.7-69.3, 6 runs) against 49.45 s (45.3-51.8) without the 226 RESOLVE_BIN class pipelines (418 MB): +25.7 % median,
+  +27.4 % on the minima, budget +25 %, run spread about +-10 % (perf-log round 3).  Cause: all 226 are `phx_exact::visibility_resolve` /
+  `phx_exact::visibility_lit_resolve` (the exact-maths module of option (a)); 124 of them are variants of constant 26 (the in-stack
+  texture-transform specialisation, b6e3a55) that the class plan does not name but scenes request, so pruning them is not safe.
+  Follow-up: class pipelines only for the constant-26 values in use, or a plan that names them.  The budget box above is unticked.
+- `aniso-narrow-sun` (ticket 11, option A, "Dichiararlo aperto"): OPEN on the exact module.  Stated plainly for F15.2: on narrow anisotropic
+  lobes the exact-maths module, which stays the default for every scene with material features, is FURTHER from the reference than the fast
+  module: glint pixel (765,76) of sphere 23 3.77 % exact against 2.21 % fast (gate 3 %); narrow metal rows 16 pixels above 1 % exact
+  against 6 fast.  The sun-disk spiral hypothesis was rejected (diff kept in build/aniso3/spiral-prototype.diff); follow-up E: a per-term
+  dump (N, T', H, D, V, F) of the glint pixel, exact against fast against the snapshot.  No gate on the fast module, no threshold or pixel
+  change.
+

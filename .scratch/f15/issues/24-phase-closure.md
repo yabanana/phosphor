@@ -360,3 +360,19 @@ only). Final sha256: phosphor `c2514d6fdbe7344ae50fa14528a7f89970f3d5a17aa665270
 - `layers-blk-all-e1`: its pending 2-ULP expectation is met by the exact module, asserted to pass since 858569f.
 - The remaining failing rows are the declared subsurface default-tier keys (expected failures, expectation met).
 
+### 2026-11-17 — identity of every final-battery result (owner request) and what replaces it
+
+All results above came from phosphor c2514d6f / metallib 5adf457e.  Archive per result: `build/final2` steps 15:22-16:57 (build, ctest,
+syntax, visual, variant, variant-mesh, archive_check, overflow, exactness, JIT, XPC, Apple9, every round-2/3 fixture, chess, Khronos corpus,
+equivalence) and the f15_check captures (286 / 286, exit 0, 16:57-17:30) ran with archive 128a394a; the POST steps (ctest, archive_check,
+Khronos corpus + validation, 18:00-18:15), the quiet window (hitch, D2, costs, metal-tt, 18:20-19:13), the transmission clip (19:13-19:42)
+and the diagnosis runs ran with archive 49e5d00e.  The 2 added tile pipelines only change archive hits of two corpus models (ToyCar,
+GlamVelvetSofa); images do not depend on the archive (captures use final pipelines, `--pipeline-sync`), which archive_check re-confirmed on
+49e5d00e.  f15_check's GPU run was stopped by the orchestrator after the 286 captures because the reference rendering (every transmission
+reference re-renders after the f15_reference.py change) held the GPU lock for hours; the references were rendered by CPU shards and one
+`--evaluate` pass judged the captures.  The F13/F14 corpus re-run on c2514d6f was stopped deliberately after 37 of 89 cases (2026-11-17
+~00:00) as a pre-check: the owner's round-4 fixes replace this binary, the GPU went to the fix verifications, ed41156 is validated on a
+frozen F14-numerical subset (build/f15-corpus-oracle-check).  The owner's round-4 decisions (layer test flag, MS fixes, combo
+investigation) change the binary: ONE complete final battery is re-run on the new hashes (f15_check in full, equivalence, archive_check,
+visual, hitch, D2 on a quiet machine, the full F13/F14 corpus), and only those results are the final evidence.
+
