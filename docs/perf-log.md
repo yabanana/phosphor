@@ -1524,3 +1524,63 @@ F13 correctness cost the owner attributes to F13.  The ~0.2 ms seen at the closu
 continuation multiplying the traversals of the 124-byte ticket-14 payload that `reflection_rt` still carried (an F15 cost), removed by the fix
 (docs/opt-log.md, "follow-up 3", adopted).  With it the F15 band is met under option A (-0.038 ms) and against the plain ticket-03 baseline (+0.020 ms);
 the absolute D2 gate holds (GPU p95 15.33-15.43 ms <= 16.67, 0 GPU allocations).  No image changes (F13 exactness 0 px, PFM bit-identical).
+
+## 2026-11-16 — F15 closure round 2: quiet-machine costs on the final tree (M5 Max)
+
+Binary `build/d2-final/final` (tree 9d418f5 + the targeted archive update, sha256 `c4d781e7…`), frozen by APFS clone; heavy CPU jobs
+(Mitsuba reference renders) SIGSTOPped for the whole window (`scratchpad/quiet_r2_wrap.sh`), quietgate: load 1.6-4.7 at the start (the 5/15-min
+averages carry the paused renders), disturbance only from the Claude app (56-90 %), MTLCompilerService at startup and ecosystemanalyticsd.
+0 GPU allocations in every measured run; every measured window 0 fallback draws, 0 compiler calls.
+
+### Sponza D2 band (decision 11: median of three A/B/A GPU p95 deltas <= 0.10 ms, absolute <= 16.67 ms): MET
+Rotation t03 (2e1057a, `build/d2-skips/t03`) / finalMS (41be99b, MS + mirror chain) / final, 3 replicas, order reversed every replica
+(`build/d2-final/rot-r2`):
+
+| binary | GPU p50 | GPU p95 median (min-max) | refl. sample 0 p50 / p95 | sky p95 |
+|---|---|---|---|---|
+| final | 14.238 | 15.320 (15.27-15.36) | 2.479 / 3.544 | 0.860 |
+| finalMS | 14.254 | 15.342 (15.32-15.42) | 2.489 / 3.560 | 0.796 |
+| t03 | 14.397 | 15.389 (15.38-15.40) | 2.651 / 3.532 | 0.787 |
+
+t03 -> final -0.059 ms (pairs -0.06 / -0.13 / -0.02); finalMS -> final -0.047; t03 -> finalMS -0.037 (the earlier window gave +0.043: run-to-run
+spread of the band measurement is about 0.08 ms).
+
+### Transmission, chess back-light rig (`tools/f15_costs.py --only t1-transmission-chess-backlight`)
+B arm (transmission 1) frame GPU p50 per run; the A arm (factor 0) is bimodal by about 3 ms between identical runs on preMS/finalMS, so the
+B-A medians mislead there; the B arm is stable:
+
+| binary | B frame p50 (3 runs) | B - A median | cluster RT shading B p50 | reflection samples B |
+|---|---|---|---|---|
+| base 3ef8f41 | 47.3 / 46.9 / 46.9 | +10.02 | 33.86 | 9.80 (8 passes) |
+| preMS 06dd3a7 | 47.3 / 47.2 / 49.3 | +11.83 | 32.91 | 11.34 |
+| finalMS 41be99b | 47.7 / 50.6 / 47.7 | +9.38 | 33.16 | 11.58 |
+| final | 51.6 / 52.2 / 51.4 | +14.19 | 36.85 | 11.74 |
+
+finalMS -> final (+3.7 ms cluster on the glass arm) = transport round 2 (049f570 closed-volume interior + masked casters, aa3b19b Fresnel weights,
+payload 144 B). Attribution spike: see opt-log.
+
+### Iridescence per light (A = thickness 0, B = film; 1920x1080; resolve mean / DI pass p50)
+legacy (resolve lights): 1 light +0.245 ms, 8 lights +0.477 ms -> (0.477-0.245)/7 = +0.033 ms per extra light; clustered DI: DI pass 1 light
++0.022, 8 lights +0.271 -> +0.036 ms per extra light; the resolve keeps +0.22-0.26 ms for the environment film term in both.
+
+### RT walk subsurface tier (`subsurface-volumetric-sun`, 1280x720, 3 replicas interleaved)
+"Subsurface diffusion" 0.328 ms; "Subsurface RT walk": 4 walks 3.93 ms, 16 walks (product default) 15.3 ms, 64 walks 60.4 ms (linear,
+~0.95 ms per walk per pixel-set); frame GPU p50 0.64 / 4.5 / 15.9 / 61.0 ms. Optional tier (default diffusion).
+
+### Layer stack resolve (terrain CC0, 1920x1080, union, "Material resolve" mean)
+| arm | base 3ef8f41 | preMS 06dd3a7 | finalMS 41be99b | final |
+|---|---|---|---|---|
+| single | 0.086 | 0.089 | 0.094 | 0.094 |
+| layers-1 | 0.129 | 0.270 | 0.286 | 0.285 |
+| layers-4 | 0.203 | 0.369 | 0.383 | 0.375 |
+| full | 0.199 | 0.467 | 0.544 | 0.543 |
+Feature blocks (final, f15_layers_timing A/B/A): blocks-1..4 1.229 / 1.474 / 1.553 / 2.504 ms. Attribution spike: opt-log.
+
+### Transmission after the 128-byte payload (f7d1f22; quiet A/B, opt-log "+3.7 ms payload SIZE")
+Chess back-light rig, B - A effect of the glass transport: pre-fix tip +14.46 ms, fix +12.62 ms (-1.84 ms); cluster RT shading +11.36 -> +9.67 ms. Adopted.
+
+### Layer stack after the attribution spike (owner-cited quiet numbers, opt-log 2026-11-16 F15.4 / F15.2 option (a))
+`Material resolve` mean at 1080p, terrain CC0, the final module choice (exact maths for scenes with material features) against the same binary
+forced to the fast module (`--debug-material-module fast`, debug only): layers-1 0.282 vs 0.158 ms (+78 %), layers-4 0.353 vs 0.239 ms (+48 %),
+full 0.494 vs 0.277 ms (+78 %); a featureless scene pays 0 (single material 0.095 / 0.095 ms, base module).  These replace the earlier
++62 / +81 % estimate.  The in-stack texture-transform code is compiled out without transforms (c8e240f / b6e3a55: layers-4 -7 %, full -9 %).
