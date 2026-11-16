@@ -1160,8 +1160,15 @@ static ShadingResult shadeSurface(SurfaceInput in, constant FrameConstants &fram
     if (useSpec) { // F15.1: f0 * A + f90 * B per lobe, diffuse weight 1 - max(E_dielectric)
         // F15.1 (ticket 11): the split sum (diffuse weight included) at the effective isotropic roughness of an anisotropic lobe.
         // F15.1 (ticket 12): the film at N.V (bsdfSpecEnvIrid; no film = bsdfSpecEnv).
-        const BsdfSpecEnv env = bsdfSpecEnvIrid(spec, irid, baseColor.rgb, metallic, anisoActive ? bsdfAnisoEnvRoughness(roughness, anisoStrength) : roughness,
-                                                NdotV, frame.dfgTable);
+        // F15.1 (ticket 11, round 3): an anisotropic lobe reads its own directional albedo (A, B) (tools/aniso_table.py) instead of the DFG table at an
+        // effective roughness (rms fit 6.5 % against the exact albedo at strength 1; the table reproduces it to < 0.1 % on the ticket grid).
+        BsdfSpecEnv env;
+        if (anisoActive) {
+            const float2 ab = bsdfAnisoEnvAB(aniso, V, NdotV, roughness, anisoStrength, BSDF_ANISO_TABLE(frame.dfgTable));
+            env = bsdfSpecEnvIridAB(spec, irid, baseColor.rgb, metallic, ab.x, ab.y, NdotV);
+        } else {
+            env = bsdfSpecEnvIrid(spec, irid, baseColor.rgb, metallic, roughness, NdotV, frame.dfgTable);
+        }
         envDiffuse = env.diffuseWeight;
         envSpecularWeight = env.specular;
         envDielectric = env.dielectric;

@@ -1271,15 +1271,19 @@ def legacy_hemisphere_radiance(base, metallic, roughness, n, v, aniso, variant):
     n_dot_v = np.maximum(dot(n, v), MIN_NDOTV)
     effective = np.asarray(roughness, dtype=np.float64)
     env_normal = n
+    table_ab = None
     kind = variant.get("aniso", "spec")
     if aniso is not None:
         at, ab = aniso_alphas(effective_alpha(roughness), aniso["strength"])
-        alpha_eff = declared_aniso_alpha(at, ab, "spec" if kind == "bent-normal-ignored" else kind)
-        effective = np.where(alpha_eff == ab, effective, np.sqrt(alpha_eff))
+        if kind in ("spec", "azimuth-ignored", "bent-normal-ignored"):  # F15.1 (ticket 11, round 3): the anisotropic albedo table
+            table_ab = declared_aniso_ab(effective, n_dot_v, aniso, "azimuth-ignored" if kind == "azimuth-ignored" else "spec")
+        else:  # the older fit (negative controls `rms-fit`, `ignored`, `alpha-t`)
+            alpha_eff = declared_aniso_alpha(at, ab, "spec" if kind == "rms-fit" else kind)
+            effective = np.where(alpha_eff == ab, effective, np.sqrt(alpha_eff))
         if kind != "bent-normal-ignored":
             _, b_axis = aniso_axes(aniso, n)
             env_normal = np.where((aniso["strength"] > 0)[:, None], aniso_bent_normal(n, v, b_axis, np.asarray(roughness, dtype=np.float64), aniso["strength"]), n)
-    a, b = dfg_lookup(n_dot_v, clamp_roughness(effective))
+    a, b = dfg_lookup(n_dot_v, clamp_roughness(effective)) if table_ab is None else table_ab[:2]
     m = np.asarray(metallic, dtype=np.float64)[:, None]
     f0 = DIELECTRIC_F0 * (1 - m) + base * m
     spec_w = np.clip(f0 * a[:, None] + b[:, None], 0.0, 1.0)
@@ -1341,7 +1345,7 @@ def declared_extension_diffuse_weight(metallic, roughness, n_dot_v, variant, die
     """The declared diffuse weight 1 - max3 E of the underlying dielectric (n, 1): the extension (ior/specular) and/or the film, exactly the weights
     `_declared_material_radiance` and `declared_irid_environment` apply to the diffuse term (F15.3 closure, thin + ior / iridescence)."""
     mu = np.maximum(np.asarray(n_dot_v, dtype=np.float64), MIN_NDOTV)
-    a, b = dfg_lookup(mu, clamp_roughness(roughness))
+    a, b = declared_dfg(mu, clamp_roughness(roughness))
     a, b = a[:, None], b[:, None]
     if dielectric is None:
         f0_film, e_ds = np.full((len(mu), 3), DIELECTRIC_F0), np.clip(DIELECTRIC_F0 * a + b, 0.0, 1.0)
@@ -1373,7 +1377,7 @@ def declared_thin_environment(material, metallic, base, roughness, n_dot_v, thin
     so it never exceeds the diffuse weight it replaces (energy moved, not added).  Controls: `front-only` r = 1 (the transmitted
     weight equals the front diffuse's), `untinted`, `double-counted`, `ignored`."""
     mu = np.maximum(np.asarray(n_dot_v, dtype=np.float64), MIN_NDOTV)
-    a, b = dfg_lookup(mu, clamp_roughness(roughness))
+    a, b = declared_dfg(mu, clamp_roughness(roughness))
     if thin["variant"] == "default-weight":
         diffuse_weight = None
     weight = np.clip(DIELECTRIC_F0 * a + b, 0.0, 1.0)[:, None] if diffuse_weight is None else 1.0 - diffuse_weight  # E_d of the extension / film when given
@@ -2065,6 +2069,8 @@ SHEEN_DECLARED_CONTROLS = {
 ANISO_DECLARED_CONTROLS = {
     "declared-aniso-ignored": {**DECLARED, "aniso": "ignored"},      # alpha_eff = alpha_b: the engine before ticket 11
     "declared-aniso-alpha-t": {**DECLARED, "aniso": "alpha-t"},      # alpha_eff = alpha_t: the stretched axis only
+    "declared-aniso-rms-fit": {**DECLARED, "aniso": "rms-fit"},      # the isotropic split sum at the rms effective roughness: the engine before round 3
+    "declared-aniso-azimuth-ignored": {**DECLARED, "aniso": "azimuth-ignored"},  # the albedo table read at a fixed view azimuth (pi / 4)
     "declared-aniso-bent-normal-ignored": {**DECLARED, "aniso": "bent-normal-ignored"},  # legacy hemisphere: fetch along N, not the README's bent normal
 }
 # F15.3 (ticket 12): negative controls of the iridescence grids of the deterministic resolve.  The split-sum model evaluates
@@ -2174,6 +2180,62 @@ def sheen_lookup(n_dot_v, roughness, path=SHEEN_HEADER):
     return np.minimum(e, SHEEN_E_CLAMP)
 
 
+ANISO_TABLE_HEADER = REPO / "src" / "renderer" / "aniso_table.h"
+_ANISO_TABLE = {}
+
+
+def load_aniso_table(path=ANISO_TABLE_HEADER):
+    """table[strength, roughness, azimuth, N.V, (A, B)] parsed from the engine header (tools/aniso_table.py; layout in the header's comment)."""
+    key = str(path)
+    if key not in _ANISO_TABLE:
+        text = pathlib.Path(path).read_text()
+        dims = [int(re.search(name + r"\s*=\s*(\d+)", text).group(1))
+                for name in ("AnisoTableMu", "AnisoTableAzimuth", "AnisoTableRoughness", "AnisoTableStrength")]
+        start = text.index("AnisoTable[")
+        body = text[text.index("{", start) + 1:text.index("};", start)]
+        values = [float(v) for v in re.findall(r"[-+]?(?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?(?=f\b)", body)]
+        if len(values) != int(np.prod(dims)) * 2:
+            raise ValueError(f"{path}: expected {int(np.prod(dims)) * 2} anisotropic albedo values, parsed {len(values)}")
+        _ANISO_TABLE[key] = np.asarray(values, dtype=np.float64).reshape(dims[3], dims[2], dims[1], dims[0], 2)
+    return _ANISO_TABLE[key]
+
+
+def aniso_table_lookup(n_dot_v, azimuth, roughness, strength, path=ANISO_TABLE_HEADER):
+    """Four-linear (A, B) of the anisotropic albedo table, the rule of `anisoTableLookup` written from its documentation: node = clip(x, 0, 1) (n - 1)
+    for x = N.V, azimuth / (pi / 2), roughness and strength, the cell index clamped to n - 2."""
+    table = load_aniso_table(path)
+    ns, nr, npi, nm = table.shape[:4]
+    coords = []
+    for x, n in ((n_dot_v, nm), (np.asarray(azimuth, dtype=np.float64) / (0.5 * math.pi), npi), (roughness, nr), (strength, ns)):
+        t = np.clip(np.asarray(x, dtype=np.float64), 0.0, 1.0) * (n - 1)
+        i = np.minimum(np.floor(t).astype(np.int64), n - 2)
+        coords.append((i, t - i))
+    (im, fm), (ip, fp), (ir, fr), (is_, fs) = coords
+    out = 0.0
+    for ds in (0, 1):
+        for dr in (0, 1):
+            for dp in (0, 1):
+                for dm in (0, 1):
+                    w = (fs if ds else 1 - fs) * (fr if dr else 1 - fr) * (fp if dp else 1 - fp) * (fm if dm else 1 - fm)
+                    out = out + w[..., None] * table[is_ + ds, ir + dr, ip + dp, im + dm]
+    return out[..., 0], out[..., 1]
+
+
+# The declared (A, B) of the anisotropic pixels of one `declared_environment_radiance` call: the base-lobe sites of the declared model read it
+# through `declared_dfg` instead of the isotropic DFG table (None = every pixel isotropic).
+_DECLARED_AB = {"ab": None}
+
+
+def declared_dfg(n_dot_v, roughness):
+    """(A, B) of the declared base lobe: the anisotropic override of the running call, else the DFG table."""
+    ab = _DECLARED_AB["ab"]
+    if ab is None:
+        return dfg_lookup(n_dot_v, roughness)
+    if len(ab[0]) != len(np.atleast_1d(n_dot_v)):
+        raise ValueError("the anisotropic declared (A, B) has a different pixel count than the call")
+    return ab
+
+
 def declared_sheen_environment(material, n_dot_v, sheen, variant):
     """The declared sheen environment model for unit radiance: material (1 - max3(S) E_t) + S E_t, E_t = the table
     value at (N.V, sheen roughness) (clamped to [0.07, 1], the table's own clamp); variant["sheen"] names the control
@@ -2200,8 +2262,40 @@ def karis_ab(n_dot_v, roughness):
     return -1.04 * a004 + r[2], 1.04 * a004 + r[3]
 
 
+def declared_aniso_ab(roughness, n_dot_v, aniso, kind="spec"):
+    """(A, B, active) per pixel of the declared environment of an anisotropic material (F15.1, ticket 11, round 3): the anisotropic albedo table of the engine
+    (`aniso_table_lookup`: N.V, the azimuth `aniso["phi"]` of V against the lobe axis T' folded into [0, pi / 2], the material roughness, the strength) for the
+    pixels with strength > 0, the DFG table elsewhere.  `azimuth-ignored` (control) reads the table at the fixed azimuth pi / 4."""
+    mu = np.maximum(np.asarray(n_dot_v, dtype=np.float64), MIN_NDOTV)
+    rough = clamp_roughness(roughness)
+    strength = np.asarray(aniso["strength"], dtype=np.float64)
+    phi = np.full(len(mu), 0.25 * math.pi) if kind == "azimuth-ignored" else np.asarray(aniso["phi"], dtype=np.float64)
+    a_t, b_t = aniso_table_lookup(mu, phi, rough, np.clip(strength, 0.0, 1.0))
+    a_d, b_d = dfg_lookup(mu, rough)
+    active = strength > 0.0
+    return np.where(active, a_t, a_d), np.where(active, b_t, b_d), active
+
+
 def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, variant=DECLARED, dielectric=None,
                                   coat=None, sheen=None, aniso=None, irid=None, thin=None):
+    """The declared environment model (see `_declared_environment_radiance`).  F15.1 (ticket 11, round 3): an anisotropic pixel's split sum reads the
+    anisotropic albedo table (variant["aniso"] `spec`, `azimuth-ignored`); the older fits (`rms-fit` = the rms effective roughness of the decision 06
+    amendment, `ignored`, `alpha-t`) stay as negative controls.  `aniso` then needs "phi" (`aniso_environment_inputs`)."""
+    kind = variant.get("aniso", "spec")
+    if aniso is None or kind not in ("spec", "azimuth-ignored"):
+        return _declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, variant, dielectric, coat, sheen, aniso, irid, thin)
+    if "phi" not in aniso:
+        raise ValueError("the declared anisotropic environment needs the azimuth of the view in the lobe frame (aniso['phi'])")
+    a, b, _ = declared_aniso_ab(roughness, n_dot_v, aniso, kind)
+    _DECLARED_AB["ab"] = (a, b)
+    try:
+        return _declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, variant, dielectric, coat, sheen, aniso, irid, thin)
+    finally:
+        _DECLARED_AB["ab"] = None
+
+
+def _declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, variant=DECLARED, dielectric=None,
+                                   coat=None, sheen=None, aniso=None, irid=None, thin=None):
     """Outgoing radiance (n, 3) of the engine's declared environment model (see the module docstring).
 
     `irid` (F15.3, ticket 12, per-pixel dict of the iridescence section; variant["irid"] names the control): the iridescent pixels
@@ -2222,8 +2316,10 @@ def declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance, 
     if aniso is not None:
         alpha = effective_alpha(roughness)
         at, ab = aniso_alphas(alpha, aniso["strength"])
-        alpha_eff = declared_aniso_alpha(at, ab, variant.get("aniso", "spec"))
-        roughness = np.where(alpha_eff == ab, np.asarray(roughness, dtype=np.float64), np.sqrt(alpha_eff))
+        kind = variant.get("aniso", "spec")
+        if kind not in ("spec", "azimuth-ignored"):  # the older fit of the decision 06 amendment (negative controls)
+            alpha_eff = declared_aniso_alpha(at, ab, "spec" if kind == "rms-fit" else kind)
+            roughness = np.where(alpha_eff == ab, np.asarray(roughness, dtype=np.float64), np.sqrt(alpha_eff))
         ms_pixels = ~(np.asarray(aniso["strength"], dtype=np.float64) > 0.0)
     material = _declared_material_radiance(base, metallic, roughness, n_dot_v, variant, dielectric, ms_pixels)
     if irid is not None:
@@ -2275,7 +2371,7 @@ def declared_irid_environment(material, base, metallic, roughness, n_dot_v, irid
         metal      = (1 - s) clamp(c A + B, 0, 1) + s E_irid(base_f0 = c)
     `material` keeps the pixels whose strength is 0 (the declared model of the base)."""
     mu = np.maximum(np.asarray(n_dot_v, dtype=np.float64), MIN_NDOTV)
-    a, b = dfg_lookup(mu, clamp_roughness(roughness))
+    a, b = declared_dfg(mu, clamp_roughness(roughness))
     a, b = a[:, None], b[:, None]
     s = irid_strength(irid)[:, None]
     m = np.asarray(metallic, dtype=np.float64)[:, None]
@@ -2318,7 +2414,7 @@ def _declared_material_radiance(base, metallic, roughness, n_dot_v, variant, die
     """The declared model of the material alone for unit environment radiance (see declared_environment_radiance)."""
     mu = np.maximum(np.asarray(n_dot_v, dtype=np.float64), MIN_NDOTV)
     rough = clamp_roughness(roughness)
-    a, b = karis_ab(mu, rough) if variant["albedo"] == "karis-fit" else dfg_lookup(mu, rough)
+    a, b = karis_ab(mu, rough) if variant["albedo"] == "karis-fit" else declared_dfg(mu, rough)
     a, b = a[:, None], b[:, None]
     m = np.asarray(metallic, dtype=np.float64)[:, None]
     ms_on = variant.get("ms", "off") != "off"  # ADR-0007: the dielectric layer's lobe energy comes out of the diffuse complement
@@ -3190,6 +3286,8 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
                 radiance += f15_ms.coat_environment_value(coat, coat_weight(coat), dot(n, v), sky, model, model["ms"])
             terms.append("environment-quadrature")
         else:
+            if env_aniso is not None:  # F15.1 (ticket 11, round 3): the declared anisotropic albedo table is indexed by the view azimuth in the lobe frame
+                env_aniso = {**env_aniso, "phi": aniso_environment_inputs(env_aniso, roughness, n, v)["phi"]}
             if LEGACY_ENVIRONMENT:
                 if any(x is not None for x in (env_dielectric, env_coat, env_sheen, env_irid, env_thin)):
                     raise ValueError("the legacy-environment reference models the base and anisotropy only")

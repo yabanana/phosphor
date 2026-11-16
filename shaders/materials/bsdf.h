@@ -13,6 +13,7 @@
 #include "exact_pragma_on.h"
 #include "renderer/dfg_table.h"
 #include "renderer/sheen_table.h"
+#include "renderer/aniso_table.h" // F15.1 (ticket 11): the lookup of the anisotropic albedo table (the data array is C++ only)
 #include "renderer/lobe_select.h"
 #include "renderer/transmission_math.h"
 #include "renderer/specular_ms.h" // before the exact-maths region opens (bsdf_energy.h below only wraps it)
@@ -168,16 +169,20 @@ struct BsdfSpecEnv {
     float3 dielectric;    // E_dielectric
     float diffuseWeight;  // 1 - max(E_dielectric)
 };
-inline BsdfSpecEnv bsdfSpecEnv(BsdfDielectricSpec s, float3 albedo, float metallic, float roughness, float NdotV,
-                               const constant float* table) {
-    const float A = phosphor::dfgTableLookup(table, NdotV, roughness, 0u),
-                B = phosphor::dfgTableLookup(table, NdotV, roughness, 1u);
+// A and B given (the DFG table at the lobe roughness, or the anisotropic albedo table of an anisotropic lobe).
+inline BsdfSpecEnv bsdfSpecEnvAB(BsdfDielectricSpec s, float3 albedo, float metallic, float A, float B) {
     BsdfSpecEnv e;
     e.dielectric = clamp(s.f0 * A + s.f90 * B, 0.0f, 1.0f);
     const float3 metal = clamp(albedo * A + B, 0.0f, 1.0f);
     e.specular = mix(e.dielectric, metal, metallic);
     e.diffuseWeight = 1.0f - bsdfMax3(e.dielectric);
     return e;
+}
+inline BsdfSpecEnv bsdfSpecEnv(BsdfDielectricSpec s, float3 albedo, float metallic, float roughness, float NdotV,
+                               const constant float* table) {
+    const float A = phosphor::dfgTableLookup(table, NdotV, roughness, 0u),
+                B = phosphor::dfgTableLookup(table, NdotV, roughness, 1u);
+    return bsdfSpecEnvAB(s, albedo, metallic, A, B);
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +338,15 @@ inline float bsdfAnisoDiffuseRoughness(float roughness, float strength) {
     const float ab = bsdfAlpha(roughness), at = ab + (1.0f - ab) * (strength * strength);
     return sqrt(0.5f * (at + ab));
 }
+// F15.1 (ticket 11, round 3): the split-sum scale and bias (A, B) of the anisotropic lobe from the albedo table (tools/aniso_table.py,
+// renderer/aniso_table.h), replacing the isotropic DFG lookup at the effective roughness (whose best single roughness leaves 4.0-4.8 % against the
+// exact albedo at strength 1, rms fit 6.5 %).  The table is indexed by N.V, the azimuth of V in the lobe frame (T', B') folded into [0, pi / 2],
+// the material roughness and the strength.  `table` = BSDF_ANISO_TABLE(frame.dfgTable) (a buffer: fragment functions) or phosphor::AnisoTable.
+inline float2 bsdfAnisoEnvAB(BsdfAniso an, float3 v, float NdotV, float roughness, float strength, const constant float* table) {
+    const float azimuth = atan2(abs(dot(an.b, v)), abs(dot(an.t, v))) * (2.0f / M_PI_F);
+    return float2(phosphor::anisoTableLookup(table, NdotV, azimuth, roughness, strength, 0u),
+                  phosphor::anisoTableLookup(table, NdotV, azimuth, roughness, strength, 1u));
+}
 // The README's bent normal (fetch direction of the environment): towards the plane spanned by v and the stretch direction.
 inline float3 bsdfAnisoBentNormal(float3 n, float3 v, BsdfAniso an, float roughness, float strength) {
     const float3 bent = cross(cross(an.b, v), an.b);
@@ -487,11 +501,9 @@ inline BsdfBaseLobes bsdfSpecEvalIrid(BsdfDielectricSpec s, BsdfIrid irid, float
     return out;
 }
 // Split-sum environment of an iridescent material (film at N.V, see above); bsdfSpecEnv without a film.
-inline BsdfSpecEnv bsdfSpecEnvIrid(BsdfDielectricSpec s, BsdfIrid irid, float3 albedo, float metallic, float roughness, float NdotV,
-                                   const constant float* table) {
-    BsdfSpecEnv e = bsdfSpecEnv(s, albedo, metallic, roughness, NdotV, table);
+inline BsdfSpecEnv bsdfSpecEnvIridAB(BsdfDielectricSpec s, BsdfIrid irid, float3 albedo, float metallic, float A, float B, float NdotV) {
+    BsdfSpecEnv e = bsdfSpecEnvAB(s, albedo, metallic, A, B);
     if (!bsdfIridActive(irid)) return e;
-    const float A = phosphor::dfgTableLookup(table, NdotV, roughness, 0u), B = phosphor::dfgTableLookup(table, NdotV, roughness, 1u);
     const float carry = clamp(A + B, 0.0f, 1.0f);
     const float3 eDielectric = clamp(bsdfIridFresnel(irid, s.f0, NdotV) * carry, 0.0f, 1.0f);
     const float3 eMetal = clamp(bsdfIridFresnel(irid, albedo, NdotV) * carry, 0.0f, 1.0f);
@@ -502,6 +514,11 @@ inline BsdfSpecEnv bsdfSpecEnvIrid(BsdfDielectricSpec s, BsdfIrid irid, float3 a
     e.specular = mix(e.dielectric, mix(metalPlain, eMetal, k), metallic);
     e.diffuseWeight = diffuse;
     return e;
+}
+inline BsdfSpecEnv bsdfSpecEnvIrid(BsdfDielectricSpec s, BsdfIrid irid, float3 albedo, float metallic, float roughness, float NdotV,
+                                   const constant float* table) {
+    const float A = phosphor::dfgTableLookup(table, NdotV, roughness, 0u), B = phosphor::dfgTableLookup(table, NdotV, roughness, 1u);
+    return bsdfSpecEnvIridAB(s, irid, albedo, metallic, A, B, NdotV);
 }
 
 // ---------------------------------------------------------------------------

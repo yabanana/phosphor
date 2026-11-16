@@ -12,6 +12,8 @@
 
 #define BSDF_MS_LOSS_AVG(dfg) ((dfg) + phosphor::DfgTableSize * phosphor::DfgTableSize * 2u)
 #define BSDF_MS_LOST(dfg) (BSDF_MS_LOSS_AVG(dfg) + phosphor::MsTableSize)
+// F15.1 (ticket 11, round 3): the anisotropic albedo table (renderer/aniso_table.h) follows the lost-energy table in the same buffer.
+#define BSDF_ANISO_TABLE(dfg) (BSDF_MS_LOST(dfg) + phosphor::MsTableSize * phosphor::MsTableSize)
 
 struct BsdfMs {
     float3 fms;         // F_ms of the pixel's lobe (colour of the energy that scatters more than once)

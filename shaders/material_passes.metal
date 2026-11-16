@@ -3,6 +3,7 @@
 // across the separate forward/resolve AIR modules during metal-tt (F7/F8).
 // Keep the source passes separate for editing; share their compiled types,
 // samplers and function constants. See docs/plans/F7-F8-EXECUTION.md.
+#define PHOSPHOR_ANISO_TABLE_DATA 1 // F15.1 (ticket 11): the composite lobe kernel reads the anisotropic albedo table as a program-scope array
 #include "forward.metal"
 #include "visibility_resolve.metal"
 // F15.1 (ticket 07): the lobe-guide DI kernels (specialised by MATERIAL_FEATURES) join this module, like forward and

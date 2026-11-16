@@ -1493,11 +1493,12 @@ class SheenSnapshot(unittest.TestCase):
 
 # --- KHR_materials_anisotropy (F15.3, ticket 11) -----------------------------------------------------------------------
 
-def aniso_pixels(strength, rotation, tangent=(1.0, 0.0, 0.0), w=1.0, det=1.0, variant="spec", count=1):
-    """Per-pixel anisotropy arrays of `count` identical pixels (see ref.aniso_arrays)."""
+def aniso_pixels(strength, rotation, tangent=(1.0, 0.0, 0.0), w=1.0, det=1.0, variant="spec", count=1, phi=0.3):
+    """Per-pixel anisotropy arrays of `count` identical pixels (see ref.aniso_arrays); `phi` is the azimuth of the view in the lobe frame that the
+    declared environment (anisotropic albedo table, ticket 11 round 3) reads (render_frame sets it from `aniso_environment_inputs`)."""
     return {"strength": np.full(count, float(strength)), "rotation": np.full(count, float(rotation)),
             "tangent": np.tile(np.asarray(tangent, dtype=np.float64), (count, 1)), "w": np.full(count, float(w)),
-            "det": np.full(count, float(det)), "variant": variant}
+            "det": np.full(count, float(det)), "variant": variant, "phi": np.full(count, float(phi))}
 
 
 def readme_d(n_dot_h, t_dot_h, b_dot_h, at, ab):
@@ -1781,6 +1782,55 @@ class AnisotropyModel(unittest.TestCase):
                                                  aniso=aniso_pixels(1.0, 1.1, w=-1.0, count=2))
         np.testing.assert_allclose(spin, spec, rtol=1e-12)
 
+    def test_declared_anisotropic_environment_reads_the_albedo_table_and_meets_decision_11(self):
+        # F15.1 (ticket 11, round 3): the declared model of an anisotropic pixel is the split sum with the engine's anisotropic albedo table
+        # (tools/aniso_table.py, renderer/aniso_table.h): a white metal under unit radiance returns A + B of the table at (N.V, azimuth, roughness,
+        # strength).  Against the exact quadrature on the ticket grid (sphere-weighted over N.V >= 0.1 and all azimuths, r 0.2 / 0.3 / 0.5 / 0.7,
+        # strength 0.25 .. 1) the table model is below the decision-11 5 % (bound fixed beforehand; the measured worst is printed) and the former rms
+        # fit (control `declared-aniso-rms-fit`) is above it at strength 1 (r 0.2 / 0.3 / 0.5: 6.5 %); `azimuth-ignored` reads a fixed azimuth and
+        # leaves 3-5 % where the azimuth matters.
+        mus = np.linspace(0.1, 1.0, 19)
+        phis = np.linspace(0.0, 0.5 * math.pi, 9)
+        grid_mu, grid_phi = np.meshgrid(mus, phis, indexing="ij")
+        mu, phi = grid_mu.ravel(), grid_phi.ravel()
+        count = len(mu)
+        weight = 2.0 * mu * np.where(np.isclose(phi, 0.0) | np.isclose(phi, 0.5 * math.pi), 0.5, 1.0)
+        worst = {"spec": 0.0, "rms-fit": 0.0, "azimuth-ignored": 0.0}
+        for rough in (0.2, 0.3, 0.5, 0.7):
+            for strength in (0.25, 0.5, 0.75, 1.0):
+                ab = max(rough * rough, 0.002)
+                at = ab + (1 - ab) * strength * strength
+                tmus, tphis, ta, tb = ref.aniso_albedo_table(at, ab)
+                exact = ref._bilinear(tmus, tphis, ta + tb, mu, phi)
+                aniso = aniso_pixels(strength, 0.0, count=count)
+                aniso["phi"] = phi
+                for kind in worst:
+                    out = ref.declared_environment_radiance(np.ones((count, 3)), np.ones(count), np.full(count, rough), mu, 1.0, {**ref.DECLARED, "aniso": kind},
+                                                            aniso=aniso)[:, 0]
+                    error = float((np.abs(out - exact) / exact * weight).sum() / weight.sum())
+                    worst[kind] = max(worst[kind], error)
+                    if kind == "spec":
+                        self.assertLess(error, 0.05, (rough, strength))
+                        a, b = ref.aniso_table_lookup(mu, phi, ref.clamp_roughness(np.full(count, rough)), np.full(count, strength))
+                        np.testing.assert_allclose(out, np.clip(a + b, 0, 1), rtol=1e-12)
+                    if kind == "rms-fit" and strength == 1.0 and rough <= 0.5:
+                        self.assertGreater(error, 0.05, (rough, strength))  # negative control: the old fit fails the bound
+        print("\ndeclared anisotropic environment, worst sphere-weighted error against the exact albedo:", {k: round(v, 4) for k, v in worst.items()})
+        self.assertLess(worst["spec"], 0.01)
+        self.assertGreater(worst["azimuth-ignored"], 0.02)
+
+    def test_declared_anisotropic_environment_keeps_isotropic_pixels_on_the_dfg_table(self):
+        # Strength 0 pixels are not anisotropic in the engine (anisoActive false): the DFG table, bit for bit, for every kind of the declared model.
+        base, metallic, rough, mu = np.array([[0.8, 0.35, 0.15]] * 2), np.array([0.0, 1.0]), np.full(2, 0.3), np.array([0.6, 0.4])
+        plain = ref.declared_environment_radiance(base, metallic, rough, mu, 0.5)
+        for kind in ("spec", "azimuth-ignored", "rms-fit", "ignored"):
+            out = ref.declared_environment_radiance(base, metallic, rough, mu, 0.5, {**ref.DECLARED, "aniso": kind}, aniso=aniso_pixels(0.0, 0.3, count=2))
+            np.testing.assert_allclose(out, plain, rtol=1e-12, err_msg=kind)
+        with self.assertRaises(ValueError):  # the table needs the azimuth of the view
+            bad = aniso_pixels(1.0, 0.3, count=2)
+            del bad["phi"]
+            ref.declared_environment_radiance(base, metallic, rough, mu, 0.5, aniso=bad)
+
     def test_declared_fit_error_against_the_exact_quadrature_is_published_and_bounded(self):
         # Sphere-weighted (pdf 2 mu over N.V >= 0.1, uniform view azimuth) mean relative error of A + B at alpha_b 0.09.
         for strength, bound in ((0.5, 0.02), (1.0, 0.09)):
@@ -1975,7 +2025,7 @@ class AnisotropyModel(unittest.TestCase):
         self.assertEqual(sorted(ref.ANISO_CONTROLS), ["aniso-alpha-swapped", "aniso-bitangent-flipped",
                                                       "aniso-d-normalised-by-ab", "aniso-ignored",
                                                       "aniso-mirror-unaware", "aniso-rotation-flipped"])
-        self.assertEqual(sorted(ref.ANISO_DECLARED_CONTROLS), ["declared-aniso-alpha-t", "declared-aniso-bent-normal-ignored", "declared-aniso-ignored"])
+        self.assertEqual(sorted(ref.ANISO_DECLARED_CONTROLS), ["declared-aniso-alpha-t", "declared-aniso-azimuth-ignored", "declared-aniso-bent-normal-ignored", "declared-aniso-ignored", "declared-aniso-rms-fit"])
         self.assertIn("anisotropy", ref.MODEL)
 
 

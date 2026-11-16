@@ -1,4 +1,5 @@
 #include "platform/metal/scene_renderer.h"
+#include "renderer/aniso_table.h"
 #include "renderer/dfg_table.h"
 #include "renderer/ms_table.h"
 #include "renderer/sheen_table.h"
@@ -115,13 +116,15 @@ SceneRenderer::SceneRenderer(MetalContext& context, PipelineCache& pipelines, u3
     // F15: the DFG table as a buffer; written once, never modified (no frame upload).
     // F15 closure (--specular-ms): the multiple-scattering tables (renderer/ms_table.h: 1 - E_avg per roughness, then the lost-energy table)
     // follow the DFG table in the same buffer; the shaders address them as frame.dfgTable + DfgTableSize * DfgTableSize * 2 (BSDF_MS_LOSS_AVG)
-    // and + MsTableSize more (BSDF_MS_LOST): nothing else of this buffer moves.
-    dfgTable_ = context_.memory().newBuffer(sizeof(DfgTable) + sizeof(MsLogLossAvgTable) + sizeof(MsLogLostTable), MTL::ResourceStorageModeShared,
-                                            MemoryCategory::Scene, "DFG table");
+    // and + MsTableSize more (BSDF_MS_LOST): nothing else of this buffer moves.  F15.1 (ticket 11): the anisotropic albedo table (renderer/aniso_table.h)
+    // follows them (BSDF_ANISO_TABLE).
+    dfgTable_ = context_.memory().newBuffer(sizeof(DfgTable) + sizeof(MsLogLossAvgTable) + sizeof(MsLogLostTable) + sizeof(AnisoTable),
+                                            MTL::ResourceStorageModeShared, MemoryCategory::Scene, "DFG table");
     char* dfgBytes = static_cast<char*>(dfgTable_->contents());
     std::memcpy(dfgBytes, DfgTable, sizeof(DfgTable));
     std::memcpy(dfgBytes + sizeof(DfgTable), MsLogLossAvgTable, sizeof(MsLogLossAvgTable));
     std::memcpy(dfgBytes + sizeof(DfgTable) + sizeof(MsLogLossAvgTable), MsLogLostTable, sizeof(MsLogLostTable));
+    std::memcpy(dfgBytes + sizeof(DfgTable) + sizeof(MsLogLossAvgTable) + sizeof(MsLogLostTable), AnisoTable, sizeof(AnisoTable));
     // F15.1 (ticket 10): the sheen albedo table, same rules.
     sheenTable_ = context_.memory().newBuffer(sizeof(SheenTable), MTL::ResourceStorageModeShared, MemoryCategory::Scene, "Sheen table");
     std::memcpy(sheenTable_->contents(), SheenTable, sizeof(SheenTable));

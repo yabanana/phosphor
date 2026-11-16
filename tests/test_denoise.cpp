@@ -419,6 +419,30 @@ TEST_CASE("F15.1 ticket 11: an anisotropic pixel is filtered at the roughness of
     auto wide=a;wide.roughness=eff;auto wideB=b;wideB.roughness=eff;
     CHECK(denoiseSpatialWeight(wide,wideB,2,2,1,p,&base,&base)>sharp);
 }
+TEST_CASE("F15.1 ticket 11 (round 3): an anisotropic highlight keeps the base lobe id, so its history and neighbours survive"){
+    // The transport gives an anisotropic pixel without a coat lobe id 0 (shaders/reflection_lobe.h sets the id only in the coat block; the
+    // anisotropic lobe is the BASE lobe with a different D V), whichever strength or rotation: the key of every frame is 0 and the history accumulates.
+    const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);const auto s=receiver();DenoiseLobeGuide guide;guide.ior=1.5f;
+    const u32 anisoKey=specularSampleLobeFlags(SPECULAR_LOBE_BASE,false);
+    CHECK(specularSampleLobeKey(anisoKey)==0u);CHECK(denoiseStableLobeKey(specularSampleLobeKey(anisoKey),guide)==0u);
+    auto h=denoiseTemporal(s,glm::vec3(1),{},p,{},{},lobeSpec(anisoKey),-1,glm::vec3(0),glm::vec3(-1),&guide);REQUIRE(h.valid);CHECK(h.lobe==0u);
+    for(u32 frame=2;frame<=6;++frame){
+        CHECK(denoiseCompatible(s,h,p,lobeSpec(anisoKey),&guide));
+        h=denoiseTemporal(s,glm::vec3(1),h,p,{},{},lobeSpec(anisoKey),-1,glm::vec3(0),glm::vec3(-1),&guide);CHECK(h.length==frame);CHECK(h.lobe==0u);}
+    // the history roughness of the highlight is the sharper axis of the lobe (base roughness), for every strength
+    for(const float k:{.25f,.5f,1.f}){auto rs=s;rs.roughness=.3f;
+        const auto hk=denoiseTemporal(rs,glm::vec3(1),{},p,{},{},lobeSpec(anisoKey),-1,glm::vec3(0),glm::vec3(-1),&guide);
+        CHECK(hk.roughness==doctest::Approx(denoiseAnisotropicRoughness(.3f,k)).epsilon(1e-5));}
+    // neighbours of two anisotropic highlights filter together
+    DenoiseLobePixel a,b;a.guide=b.guide=guide;a.sampleFlags=b.sampleFlags=anisoKey|SPECULAR_SAMPLE_VALID;
+    auto sv=s;sv.viewDirection[2]=1;CHECK(denoiseSpatialWeight(sv,sv,.5f,.5f,.1f,p,&a,&b)>.99f);
+    // negative controls: a transport that flipped the lobe id of the highlight (here to the clear coat, frame by frame) would reject the history
+    // and the neighbours; the stable key does not mask it for a pixel without a transmission factor.
+    const auto flipped=denoiseTemporal(s,glm::vec3(1),h,p,{},{},lobeSpec(kCoat),-1,glm::vec3(0),glm::vec3(-1),&guide);
+    CHECK(flipped.length==1u);CHECK(flipped.lobe==specularSampleLobeKey(kCoat));
+    CHECK_FALSE(denoiseCompatible(s,h,p,lobeSpec(kCoat),&guide));
+    DenoiseLobePixel c=b;c.sampleFlags=kCoat|SPECULAR_SAMPLE_VALID;CHECK(denoiseSpatialWeight(sv,sv,.5f,.5f,.1f,p,&a,&c)==0.f);
+}
 TEST_CASE("F15.1 (ticket 13) a transmissive pixel has one key whichever branch of the reflect/refract estimator was drawn"){
     const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);const auto s=receiver();
     DenoiseLobeGuide glass;glass.ior=1.5f;glass.transmissionFactor=1.0f;

@@ -135,7 +135,12 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
             float3 thinTerm=float3(0); // F15.1 (ticket 16): w color (1 - metallic) (1 - E_d) (1 - 0.16 N.V), the transmitted diffuse (radiance / pi at -N)
             // F15.1 (ticket 08): extended pixels receive 1 - max(E_dielectric) of their own specular lobe.
             {const auto lobe=REFL_LOBE(p.flags,REFLECT_COMPOSE_LOBE_GUIDE_VALID,pixel.y*p.width+pixel.x,s);
-                if(lobe.extended&&!noSpecularEstimate)envDiffuse=bsdfSpecEnvIrid(lobe.spec,lobe.irid,diVec(s.albedo),saturate(s.metallic),(p.flags&REFLECT_COMPOSE_SPEC)?lobe.diffuseRoughness:lobe.envRoughness,envNV,phosphor::DfgTable).diffuseWeight;
+                if(lobe.extended&&!noSpecularEstimate){
+                    if(lobe.aniso){ // F15.1 (ticket 11, round 3): the diffuse complement of the anisotropic lobe from its own directional albedo (A, B), the exact split sum
+                        const float3 an_n=normalize(diVec(s.shadingNormal)),an_v=normalize(diVec(s.viewDirection));
+                        const float2 ab=bsdfAnisoEnvAB(reflectionAnisoFrame(s,an_n,lobe),an_v,envNV,s.roughness,lobe.anisoStrength,phosphor::AnisoTable);
+                        envDiffuse=bsdfSpecEnvIridAB(lobe.spec,lobe.irid,diVec(s.albedo),saturate(s.metallic),ab.x,ab.y,envNV).diffuseWeight;
+                    } else envDiffuse=bsdfSpecEnvIrid(lobe.spec,lobe.irid,diVec(s.albedo),saturate(s.metallic),(p.flags&REFLECT_COMPOSE_SPEC)?lobe.diffuseRoughness:lobe.envRoughness,envNV,phosphor::DfgTable).diffuseWeight;}
                 // F15 closure (ADR-0007): the dielectric layer's multiple-scattering energy is taken from the diffuse complement (1 - E_d - F_ms L).
                 if((p.flags&REFLECT_COMPOSE_SPECULAR_MS)&&!noSpecularEstimate&&!lobe.aniso){ // anisotropic lobes carry none (ADR-0007)
                     const float msRough=(p.flags&REFLECT_COMPOSE_SPEC)?lobe.diffuseRoughness:lobe.envRoughness;

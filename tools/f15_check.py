@@ -537,8 +537,8 @@ SCENARIOS = {
     # flipped, handedness ignored (the same lobe as the rotation flip on a mesh of handedness -1: the mirrored fixture
     # separates them), alpha_t / alpha_b swapped, D normalised by alpha_b^2 (gains energy).  The exact environment key uses
     # the same five controls (the per-sphere mean over a combed sphere sees the lobe orientation: measured); the declared
-    # environment key (split sum at an effective roughness, see the reference) requires `declared-aniso-ignored` and
-    # `-alpha-t` (the declared fit is independent of rotation, handedness and axis swap).
+    # environment key (split sum with the anisotropic albedo table of the engine since round 3, see the reference) requires `declared-aniso-ignored`,
+    # `-alpha-t`, `-rms-fit` (the former fit) and `-azimuth-ignored`.
     "aniso-grid-sun": {"kind": "direct",
                        "controls": ANISO_DIRECT_CONTROLS,
                        "terms": "sun disk only (environment 0, no shadows, no GI) on the strength x rotation grid"},
@@ -547,14 +547,14 @@ SCENARIOS = {
                          "terms": "sun disk only on the strength x rotation grid with NARROW lobes (alpha_b 0.0064 .. 0.04); the reference integrates the disk "
                                   "exactly (polar grid, no quadrature mask) instead of the engine's spiral rule"},
     "aniso-grid-env-resolve": {"kind": "declared",
-                               "reflections": "off", "controls": ["declared-aniso-ignored", "declared-aniso-alpha-t"],
+                               "reflections": "off", "controls": ["declared-aniso-ignored", "declared-aniso-alpha-t", "declared-aniso-rms-fit", "declared-aniso-azimuth-ignored"],
                                "terms": "constant environment only (radiance 0.5, no sun) on the anisotropy grid, deterministic "
                                         "resolve terms (--reflections off --lighting-denoise custom)"},
     # ticket 11 (F15.3 closure): the legacy two-colour hemisphere environment (--legacy-environment, --reflections off, legacy lighting) is NOT constant, so the README's
     # bent-normal fetch direction is visible.  Reference: the declared split-sum weights times hemisphere(N) / hemisphere(specularDir) with the README bent normal.
     "aniso-bent-env": {"kind": "declared", "reflections": "off", "denoise": "off", "legacy_environment": True,
                        "reference_args": ["--legacy-environment"],
-                       "controls": ["declared-aniso-bent-normal-ignored", "declared-aniso-ignored"],
+                       "controls": ["declared-aniso-bent-normal-ignored", "declared-aniso-ignored", "declared-aniso-rms-fit"],
                        "terms": "legacy hemisphere environment (sky 0.30 0.36 0.45 above, ground 0.10 0.09 0.08 below), no sun, resolve-owned, on the anisotropy grid"},
     "aniso-grid-env": {"kind": "environment",
                        "controls": ANISO_DIRECT_CONTROLS,
@@ -581,7 +581,7 @@ SCENARIOS = {
                                "anisotropy grid"},
     "furnace-aniso@resolve": {"kind": "furnace", "always_green": True, "reflections": "off",
                               "controls": ["aniso-d-normalised-by-ab"],
-                              "declared": ["declared-aniso-ignored", "declared-aniso-alpha-t"],
+                              "declared": ["declared-aniso-ignored", "declared-aniso-alpha-t", "declared-aniso-rms-fit"],
                               "terms": "constant environment radiance 1, base albedo 1, no sun, deterministic resolve terms "
                                        "on the anisotropy grid"},
     # The mirrored carrier fixture (sun only): columns = (plain, mirrored) x (handedness -1, +1) at rotation pi/4.  The
