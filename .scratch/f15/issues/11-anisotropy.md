@@ -282,3 +282,29 @@ Verification on the integrated tip (`build/aniso3`, orchestrator):
 - Still declared: the probe fit and the reflection-weight code keep the rms fit (decision 06); a bench-built primitive without tangents gets (1, 0, 0, 1).
 
 2026-11-16 — status reconciliation (closure): Status no longer lists the denoiser lobe-id criterion as uncovered (closed by the round-3 section: 40 of 40, flip control 0.0 / 1) nor the strength-1 declared-environment fit gap as open (round 3: 0.08 %). The direction-TEXTURE fixture is recorded as GREEN (round 2). The fixture box stays unticked only because `aniso-narrow-sun` is RED on the exact module and OPEN by owner decision (option A, 2026-11-16, follow-up E); no threshold, pixel set or module choice was changed.
+
+2026-11-17 round 4 — `combo-all-lobes-env` regression (owner option C, investigated; writer W3, branch `f15c-combo`):
+- Reproduced on the final binary: sphere 2 (dielectric, ior 2.4 / specular 1, coat 1 / 0.3, sheen orange 0.75, anisotropy strength 1 at azimuth half, roughness 0.3) mean
+  5.1237 % against the gate 5 %; 7704b21 gave 4.07 %. Attribution: the hunk of 141655c in `reflection_composite.metal` (diffuse complement of anisotropic pixels from the
+  anisotropic albedo table) in the SSR transport (`REFLECT_COMPOSE_SPEC`); the resolve hunk is not involved (the declared keys are unchanged).
+- Cause (analysis against `tools/f15_reference.py`, not a compensation of the combination): the exact reference's diffuse weight is `cd_ext`, the cosine integral of
+  1 - max F(V.H) over L; it does not depend on the specular lobe (V.H of a cosine-distributed L). For the sphere (f0 0.17, roughness 0.3) cd_ext(N.V = 1) is 0.8304; the
+  isotropic base roughness gives 1 - max E = 0.8322 (the lookup every isotropic key already uses), the old diffuse roughness (alpha_t + alpha_b) / 2 gave 0.8908, the exact
+  anisotropic albedo table gives 0.9101 (strength 1, any azimuth).  1 - E of the anisotropic lobe is energy-conserving for the lobe but is the wrong estimate of the
+  diffuse weight of the specification, and the strength 1 anisotropic lobe has the lowest albedo: the table made the diffuse complement 0.08 too large (the old fit was
+  closer by accident, 0.06) so the combination (coat, sheen and a bright f0 on top) sat 4 % above the reference, and the table's +0.02 pushed it over the gate.
+- Fix (verified for the transport path only): in the composite, an anisotropic pixel under the transported specular signal takes the diffuse weight at the isotropic
+  base roughness (`bsdfSpecEnvIrid(..., s.roughness, ...)`); the resolve and the composite without a specular signal keep the albedo-table complement (the declared reference
+  of tickets 11 / 19 is built on it, and `tools/f15_reference.py` is outside this change).  The change is in `shaders/reflection_composite.metal`, delivered as the
+  patch `f15-closure/w3-combo.patch` (file owned by another writer).
+- Before / after (final binary c2514d6f / this build, `f15_check --run --expect green`, cached final references; selection = every key of kind environment or
+  furnace-transport that has an anisotropic pixel, plus the layer blocks): combo-all-lobes-env 5.124 % -> 0.918 % (all spheres <= 0.92 %; sphere 2 0.83 %), GREEN;
+  aniso-grid-env 1.93 -> 2.13 %; combo-aniso-coat-env 1.69 -> 1.91 %; combo-aniso-panel-env 1.57 -> 2.49 % (sphere 2 0.65 -> 2.49 %, sphere 0 1.57 -> 0.06 %);
+  combo-thin-lobes-env 1.96 -> 2.15 %; combo-aniso-sheen-env 1.35 -> 1.01 %; combo-irid-aniso-env 3.565 % (unchanged); furnace-aniso and furnace-combinations
+  max pixel unchanged (1.0289 / 1.0273, gate 1.005 on the mean); layers-blk-aniso-e0 / e1 / ramp and layers-furnace unchanged and green.  Every gate green, every control still fails
+  (GREEN exit 0 on the 13 keys).
+- Cost, reported: the furnace energy of transported dielectric anisotropic pixels falls (furnace-aniso spheres 4-11 mean 1.0000 -> 0.9915 ... 0.964, furnace-combinations
+  sphere 1 0.9976 -> 0.9694): the exact diffuse weight is not energy-conserving together with the anisotropic specular albedo (the reference itself reports an energy
+  gain of 2 %); the gate is an upper bound.  The weaker strengths of aniso-grid-env lose about 0.5 % accuracy.
+- Featureless scenes: the 5 `f15_exact.sh` PFMs cmp-identical to `build/exact-final-ms`; visual_check result in the report of W3.
+- Open: the resolve path (declared) still uses the table complement; changing it needs `declared_extension_diffuse_weight` of the reference (other owner) and a re-baseline of the declared keys.
