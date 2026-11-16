@@ -340,5 +340,23 @@ only). Final sha256: phosphor `c2514d6fdbe7344ae50fa14528a7f89970f3d5a17aa665270
 | chess king / queen subsurface bound | RED as declared (ticket 20), equal to the pre-check |
 | F15.2 permutation equivalence | 237 cases / 168 scenes 0 px / 0 ULP; controls leave the envelope in 151 of 216; every feature bit 0-8 discriminated; overflow 12 / 12 0 ULP; repeats 7 / 7 |
 | transmission temporal clip | PASS on a converged control rebuilt for the final binary (128 seeds, half-vs-half 0.0055 / 0.0069 / 0.0096 <= gates / 3): smooth ior 1.33 / 1.5 / 2.0 p95 0.0230 / 0.0234 / 0.0307, max 0.0409 / 0.0480 / 0.0620 (gate 0.06); negative-refract-axis fails (0.1745 / 0.1690 / 0.1445); rough ROIs information (r0.1 0.0889, r0.3 0.0845, r0.6 0.0517); the battery run itself had no converged control (exit 5, not judged) |
-| f15_check (286 scenarios) | captures done on the final binary; the reference rendering held the GPU lock for hours (every transmission reference re-renders since f15_reference.py changed), so the run was stopped after the captures and is evaluated with `--evaluate` (CPU only) next to the GPU jobs |
-| F13/F14 corpus with the MS references | after the clip control |
+| f15_check (286 scenarios, 209 evaluated) | captures on the final binary; missing references rendered by 3 CPU shards, then one `--evaluate`: RED, 21 scenarios miss their expectation, every cause diagnosed by A/B on the same binary (section "f15_check diagnosis" below); owner decisions pending |
+| F13/F14 corpus with the MS references | first run (kept in `build/f15-corpus-r2-oracle112`): functional checks pass, but the F14 volume oracle rejected every frame (116-word fog block against 112) -> numerical 0 / 14, full-rate pairs 0 / 17, controls 15 / 30; oracle fixed (ed41156), full frozen-plan re-run in place |
+
+### 2026-11-16 — f15_check diagnosis on the final binary (orchestrator; owner decisions requested)
+
+- 16 layer-equal keys (`layers-endpoint-*` incl. cc0, `layers-blk-emissive-e0/e1`, `layers-hit-{refl,probe,gi}-e0/e1`): the stack has material
+  features and resolves on the exact module, the single-material pair is featureless and stays on the fast module.  With the stack forced to
+  the fast module (`--debug-material-module fast`) all 16 are 0 px bitwise against their pairs: the blending is exact.  Last green
+  2026-11-15 20:54 (before fa6786d).
+- `sheen-probe-env` (7.0 %) and `texture-coat-sun` (p99 1.55 %): pass with the round-2 numbers when engine AND reference run with MS off
+  (sheen mean 1.2e-5, coat p99 0.34 %); with MS on the engine and the reference model the multiple-scattering energy differently on the
+  probe-captured sheen path and the textured coat path (engine MS on / off +3.0 % and +2.3 % on the spheres).  Last green 2026-11-15
+  21:44 (before 3812871); these keys were among the 101-148 never evaluated with MS in round 2.
+- `combo-all-lobes-env` sphere 2 (ior / specular + coat + sheen + anisotropy): 5.12 % against 5 %, unchanged with MS off, the fast module or
+  one reflection bounce; a build of 7704b21 (before the anisotropic albedo table) gives 4.07 % (PASS): the table (141655c) moves this
+  4-lobe combination 0.84 % brighter while the reference is unchanged.
+- `aniso-narrow-sun`: exact module, declared open (follow-up E).
+- `layers-blk-all-e1`: its pending 2-ULP expectation is met by the exact module, asserted to pass since 858569f.
+- The remaining failing rows are the declared subsurface default-tier keys (expected failures, expectation met).
+
