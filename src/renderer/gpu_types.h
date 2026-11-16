@@ -826,6 +826,9 @@ PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_TRANSMITTANCE_MAP = 1u << 5;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_TRANSMITTANCE_IGNORED = 1u << 6;
 // F15 closure (ticket 15): the receiver keeps its own transmissive surface in the map sum (negative control `--debug-receiver-own off`).
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_RECEIVER_OWN_IGNORED = 1u << 7;
+// F15.1 (ticket 16): the scene has a caster with a material extension record (thin / diffuse-transmission / feature materials): the PCSS filter taps use the
+// receiver-plane bias, so a tilted receiver that is also a caster (the quad itself) does not self-shadow.  Clear for featureless scenes (images unchanged).
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_RECEIVER_PLANE_BIAS = 1u << 8;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_NONE = 0u;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_BIAS = 1u;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_CASTER = 2u;

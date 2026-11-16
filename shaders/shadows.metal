@@ -421,7 +421,7 @@ static float shadowPcss(float3 point,float3 normal,uint cascade,constant GPUShad
     // fixed slope term (a quarter texel) does not cover: the taps then self-shadow in bands along the texel grid (measured 0.82-0.95 of the lit
     // floor on the pane fixtures).  Without the map the bias stays as before (every CSM scene without transmissive casters is unchanged).
     float filterBias=bias;
-    if(p.flags&SHADOW_FLAG_TRANSMITTANCE_MAP) filterBias=bias+(max(penumbra,c.texelWorld*0.5f)+c.texelWorld*0.25f)*slope/max(c.depthRange,1e-6f);
+    if(p.flags&(SHADOW_FLAG_TRANSMITTANCE_MAP|SHADOW_FLAG_RECEIVER_PLANE_BIAS)) filterBias=bias+(max(penumbra,c.texelWorld*0.5f)+c.texelWorld*0.25f)*slope/max(c.depthRange,1e-6f);
     float visible=0;
     for(uint s=0;s<filterCount;++s) {
         const float2 at=uv+shadowDisk(s,filterCount,rotation)*radiusUv;

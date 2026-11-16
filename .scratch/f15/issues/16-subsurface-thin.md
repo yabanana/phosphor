@@ -323,3 +323,25 @@ geometry tests are in the tree.  Status: PARTIAL - no code change is justified w
 - Archive: `metal-tt` ends with "applegpu-nt: Internal compiler error ... plugin wrapper-nt.dylib cannot emit pipeline" (no descriptor named) on every `phosphor-archive.metallib` step in this worktree: with my changes (3 runs),
   with all my shader changes reverted to the tip (2 runs, at fa6786d and at 06dd3a7), identical pipelines.mtl4-json to the orchestrator's (cmp).  I linked `phosphor` from `ninja -t commands` without the archive and ran with
   "archive hits 0, unavailable 136" (every pipeline compiled at start, `--pipeline-sync`): fallbacks 0.  The archive ICE is therefore environmental to this tree, not caused by this work; the orchestrator's archive build of the same content succeeds.
+
+### 2026-11-16 round 3 - CSM self-shadowing of a back-lit thin receiver (agent `csm-thin`, branch f15c-csm-thin)
+
+Fixture `python3 -I tools/f15_transport_check.py csm-thin --binary B [--control-binary B0] --out DIR` (corpus rig; the sun is fixed relative to the camera, so a thin
+diffuse-transmission quad is tilted until n.sun = -0.5 while n.camera = +0.25: the camera sees the front face, the sun reaches only the back face; a sun-lit back face is
+inherently grazing for the camera because sun and camera are 44 deg apart).  Arms: `--shadows off|csm|rt`, plus an opaque occluder (the receiver's shadow footprint on the
+plane 0.9 m towards the sun, +15 %) with csm and rt.  N = the blocked-rt capture (ambient only); D_x = ROI sum(x) - N.  Bounds fixed before measuring (decision 11 transmission
+bound): D_off / N >= 5 % (real signal), |D_csm / D_off - 1| <= 5 %, |D_rt / D_off - 1| <= 5 %, control blocked-csm D / D_off <= 10 % (the occluder must remove the term),
+identical corpus framing across arms (1 mm slivers at the occluder corners keep the bounds equal), front-lit sanity arm csm and rt within 5 % of off.
+
+- Before (pre-fix binary): signal 0.770 of ambient; **csm / off = 0.870 (13 % of the transmitted sun term lost)**, rt / off = 0.99995, front-lit csm / off 0.998, occluder control 0.000.
+  Grazing variant (n.sun = -0.18): csm / off 0.83 of D.  Resolution scaling of the loss (`--shadow-map-size`): 1024 0.83, 2048 0.87, 4096 0.954, 8192 0.9996.
+  The shadow mask itself (`--capture-linear-signal shadow`) averages 0.83-0.92 over the quad ROI in EVERY orientation (front 0.916): the PCSS filter taps self-shadow a tilted receiver that is
+  also the caster.  The code reading of 2026-10-07 (normal flipped to the light) was right but not sufficient: the receiver-plane filter bias existed only with a transmittance map
+  (ticket 15, SHADOW_FLAG_TRANSMITTANCE_MAP), and the front-lit sun term of this scene is unaffected by the mask, so only the back-lit transmitted term showed it.
+- Fix: new flag `SHADOW_FLAG_RECEIVER_PLANE_BIAS` (gpu_types.h, bit 8) set by `shadow_passes.cpp` when any caster has a material extension record (feature materials); `shadowPcss` applies the ticket-15
+  receiver-plane filter bias under `TRANSMITTANCE_MAP | RECEIVER_PLANE_BIAS`.  Scenes without extension records (all featureless scenes) never set it.
+- After: csm / off = 0.99995, rt / off = 0.99995, front csm / rt 1.000 / 1.000, graze-back csm sum / off 0.99998, graze-front 0.9999993, mirror-front 0.999999; all 6 gates pass, the occluder control
+  (csm D / off D = 0.000) fails as required, and the pre-fix binary (`--control-binary`) FAILS the gate (0.870).
+- Featureless: `f15_exact.sh` 5 PFMs cmp-identical to build/exact-final-ms; visual_check (--pipeline-sync, BENCH8_ARGS 100000 instances, reference-f15-final): 8 benches 0 px; 0 archive misses
+  in the fixture logs (no pipeline descriptor changed: no harvest KEPT file).
+- Quiet-machine timing: none claimed (the extra bias term is a few ALU in the PCSS filter, only in feature scenes).

@@ -534,6 +534,154 @@ def run_thin_backlit(args):
     return result
 
 
+# --- ticket 16 (round 3): CSM sun shadows of a back-lit thin receiver --------------------------------------------------
+
+TOWARD_SUN = (-0.45, 0.55, 0.70)   # CorpusRig::towardSun in the yaw 0 / pitch 0 camera frame (right, up, back)
+CSM_BOUND = 0.05                   # decision 11: transmission, relative bound of the declared quantity
+CSM_SIGNAL_MIN = 0.05              # the transmitted sun term must be at least 5 % of the ambient receiver (else the arm proves nothing)
+CSM_BLOCKED_MAX = 0.10             # the control: an opaque occluder between sun and receiver removes at least 90 % of the term
+
+
+def _unit(v):
+    length = math.sqrt(sum(x * x for x in v))
+    return tuple(x / length for x in v)
+
+
+def _cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def _dot(a, b):
+    return sum(x * y for x, y in zip(a, b))
+
+
+def _add(*terms):
+    return tuple(sum(t[i] for t in terms) for i in range(3))
+
+
+def _mul(v, k):
+    return tuple(x * k for x in v)
+
+
+def csm_geometry(orientation):
+    """Unit normal n of the receiver (origin) and in-plane axes (u, v) with u x v = n.  `back`: n . sun < 0 and n . camera > 0, the camera sees the
+    front face and the sun reaches only the back face.  `front`: the sanity arm (n towards the camera and the sun)."""
+    sun = _unit(TOWARD_SUN)
+    grazing = _unit((0.85, -0.2, 0.45))   # n . sun = -0.18: the sun is 80 degrees off the lit face's normal
+    n = {"back": _unit((0.8, -0.55, 0.25)),     # n . sun = -0.50, n . camera = 0.25
+         "graze-back": grazing,
+         "front": _unit((0.0, 0.0, 1.0)),       # n . sun = +0.70
+         "graze-front": _unit(_add(grazing, _mul(sun, -2.0 * _dot(grazing, sun)))),   # n . sun = +0.18, n . camera = 0.72
+         "mirror-front": _unit(_add(_unit((0.8, -0.55, 0.25)), _mul(sun, -2.0 * _dot(_unit((0.8, -0.55, 0.25)), sun))))}[orientation]   # the back receiver mirrored about the sun: n . sun = +0.50, the same scene extents
+    u = _unit(_cross((0.0, 1.0, 0.0), n))
+    v = _cross(n, u)
+    return {"sun": sun, "n": n, "u": u, "v": v}
+
+
+CSM_HALF = (0.5, 0.35)   # receiver half extents along u, v
+
+
+def csm_scene(orientation, occluder):
+    """A thin diffuse-transmission quad (weight 1) whose lit face is away from the sun (orientation 'back'), optionally an opaque occluder between
+    the sun and the receiver: the receiver's shadow footprint on the plane at 0.9 m along the sun direction, grown by 15 % (every point stays on the
+    sun side of the receiver's plane, i.e. behind it for the camera).  Every 'back' arm carries the occluder's four corners (the full quad when it is on,
+    1 mm slivers pointing inwards otherwise) so that the corpus rig frames all arms identically."""
+    g = csm_geometry(orientation)
+    s = GltfScene()
+    thin = s.material("thin", color=(0.6, 0.6, 0.6), extensions={"KHR_materials_diffuse_transmission": {"diffuseTransmissionFactor": 1.0}})
+    block = s.material("occluder", color=(0.5, 0.5, 0.5), double_sided=True)
+    signs = ((-1, -1), (1, -1), (1, 1), (-1, 1))
+    receiver = [_add(_mul(g["u"], a * CSM_HALF[0]), _mul(g["v"], b * CSM_HALF[1])) for a, b in signs]
+    s.quad(receiver, thin)
+    if orientation in ("front", "graze-front"):
+        # the reflection probe needs bounds with an extent on every axis: a quad 0.5 m behind facing away (reversed winding, culled from the camera)
+        s.quad([(-0.5, -0.35, -0.5), (-0.5, 0.35, -0.5), (0.5, 0.35, -0.5), (0.5, -0.35, -0.5)], block)
+    if orientation.endswith("back") or orientation == "mirror-front":
+        sun = g["sun"]
+        centre = _mul(sun, 0.9)
+        corners = [_add(centre, _mul(_add(p, _mul(sun, -_dot(sun, p))), 1.15)) for p in receiver]
+        assert orientation == "mirror-front" or all(_dot(g["n"], c) < 0.0 for c in corners), "the occluder must stay behind the receiver plane"
+        if occluder:
+            s.quad(corners, block)
+        else:
+            for c in corners:
+                dx, dy = (-1e-3 if c[0] > 0 else 1e-3), (-1e-3 if c[1] > 0 else 1e-3)
+                s.quad([c, _add(c, (dx, 0, 0)), _add(c, (dx, dy, 0)), _add(c, (0, dy, 0))], block)
+    return s, g
+
+def csm_roi(orientation, fraction=0.4):
+    """Pixel box inside the projected inner `fraction` of the receiver (the corpus rig frames the scene bounds, camera on +z)."""
+    scene, g = csm_scene(orientation, False)
+    centre, distance = frame_rig(*scene.bounds())
+    cam_z = centre[2] + distance
+    pixels = []
+    for a, b in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+        p = _add(_mul(g["u"], a * CSM_HALF[0] * fraction), _mul(g["v"], b * CSM_HALF[1] * fraction))
+        depth = cam_z - p[2]
+        x = (p[0] - centre[0]) / (depth * TAN_HALF * ASPECT)
+        y = (p[1] - centre[1]) / (depth * TAN_HALF)
+        pixels.append(((0.5 + 0.5 * x) * WIDTH, (0.5 - 0.5 * y) * HEIGHT))
+    xs, ys = sorted(p[0] for p in pixels), sorted(p[1] for p in pixels)
+    return int(math.ceil(xs[1])), int(math.ceil(ys[1])), int(math.floor(xs[2])), int(math.floor(ys[2]))
+
+
+def rig_bounds_line(folder):
+    for line in (pathlib.Path(folder) / "engine.log").read_text().splitlines():
+        if "CORPUS_RIG:" in line:
+            return line.split("CORPUS_RIG:")[1].strip()
+    return None
+
+
+def run_csm_thin(args):
+    """Ticket 16: does the CSM sun shadow self-shadow a thin diffuse-transmission receiver whose lit face is away from the sun?
+    Arms (back orientation): off = no shadows, csm / rt = the sun shadow technique, blocked-csm / blocked-rt = an opaque occluder between sun and
+    receiver.  N = the blocked-rt capture (ambient only: the sun is removed); D_x = ROI sum(x) - ROI sum(N).  Gates (bounds fixed before measuring):
+    D_off / N >= 5 % (the transmitted sun term is a real signal), |D_csm / D_off - 1| <= 5 % and |D_rt / D_off - 1| <= 5 % (decision 11 transmission
+    bound).  Control: blocked-csm D / D_off <= 10 % (the fixture sees the CSM visibility; an occluder removes the term).  The front orientation is a
+    sanity arm: csm / off and rt / off ROI sums within 5 %."""
+    out = pathlib.Path(args.out)
+    binary = args.control_binary if args.use_control else args.binary
+    base = out / ("control" if args.use_control else "fixed")
+    common = {"--rt": "on", "--reflections": "off"}
+    plan = [("back", "off", False), ("back", "csm", False), ("back", "rt", False), ("back", "csm", True), ("back", "rt", True),
+            ("front", "off", False), ("front", "csm", False), ("front", "rt", False),
+            ("graze-back", "off", False), ("graze-back", "csm", False), ("graze-front", "off", False), ("graze-front", "csm", False),
+            ("mirror-front", "off", False), ("mirror-front", "csm", False)]
+    sums, rig = {}, {}
+    for orientation, mode, blocked in plan:
+        name = f"{orientation}-{mode}{'-blocked' if blocked else ''}"
+        scene, _ = csm_scene(orientation, blocked)
+        path = scene.write(base / f"scene-{name}")
+        pfm = base / name / "engine.pfm"
+        if not (args.evaluate or (args.reuse and pfm.is_file())):
+            pfm = capture_scene(binary, path, base / name, dict(common, **{"--shadows": mode}))
+        rig[name] = rig_bounds_line(base / name)
+        sums[name] = thin_roi_sum(pfm, csm_roi(orientation))
+    back_rigs = {v.split("bounds", 1)[1] for k, v in rig.items() if k.startswith("back-")}
+    ambient = sums["back-rt-blocked"]
+    d = {k: [sums[k][c] - ambient[c] for c in range(3)] for k in sums if k.startswith("back-")}
+    ratio = lambda k: [d[k][c] / d["back-off"][c] if d["back-off"][c] > 0 else 0.0 for c in range(3)]
+    signal = [d["back-off"][c] / ambient[c] for c in range(3)]
+    sumratio = lambda k, ref: [sums[k][c] / sums[ref][c] for c in range(3)]
+    front = {"front-csm": sumratio("front-csm", "front-off"), "front-rt": sumratio("front-rt", "front-off")}
+    near = lambda r: all(abs(x - 1.0) <= CSM_BOUND for x in r)
+    csm_over_off, rt_over_off = ratio("back-csm"), ratio("back-rt")
+    grazing = {"graze-back-csm-sum-over-off": sumratio("graze-back-csm", "graze-back-off"),
+               "graze-front-csm-sum-over-off": sumratio("graze-front-csm", "graze-front-off"),
+               "mirror-front-csm-sum-over-off": sumratio("mirror-front-csm", "mirror-front-off")}
+    result = {"roi_back": csm_roi("back"), "roi_front": csm_roi("front"), "rig_bounds": rig, "ambient": ambient, "d": d, "signal_over_ambient": signal,
+              "csm_over_off": csm_over_off, "rt_over_off": rt_over_off, "front_over_off": front, "grazing_diagnostic": grazing}
+    result["gates"] = {"signal": {"pass": min(signal) >= CSM_SIGNAL_MIN, "signal": signal},
+                       "framing-identical": {"pass": len(back_rigs) == 1},
+                       "csm-back-lit-not-self-shadowed": {"pass": near(csm_over_off), "ratio": csm_over_off},
+                       "rt-back-lit-not-self-shadowed": {"pass": near(rt_over_off), "ratio": rt_over_off},
+                       "csm-front-lit-sanity": {"pass": near(front["front-csm"]), "ratio": front["front-csm"]},
+                       "rt-front-lit-sanity": {"pass": near(front["front-rt"]), "ratio": front["front-rt"]}}
+    blocked_csm = ratio("back-csm-blocked")
+    result["controls"] = {"occluder-csm": {"ratio": blocked_csm, "fails": max(blocked_csm) <= CSM_BLOCKED_MAX}}
+    return result
+
+
 # --- ticket 13: raw transport weights of a rough transmissive sphere -------------------------------------------------
 
 GLASS_ALPHA_ROUGHNESS = 0.2   # alpha 0.04: the refraction tail of the pre-closure estimator reaches weights near 32 (tools/f15_transport_weights.py)
@@ -615,14 +763,15 @@ def verdict(result, kind):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("check", choices=["volume", "masked", "thin-backlit", "glass-weights"])
+    parser.add_argument("check", choices=["volume", "masked", "thin-backlit", "glass-weights", "csm-thin"])
     parser.add_argument("--binary", type=pathlib.Path, required=True)
     parser.add_argument("--control-binary", type=pathlib.Path, help="a build WITHOUT the fix: the gate must fail on it")
     parser.add_argument("--out", type=pathlib.Path, required=True)
+    parser.add_argument("--reuse", action="store_true", help="csm-thin: reuse existing captures (same scene and binary) instead of capturing them again")
     parser.add_argument("--evaluate", action="store_true", help="evaluate existing captures under --out")
     args = parser.parse_args(argv)
     args.use_control = False
-    run = {"volume": run_volume, "masked": run_masked, "thin-backlit": run_thin_backlit, "glass-weights": run_glass_weights}[args.check]
+    run = {"volume": run_volume, "masked": run_masked, "thin-backlit": run_thin_backlit, "glass-weights": run_glass_weights, "csm-thin": run_csm_thin}[args.check]
     try:
         if True:
             result = run(args)

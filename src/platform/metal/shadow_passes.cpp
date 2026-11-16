@@ -103,7 +103,7 @@ struct ShadowPasses::Impl {
     std::array<rg::TextureRef,4> transmitMaps{};
     rg::TextureRef dummyTransmitRef{},receiverOwnRef{};
     MTL::Texture* dummyTransmit=nullptr;
-    bool hasTransmissive=false, dummyTransmitZeroed=false;
+    bool hasTransmissive=false, dummyTransmitZeroed=false, hasFeatureCasters=false; // F15.1 (ticket 16): a caster with a material extension record exists
     // F15 ticket 24: kernels[Sun] is the lite RT pipeline; sunServed is what the scene's feature union selects (full while it has transmission).
     TransmissionPipelines transmitPipes; pipe::PipelineHandle sunServed{},temporalServed{}; bool temporalGlass=false;
     std::array<rg::BufferRef,4> tileRefs{},expectedRefs{};
@@ -253,9 +253,10 @@ struct ShadowPasses::Impl {
             std::memcpy(worldMatrices.data()+size_t(slot)*16,matrix,64);
         }
         casterBounds.clear();changedBounds.clear();
-        bool transmissive=false;const auto materials=store.materials();
+        bool transmissive=false,featured=false;const auto materials=store.materials();
         for(u32 slot=0;slot<count;++slot) {
             const auto& instance=instances[slot];const bool casts=(instance.flags&INSTANCE_FLAG_VALID) && (instance.flags&2u) && instance.meshIndex<geometry.size();
+            if(casts && !featured && instance.materialIndex<materials.size())featured=materials[instance.materialIndex].extensionIndex!=MATERIAL_EXTENSION_INVALID;
             if(casts && !transmissive && instance.materialIndex<materials.size()) {
                 const auto& material=materials[instance.materialIndex];
                 transmissive=shadowCasterTransmissive(material.flags,material.extensionIndex,material.alphaCutoff);
@@ -282,6 +283,7 @@ struct ShadowPasses::Impl {
         // are then absent from the graph (no empty encoders, no cost) and the graph is rebuilt when the answer changes.  F15 closure (ticket 15):
         // also with the static cache: the map is never cached (transmissive casters draw into it every frame) and the cache composes the opaque
         // casters only, so the static depth is invalidated (material revision) when the answer changes.
+        hasFeatureCasters=featured;
         bool wantTransmissive=transmissive && settings.mode==ShadowTechnique::Cascaded;
         if(wantTransmissive){requestTransmitPipelines();wantTransmissive=transmitReady()&&(pipelines.isFinal(transmitMesh)||pipelines.available(transmitMesh));} // until both are visible the glass casters stay opaque (the flag and the passes follow hasTransmissive)
         if(wantTransmissive!=hasTransmissive){hasTransmissive=wantTransmissive;++graphVersion;++materialRevision;}
@@ -397,7 +399,7 @@ struct ShadowPasses::Impl {
                      (!decision.reset?SHADOW_FLAG_HISTORY_VALID:0u) | (settings.contact?SHADOW_FLAG_CONTACT:0u) |
                      (selectedSun!=~0u?SHADOW_FLAG_LIGHT_VALID:0u) | (hasTransmissive?SHADOW_FLAG_TRANSMITTANCE_MAP:0u) |
                      (hasTransmissive && !options.debugTransmittanceMap?SHADOW_FLAG_TRANSMITTANCE_IGNORED:0u) |
-                     (hasTransmissive && !options.debugReceiverOwn?SHADOW_FLAG_RECEIVER_OWN_IGNORED:0u);
+                     (hasTransmissive && !options.debugReceiverOwn?SHADOW_FLAG_RECEIVER_OWN_IGNORED:0u) | (hasFeatureCasters?SHADOW_FLAG_RECEIVER_PLANE_BIAS:0u);
         params.mapResolution=settings.mapResolution;params.pcssSearchSamples=settings.blockerSamples;params.pcssFilterSamples=settings.filterSamples;
         params.historyMaxSamples=settings.historySamples;params.viewID=f.view;params.lightID=selectedSun;params.lightRevision=lightRevision;params.sceneRevision=signalRevision;
         params.temporalNormalThreshold=settings.temporalNormalThreshold;params.temporalPositionThreshold=settings.temporalPositionThreshold;
