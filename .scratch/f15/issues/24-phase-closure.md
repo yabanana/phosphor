@@ -339,6 +339,6 @@ only). Final sha256: phosphor `c2514d6fdbe7344ae50fa14528a7f89970f3d5a17aa665270
 | Khronos corpus (24 models) and validation | 24 / 24 render, validation pass; 0 archive misses after 740b6b7 (before: one visibility_tile miss each in ToyCar and GlamVelvetSofa, 0 fallback draws) |
 | chess king / queen subsurface bound | RED as declared (ticket 20), equal to the pre-check |
 | F15.2 permutation equivalence | 237 cases / 168 scenes 0 px / 0 ULP; controls leave the envelope in 151 of 216; every feature bit 0-8 discriminated; overflow 12 / 12 0 ULP; repeats 7 / 7 |
-| transmission temporal clip | the battery run had no converged control (exit 5, not judged); the control is rebuilt for the final binary (128 seeds) and judged separately |
+| transmission temporal clip | PASS on a converged control rebuilt for the final binary (128 seeds, half-vs-half 0.0055 / 0.0069 / 0.0096 <= gates / 3): smooth ior 1.33 / 1.5 / 2.0 p95 0.0230 / 0.0234 / 0.0307, max 0.0409 / 0.0480 / 0.0620 (gate 0.06); negative-refract-axis fails (0.1745 / 0.1690 / 0.1445); rough ROIs information (r0.1 0.0889, r0.3 0.0845, r0.6 0.0517); the battery run itself had no converged control (exit 5, not judged) |
 | f15_check (286 scenarios) | captures done on the final binary; the reference rendering held the GPU lock for hours (every transmission reference re-renders since f15_reference.py changed), so the run was stopped after the captures and is evaluated with `--evaluate` (CPU only) next to the GPU jobs |
 | F13/F14 corpus with the MS references | after the clip control |

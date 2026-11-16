@@ -461,3 +461,13 @@ Feature-less scenes: not re-run after this change (shaders touched are the `_lob
   "archive hits 0, unavailable 136" (every pipeline compiled at start, `--pipeline-sync`): fallbacks 0.  The archive ICE is therefore environmental to this tree, not caused by this work; the orchestrator's archive build of the same content succeeds.
 
 2026-11-16 — status reconciliation (closure): the temporal-clip box said the smooth-glass clip FAILS at p95 0.14-0.17; those are the refract-axis control values (0.1746 / 0.1691 / 0.1445) and the smooth ROIs pass (0.0230 / 0.0236 / 0.0306, b6c7ee6 / 8d43c2e), with the rough ROIs declared out of the gate by the owner (option b); box ticked for that scope, final-tree rerun pending the final battery (ticket 24). The D2/cost box stays unticked with its pending items named. Dated sections above are unchanged.
+
+### 2026-11-16 — final-tip clip (orchestrator, `build/final2/clip-transmission`)
+
+The round-2 converged control (2026-11-15 16:49) predates aa3b19b, the mirror chain and the MS compensation, so the control was rebuilt
+for the final binary (phosphor c2514d6f, metallib 5adf457e; 128 seeds, self-test half A vs half B p95 0.0055 / 0.0069 / 0.0096, all <=
+gates / 3).  `tools/f15_clip_check.py --evaluate --group transmission`: ALL EXPECTATIONS MET.  transmission-custom smooth ior 1.33 / 1.5 /
+2.0 p95 0.0230 / 0.0234 / 0.0307, max 0.0409 / 0.0480 / 0.0620, flicker 0.0028 / 0.0030 / 0.0045 (gate 0.06): PASS;
+negative-refract-axis 0.1745 / 0.1690 / 0.1445: FAILS while custom passes; raw 1 spp 0.1546 / 0.1485 / 0.1841.  Rough ROIs (declared,
+option b): r0.1 0.0889, r0.3 0.0845, r0.6 0.0517, grid 0.0609.
+
