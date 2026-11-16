@@ -6,7 +6,7 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 07, 08
 
-**Status:** resolved with carried items (2026-11-13; Khronos side-by-side delivered by ticket 22; coat-normal-texture numeric fixture still open: box 1 PARTIAL; coat-only union (mask 2) not archived)
+**Status:** resolved (2026-11-16, round 2: the coat-normal / factor / roughness numeric texture fixture is built, `texture-coat-sun` and `texture-coat-env-resolve` GREEN (sun worst p99 0.34 %, env-resolve worst mean 0.048 %) with the five texture controls failing; the coat-only union (mask 2) is archived (271d751 and `.scratch/f15/harvest/tex-1.json`, fixture `clearcoat-grid-coat-only-sun`, 0 archive misses, 0 render-thread compiles); C22-D3 fixed in e9569ac; the ticket records no remaining open item, Khronos side by side stays qualitative by design)
 
 - [ ] Clearcoat grids (factor × roughness, coat normal) pass decision-11 thresholds against the independent reference; furnace bound holds — coat normal = the shading normal on the grids; coat-normal TEXTURE fixtures → ticket 22 — PARTIAL (audit 2026-11-15): grids with coat normal = N met; the coat-normal TEXTURE numeric fixture is not built (ticket 22: qualitative only)
 - [x] Rough base + smooth coat: the coat reflection survives the denoiser and matches the reference within the transport bound

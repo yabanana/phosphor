@@ -6,7 +6,7 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 07, 08
 
-**Status:** resolved with carried items (2026-11-13; Khronos side-by-side delivered by ticket 22; captured-probe sheen fixture NOT built: box 2 PARTIAL)
+**Status:** resolved with declared limits (2026-11-16, round 2: sheen colour / roughness numeric texture fixtures `texture-sheen-sun` and `texture-sheen-env-resolve` GREEN (build/f15-check/tex4); the reference quadrature at N.V < 0.005 and roughness >= 0.3 is fixed and bounded against independent dense quadratures (3.8e-4 vs bound 1e-3); the captured-probe sheen term is implemented and fixture `sheen-probe-env` is GREEN (worst sphere mean 0.018 %, controls fail), decision 06 is met on the F13 composite path only (with `--lighting-denoise custom` boundary spheres differ by up to 1.9 %, and with legacy lighting or `--reflections off` the resolve-owned sheen uses the declared environment, both declared); visual_check re-run 8/8 0 px with `--pipeline-sync`; Khronos side-by-side delivered by ticket 22, qualitative)
 
 - [x] Table generator reproducible and checked against an independent numerical integration; a corrupted table fails the check
 - [ ] Sheen grid (colour × roughness) passes decision-11 thresholds under constant environment and under a probe-lit fixture; furnace bound holds — constant environment, the probe path (`@probes`, analytic) and the furnace pass; a CAPTURED-probe fixture is open (captured radiance does not reach the sheen term yet, declared) → ticket 22 — PARTIAL (audit 2026-11-15): constant environment and analytic probe met; no CAPTURED-probe fixture exists

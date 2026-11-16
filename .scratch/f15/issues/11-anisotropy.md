@@ -6,7 +6,7 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 07, 08
 
-**Status:** resolved with carried items (2026-11-13; Khronos side-by-side delivered by ticket 22; direction-texture numeric fixture NOT built: box 1 PARTIAL)
+**Status:** resolved with declared limits (2026-11-16, round 2: direction/strength texture fixture `texture-aniso-sun` / `-env-resolve` GREEN (sun worst p99 0.65 %, controls fail); narrow-lobe sun fixture `aniso-narrow-sun` GREEN against an exact disk integration; bent-normal fixture `aniso-bent-env` GREEN on the legacy hemisphere (`--legacy-environment`, worst sphere mean 0.059 %); tangent-frame repair for degenerate supplied tangents (e8b6399); the declared-environment fit gap at strength 1 stays DECLARED with a measured bound (rms 6.5 % at r 0.3, the best single isotropic roughness still leaves 4.0-4.8 %, so the decision-11 5 % needs the 4-D table; the roughness x ~0.97 tweak is left as an owner decision) and the composite complement fit is bounded on the sphere average only, per-pixel evidence stays fixture-bound (furnace 1.0022); still not covered: the denoiser lobe-id criterion for anisotropic highlights; a bench-built anisotropy primitive without tangents gets (1, 0, 0, 1))
 
 - [ ] Anisotropy fixtures (strength, rotation, direction texture) pass decision-11 thresholds; furnace bound holds — strength and rotation fixtures and the furnace pass; the direction-TEXTURE fixture needs textures in the reference → ticket 22 — PARTIAL (audit 2026-11-15): strength and rotation fixtures and furnace met; direction-TEXTURE fixture not built (ticket 22: qualitative only)
 - [x] Rotation direction and tangent handedness correct on mirrored instances (glTF conventions)

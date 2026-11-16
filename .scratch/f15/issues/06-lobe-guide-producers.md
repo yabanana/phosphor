@@ -6,7 +6,7 @@ Roadmap: F15.1
 
 **Blocked by:** 05
 
-**Status:** resolved (2026-11-13; D2 band not met at HEAD, ticket 24; open: no coplanar-overlap fixture for the raster_order_group need)
+**Status:** resolved (2026-11-16, round 2: the coplanar-overlap fixture for the raster order group is built (`lobe-guide-coplanar`, tools/f15_lobe_guide_coplanar_check.py, 2026-11-15 loader-misc section): with the group 20/20 frames pass for equal and skewed per-fragment cost, the control without the group passes 20/20 at equal cost and FAILS 20/20 with skewed cost (11 148-12 948 of 62 500 px), so the need shows whenever overlapping fragments complete out of submission order; Sponza D2 band recorded as met in ticket 24 under owner option A (720ee63), the checkbox line here still carries the older figure; still partial: per-category report memory for the guide is not quoted (criterion 3 PARTIAL per the closure audit), and the visibility resolve still does not write the guide (the pre-resolve kernel covers every meshlet pixel; deviation recorded in commits and this ticket only))
 
 - [x] Guide content equals a CPU reconstruction of the resolved feature parameters on the ior/specular fixture (readback check with a corruption control that must FAIL)
 - [x] Forced-overflow capture (`--debug-meshlets 1 --debug-meshlets-corrupt count`, as `tools/f13_overflow_emission_check.sh`) equals the meshlet path on the ticket's fixture

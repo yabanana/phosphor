@@ -6,7 +6,7 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 17 (and only if its bound is missed)
 
-**Status:** resolved by the FALLBACK (2026-11-14) and, for the RT tier, implemented (2026-11-15 comment at the end: optional rt-walk meets both bounds; LUT over the roughness).  Fallback record: bound not met; screen-space diffusion stays; F15.1 volumetric subsurface explicitly PARTIAL with the measured gap (RT single scattering analysed, not implemented; LUT valid for roughness 0.35 only)
+**Status:** resolved by the FALLBACK for the default diffusion tier (2026-11-14: bound not met, screen-space diffusion stays); (2026-11-16, round 2: by owner decision the hybrid is implemented as the optional RT random walk (`--subsurface-mode rt-walk`, `--rt on`; see the ticket 17 comment of the same date) and meets the side-lit bound (0.0635 / 0.1708 vs 0.10 / 0.25) and the 2x back-lit bound (0.0919 / 0.2288 vs 0.20 / 0.50) when enabled; the LUT is generalised over the roughness (5 x 2 x 65 table, roughness 0.15..0.7, g 0..0.3; `subsurface-volumetric-rough@rt-walk` worst gated piece 0.0645 / 0.1756, controls fail; the roughness 0.15 knot has no fixture); cost per subsurface pixel is structural only here, the quiet-machine A/B is pending the orchestrator's final battery (ticket 17))
 
 - [ ] Bound: the ticket-17 side-lit subsurface bound on the same fixtures; additionally the back-lit fixture within 2× the side-lit bound — NOT met (measured gap below)
 - [x] Timebox 2 weeks; if not met, fallback = keep screen-space diffusion, F15.1 subsurface stays explicitly partial (unticked for the volumetric mode) with the measured gap reported

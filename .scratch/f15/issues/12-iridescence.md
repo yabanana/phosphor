@@ -6,7 +6,7 @@ Roadmap: F15.1, F15.3
 
 **Blocked by:** 07, 08
 
-**Status:** resolved with carried items (2026-11-13; box 1 PARTIAL: thickness-texture numeric fixture not built; box 3 open: GPU per-light timing never taken (ticket 24 quiet-machine list); Khronos side-by-side delivered by ticket 22)
+**Status:** resolved with carried items (2026-11-16, round 2: thickness / factor numeric texture fixture `texture-irid-sun` / `-env-resolve` GREEN (sun worst p99 0.70 %, env-resolve worst mean 0.073 %, p99 0.86 % vs limit 1 %, controls fail; fixture ranges redesigned, thresholds untouched); the per-light cost fixtures are built (`iridescence-cost-nofilm`, `-lights8`, `-nofilm-lights8`, tools/f15_costs.py items t4-iridescence-*) but the GPU per-light timing (box 3) is NOT taken: pending the orchestrator's final battery on a quiet machine; the static cost stays 187 flops / 27 transcendentals per film; Khronos side-by-side delivered by ticket 22)
 
 - [ ] Iridescence fixtures (thickness sweep on dielectric and metal, factor) pass decision-11 thresholds against an independent implementation of the specification's code (the thickness TEXTURE fixture is carried to ticket 22) — PARTIAL (audit 2026-11-15): sweep and factor met; thickness-TEXTURE numeric fixture not built (ticket 22: qualitative only)
 - [x] Thickness 0 disables the effect; furnace bound holds; negative control (film ior ignored) fails
