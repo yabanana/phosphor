@@ -638,3 +638,37 @@ Effective capabilities apple9 on every apple9 run (log: "physical apple10, effec
 - **Limit of the battery:** the forced-Apple9 step's result depends on compile timing, so neither its differences nor its 0 px rows (round
   4 `texture-coat-sun` included) prove anything.  The forced-Apple9 path of these six scenarios is verified only by this `--pipeline-sync`
   re-run.  The step is not changed after the fact; follow-up: `--pipeline-sync` in the step.
+
+### 2026-11-17 — PR #32: CI include fixes and the two Codex review findings (binary 9f03723a)
+
+**The binary of the PR is not the binary of the battery.** The final battery ran on phosphor 991b2f95; the PR head builds phosphor
+`9f03723a88e741bc3fc6e4bf1b9ddea66cafea783afe4262a77056b4ecfe8373` (9f03723a). Metallib `4518d6ea…` and archive `26742e85…` are
+unchanged (no shader or pipeline-descriptor change). Three commits after the battery change code or tests:
+
+- CI Linux (libstdc++ does not provide headers that libc++ pulls in transitively): standard includes only, no code change —
+  `<cstring>` / `<algorithm>` / `<cstdlib>` in six files (5613fb5a) and `<initializer_list>` in `tests/test_lobe_select.cpp` (131c5d87),
+  found by a scan of every file the branch adds or changes against its project include closure.
+- Codex review, two findings, both confirmed and fixed (ae4cfb30):
+  1. A primitive with supplied `NORMAL` + `TANGENT` whose material has a uniform `KHR_texture_transform` (baked into the uvs by the
+     loader) kept the tangent frame of the ORIGINAL uvs, while the per-slot GPU path turns the frame of a transformed normal slot
+     (`texXfFrameOn`). The loader now turns the supplied frame with the same maths (`bakeTangentFrame`, T' orthogonalised against N,
+     w' from B'); generated tangents already came from the baked uvs.
+  2. `--material-overrides` replaced a description after the loader had baked its uniform transform / UV set into the mesh uvs, so an
+     override that changed that state was silently ignored (or would have been applied twice by the per-slot path). Such an override is
+     now an explicit error; per-slot transforms on unbaked uvs stay editable.
+
+Targeted verification of the PR binary 9f03723a (`build/ttfix`, `build/incl-check`):
+
+| check | result |
+|---|---|
+| doctest (`phosphor_tests`) | 988 / 988 (+2 tests: the tangent frame against the analytic plane for rotation, mirror and a combined transform, identity bit for bit; the override test fails without the fix, 5 checks, and passes with it) |
+| ctest | 46 / 46 |
+| visual_check, 8 benches, API + shader validation, against `build/reference-f15-final` | 0 px |
+| F13 exactness, 5 scenes | byte-identical to the battery binary 991b2f95 (`manylights-restir` included) |
+| texture-transform fixtures (primary, secondary sites, layer stacks) | pass, reference agreement 1.0 (alpha 3278 cells, RT shadow 2219, stack visibility 14 964); every uniform-bake control fails as before |
+| Khronos corpus (24 models) | 24 / 24 render, 0 archive misses; 23 models byte-identical to the battery; `TextureTransformMultiTest` differs in 14 339 px (max delta 100), only in the "Normal" and "Clearcoat Normal" rows (UV0 / UV1 cells): the transformed normal-map stripe was a uniformly dark band and now shows the same lit bevel as the untransformed "Sample" cell (qualitative, as the whole corpus page) |
+| chess rigs (they load `--material-overrides`) | GREEN, output identical to the battery run (the side-light rig passes `--material-overrides fixtures/chess/chess-subsurface.overrides.json`: the subsurface overrides do not touch the baked uv state and are accepted) |
+
+Everything else in "Closure verification" was measured on 991b2f95 and is not re-run; scenes without a uniform transform plus supplied
+tangents, and runs without `--material-overrides`, take the same code path as before.
+

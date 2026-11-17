@@ -16,6 +16,8 @@ archive af1a2b5) and re-ran ONE complete final battery on the new binary (phosph
 "Closure verification"). **No roadmap box F15.1-F15.4 is ticked** (each ID keeps an open item, see below). Physical Apple9/T0 certification
 stays `EXTERNAL_VALIDATION_PENDING`. Sponza D2 on the final binary: band met as an interleaved A/B (t03 -> final5 +0.051 ms, 0 allocations)
 in a timing window that quietgate flagged disturbed (absolute GPU p95 15.35 ms, not a quiet-machine value).
+The PR head builds phosphor 9f03723a (CI include fixes and the two Codex review fixes; metallib and archive unchanged), verified
+by targeted checks listed under "Changes after the final battery".
 Pushed and opened as a pull request to main on the owner's instruction "Push e PR (Consigliato)" (2026-11-17); merging is a separate owner
 step after CI, no auto-merge.
 
@@ -273,7 +275,7 @@ unchanged since main). The AGX compiler crash seen twice in round 1 was not repr
 
 Full sha256: phosphor `991b2f9573fed8d5f3b76578126fa70525c566becf97c9a265773a0ce9abd25e`, metallib
 `4518d6eacd1232ba7af5d15e6b5fc5a28ffcd4cb4b0f2d38a5726e3da8c3e311`, archive `26742e85da350e007afe1b3f8c2aecd313ac31de4d7490663225a2acc15bb767`,
-built from af1a2b5 (later commits are documentation only). Every row below ran on this one binary and this one archive: battery
+built from af1a2b5 (later commits up to 2b63042 are documentation only; the PR head differs, see "Changes after the final battery"). Every row below ran on this one binary and this one archive: battery
 `build/battery-r5` (2026-11-17 08:14-10:37, no Mitsuba running), the timing window on the frozen clone `build/d2-final/final5` (same
 hashes, 10:38-11:31, flagged disturbed by quietgate: not a quiet machine, see "Measured cost"), F13/F14 corpus `build/f15-corpus-r5`
 (fresh freeze on the same binary, 11:31-14:16), and the forced-Apple9 `--pipeline-sync` re-run (`build/a9-sync`, 14:16-14:17). The
@@ -315,6 +317,39 @@ of the battery drew 1 152 / 837 / 485-557 / 81-144 fallback draws (`combo-all-lo
 - the step was not changed after the fact; follow-up: `--pipeline-sync` in the step.
 Not a binary difference either: the f15_check capture of `texture-coat-sun` (with `--pipeline-sync`) is byte-identical between e01bb209
 and 991b2f95.
+
+## Changes after the final battery (PR yabanana/phosphor#32)
+
+**The binary of the PR is not the binary of the battery.** The final battery ran on phosphor 991b2f95; the PR head builds phosphor
+`9f03723a88e741bc3fc6e4bf1b9ddea66cafea783afe4262a77056b4ecfe8373` (9f03723a). Metallib `4518d6ea…` and archive `26742e85…` are
+unchanged (no shader or pipeline-descriptor change). Three commits after the battery change code or tests:
+
+- CI Linux (libstdc++ does not provide headers that libc++ pulls in transitively): standard includes only, no code change —
+  `<cstring>` / `<algorithm>` / `<cstdlib>` in six files (5613fb5a) and `<initializer_list>` in `tests/test_lobe_select.cpp` (131c5d87),
+  found by a scan of every file the branch adds or changes against its project include closure.
+- Codex review, two findings, both confirmed and fixed (ae4cfb30):
+  1. A primitive with supplied `NORMAL` + `TANGENT` whose material has a uniform `KHR_texture_transform` (baked into the uvs by the
+     loader) kept the tangent frame of the ORIGINAL uvs, while the per-slot GPU path turns the frame of a transformed normal slot
+     (`texXfFrameOn`). The loader now turns the supplied frame with the same maths (`bakeTangentFrame`, T' orthogonalised against N,
+     w' from B'); generated tangents already came from the baked uvs.
+  2. `--material-overrides` replaced a description after the loader had baked its uniform transform / UV set into the mesh uvs, so an
+     override that changed that state was silently ignored (or would have been applied twice by the per-slot path). Such an override is
+     now an explicit error; per-slot transforms on unbaked uvs stay editable.
+
+Targeted verification of the PR binary 9f03723a (`build/ttfix`, `build/incl-check`):
+
+| check | result |
+|---|---|
+| doctest (`phosphor_tests`) | 988 / 988 (+2 tests: the tangent frame against the analytic plane for rotation, mirror and a combined transform, identity bit for bit; the override test fails without the fix, 5 checks, and passes with it) |
+| ctest | 46 / 46 |
+| visual_check, 8 benches, API + shader validation, against `build/reference-f15-final` | 0 px |
+| F13 exactness, 5 scenes | byte-identical to the battery binary 991b2f95 (`manylights-restir` included) |
+| texture-transform fixtures (primary, secondary sites, layer stacks) | pass, reference agreement 1.0 (alpha 3278 cells, RT shadow 2219, stack visibility 14 964); every uniform-bake control fails as before |
+| Khronos corpus (24 models) | 24 / 24 render, 0 archive misses; 23 models byte-identical to the battery; `TextureTransformMultiTest` differs in 14 339 px (max delta 100), only in the "Normal" and "Clearcoat Normal" rows (UV0 / UV1 cells): the transformed normal-map stripe was a uniformly dark band and now shows the same lit bevel as the untransformed "Sample" cell (qualitative, as the whole corpus page) |
+| chess rigs (they load `--material-overrides`) | GREEN, output identical to the battery run (the side-light rig passes `--material-overrides fixtures/chess/chess-subsurface.overrides.json`: the subsurface overrides do not touch the baked uv state and are accepted) |
+
+Everything else in "Closure verification" was measured on 991b2f95 and is not re-run; scenes without a uniform transform plus supplied
+tangents, and runs without `--material-overrides`, take the same code path as before.
 
 ## Next steps
 
