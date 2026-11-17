@@ -325,7 +325,7 @@ only). Final sha256: phosphor `c2514d6fdbe7344ae50fa14528a7f89970f3d5a17aa665270
 | F13 exactness (5 PFMs vs exact-final-ms) | 5 / 5 SAME |
 | JIT reflection_rt_lobe | 0 failures |
 | XPC retry fixture | N=2 recovers, N=4 fails as required |
-| forced Apple9 (6 scenarios, API + shader validation without RT) | all exit 0, 0 validation lines, effective apple9; layers-patch and subsurface-volumetric-sun differ by design (Apple9 selects the `reduced` lighting preset, report `lighting.preset`), the others 0 px |
+| forced Apple9 (6 scenarios, API + shader validation without RT) | all exit 0, 0 validation lines, effective apple9; native vs apple9 differ on layers-patch (197 318 px), subsurface-volumetric-sun (53 236 px) and combo-all-lobes-sun (17 343 px, max delta 203; CORRECTED 2026-11-17: this row first said 0 px, which was the a09f738 pre-check; the difference appeared between a09f738 and c2514d6f and is unchanged in round 4); Apple9 selects the `reduced` lighting preset (report `lighting.preset`), the attribution of the combo difference to the preset is not yet proven; transmission-glass-behind-glass, transmissive-shadow-pane-sun@rt, texture-coat-sun 0 px |
 | transport fixtures volume / masked / thin-backlit / glass-weights / csm-thin | pass |
 | glass receiver, thin GI back, texture transforms (primary, secondary, layers) | pass |
 | COLOR_0 primary paths; secondary paths | pass; pass after a rerun with Pillow (the step's environment lacked it) |
