@@ -428,3 +428,33 @@ Corrections:
   `furnace-combinations` it loses 0.016 / 0.015 / 0.023 / 0.027 on spheres 1 / 2 / 6 / 9: the engine now loses up to 0.035 (aniso 8-11)
   and 0.052 (combinations 6) where the reference loses 0.014 and 0.023.  The furnace gate is an upper bound (1.005), so every furnace key
   passes; the `@resolve` furnaces are unchanged (no transported signal).
+
+### 2026-11-17 — owner decisions on the combo-fix energy cost and the non-lobe MS kernel; round-4 battery becomes a pre-check
+
+Owner decisions, relayed by the aggregating session:
+
+1. **817b080 (combo fix): accepted, the fix stays.**  Declared energy loss (measured, round-4 table above): `furnace-aniso` spheres 4-11
+   from about 1.000 to 0.964-0.992; `furnace-combinations` sphere 1 from 0.9976 to 0.9694, sphere 2 from 1.0000 to 0.9808, sphere 6 from
+   0.9714 to 0.9478 and sphere 9 from 0.9790 to 0.9764.  The furnace gate is an upper bound only (no pixel above 1.005), so it does not see this
+   loss.  Environment keys that got worse but stay under the 5 % per-sphere mean limit (round 3 `build/final2` against round 4
+   `build/battery-r4`, worst sphere mean):
+   - `aniso-grid-env` 1.93 % -> 2.13 %;
+   - `combo-aniso-panel-env` 1.57 % -> 2.49 %;
+   - `combo-aniso-coat-env` 1.69 % -> 1.91 %;
+   - `combo-thin-lobes-env` 1.96 % -> 2.15 %.
+
+   The owner named the first two; the full aniso/combo comparison of the same files adds the last two.  Improved: `combo-all-lobes-env`
+   5.12 % -> 0.92 % (the regression the fix closes) and `combo-aniso-sheen-env` 1.35 % -> 1.01 %.  Every other `aniso-*` / `combo-*` key is
+   identical.  Follow-up: an exact anisotropic diffuse complement for the transported pixels.
+2. **Non-lobe composite kernel (MS lit by the declared environment under probe reflections): fix now.**
+   - The prepared change is branch `f15c-ms-nonlobe`, 66243cbc, not yet integrated.  It adds a `reflection_probe_only_ms` kernel, the base
+     probe kernel plus `F_ms L` lit by the probe radiance at N; the `_ms` composite skips its environment copy under probe reflections.
+   - The key `ms-probe-env` is a featureless base grid with `--reflections probes`, MS on and a probe of 0.2 against a declared environment
+     of 0.5, metal spheres only.  It is fixed in that commit, before any GPU run.
+   - It must fail on 817b080e and pass after the fix, with both numbers and the negative controls logged here.
+   - Every affected key (probe, MS, composite, furnace) is re-evaluated before integration.
+   - After integration, ONE new complete final battery runs on the new binary, including the quiet window and the F13/F14 corpus with a
+     fresh freeze.
+
+The round-4 battery that started at 01:37 (`build/battery-r4`, `build/f15-costs-r4`, `build/f15-corpus-r4`, e01bb209) is therefore a
+pre-check of 817b080e, not the final battery of record.
