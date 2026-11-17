@@ -308,3 +308,4 @@ Verification on the integrated tip (`build/aniso3`, orchestrator):
   gain of 2 %); the gate is an upper bound.  The weaker strengths of aniso-grid-env lose about 0.5 % accuracy.
 - Featureless scenes: the 5 `f15_exact.sh` PFMs cmp-identical to `build/exact-final-ms`; visual_check (EXTRA_ARGS=--pipeline-sync, BENCH8_ARGS="--instances 100000") against `build/reference-f15-final`: 0 of 5760000 pixels differ on all 8 benches.
 - Open: the resolve path (declared) still uses the table complement; changing it needs `declared_extension_diffuse_weight` of the reference (other owner) and a re-baseline of the declared keys.
+- Remaining 21 keys with anisotropy (direct, declared, texture, furnace@resolve; not reachable by the composite change) re-run on the fixed build: every number identical to the final battery (e.g. aniso-grid-env-resolve 1.8e-5, combo-all-lobes-env@resolve 1.8e-4), `aniso-narrow-sun` unchanged (open, owner decision 2026-11-16).
