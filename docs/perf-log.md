@@ -1621,3 +1621,46 @@ The A/B measurements are interleaved and their numbers agree with the earlier qu
   62.16 s median (57.7-69.3), 494.3 MB; without the 226 RESOLVE_BIN class pipelines (all `phx_exact::visibility_(lit_)resolve`)
   49.45 s (45.3-51.8), 418.2 MB: +25.7 % median (+27.4 % on the minima) against the F15.2 budget of +25 % (round 1: +9.4 % with 74 class
   pipelines).  The run-to-run spread is about +-10 %, so the budget is not demonstrably met.
+
+## 2026-11-17 — F15 closure round 4: final window on the final binary (M5 Max)
+
+Binary `build/d2-final/final4` = `build/release` at tip 817b080 (round-4 owner fixes integrated), frozen by APFS clone: phosphor
+`e01bb209…`, metallib `0e5423c1…`, archive `c2776814…` (full hashes in the handoff), the binary of the round-4 correctness battery.
+Window 04:35-05:24 after the battery (no Mitsuba, no other GPU job of ours, battery 100 % on AC). quietgate passed the start (load 2.2)
+and flagged the window **disturbed**: macOS background services (Siri suggestions/inference, Spotlight, IntelligencePlatformComputeService,
+PerfPowerServices, knowledgeconstructiond) and this Claude session were seen busy at some sample; the timed GPU steps ran at load 1.1-2.3,
+the metal-tt rounds at load 18-52, which is metal-tt's own compiler processes (air-pack, applegpu-nt).  0 GPU allocations in every
+measured run.
+
+- hitch_check: 15 bench switches, 0 hitches, 21 / 21 archive hits, 0 compiler calls, 0 render-thread compiles; post-switch worst 1.22 ms
+  (steady p99 1.53 ms).
+- Sponza D2 rotation t03 / finalMS / final4, 3 replicas, order reversed every replica (`build/d2-final/rot-r4`):
+
+| binary | GPU p50 median | GPU p95 median (min-max) | refl. sample 0 p50 / p95 | sky p95 |
+|---|---|---|---|---|
+| final4 | 14.236 | 15.322 (15.28-15.41) | 2.485 / 3.550 | 0.908 |
+| finalMS | 14.229 | 15.351 (15.32-15.39) | 2.478 / 3.534 | 0.911 |
+| t03 | 14.344 | 15.303 (15.28-15.38) | 2.648 / 3.533 | 0.826 |
+
+  t03 -> final4 -0.005 ms (pairs -0.06 / +0.10 / -0.01): band MET (decision 11, <= 0.10 ms; absolute 15.32 ms <= 16.67); finalMS -> final4
+  -0.029 ms (round-3 + round-4 changes inside the band).  The sky pass p95 (clock sentinel) is 0.83-0.91 ms in every arm against 0.69 ms in
+  the round-3 window: the whole window ran at a different clock state, the comparison stays within the window.
+- Transmission, chess back-light rig (`f15_costs t1`): frame GPU p50 A 36.461 / B 48.666 ms, B - A +12.505 ms (+10.006..+12.765; A-A
+  spread 5.382); `Local clustered RT shading` +9.664, `F13 reflection samples` +2.939 ms (round 3: +12.058 / +9.099 / +2.934).
+- RT walk with glass in the union (`transmissive-shadow-sss-pane` against `-open`, same binary, 1280x720, 64 walks, 512 steps, 3 replicas
+  interleaved; `build/f15-costs-r4/walk-glass2`): `Subsurface RT walk` p50 95.31 / 95.49 / 96.00 against 54.01 / 54.07 / 54.17 ms, frame
+  GPU p50 97.8-98.6 against 56.4-56.6 ms: the glass variant (`subsurface_walk_glass`, full 128-byte payload and a transmitted exit shadow
+  ray, cf21330) costs +41.4 ms (+77 %) on this optional tier at 64 walks; glass-free scenes keep the Lite walk.  First valid measurement
+  (the round-3 attempt used a rig without a subsurface material).
+- RT walk tier (`subsurface-volumetric-sun`, 1280x720, 3 replicas interleaved), pass p50 median: `Subsurface diffusion` 0.320 ms; `Subsurface
+  RT walk` 4 / 16 / 64 walks 3.913 / 15.174 / 60.184 ms; unchanged from round 3.
+- Layer stack, terrain CC0 1080p, `Material resolve` (+ classification for bins), exact module, union / bin arm ms (single 0.094-0.096 /
+  0.112-0.114): layers-1 0.280 / 0.294, -2 0.310 / 0.322, -3 0.331 / 0.343, -4 0.354 / 0.362, full 0.494 / 0.509; feature blocks 1-4
+  1.211 / 1.442 / 1.568 / 2.459 union, 1.251 / 1.542 / 1.645 / 2.427 bin.  Binning never lowers the resolve by 5 %.
+- Material binning on the chess rigs (exact module; resolve + classification, mean): side-light +2.6 % (noise 0.5 %), shadow rig +4.2 %
+  (0.7 %), back-light -2.8 % (-17.1..+8.9 %, A-A noise 41.7 %): NOT adopted.
+- Archive build (`tools/archive_build_time.py`, 2 interleaved rounds x 3 runs): final archive (2655 + 5 exact-all compute pipelines)
+  runs 57.63 / 56.23 / 53.78 and 52.83 / 53.14 / 52.82 s (round medians 56.23 / 52.83 s), 495.6 MB; without the 226 RESOLVE_BIN class
+  pipelines 44.53 / 43.89 / 44.19 and 43.97 / 44.25 / 43.72 s (44.19 / 43.97 s), 420.7 MB.  Per round +27.2 % and +20.2 %; pooled median
+  of the six runs 53.46 against 44.08 s, +21.3 %; minima +20.8 %.  The two rounds of the same window straddle the +25 % budget (round 3:
+  +25.7 % median, +27.4 % minima), so the owner decision stands: not demonstrably met.
