@@ -534,3 +534,13 @@ section is the verification record).
 | `sheen-probe-env` | 7.02 % (round 3, before the W2 fix) | 0.018 % / p99 0.064 % (= e01bb209: the W2 probe fix stays) |
 
 The run's RED exit comes only from `combo-all-lobes-env`.
+
+**Featureless images on the integrated binary 991b2f95, before the final battery:**
+- visual_check against `build/reference-f15-final`: every bench 0 px.
+- Exactness, `f15_exact.sh` against `build/exact-final-ms`: 4 of 5 cmp-identical.  `manylights-restir` differs by design: it is the only
+  exactness scene with `--reflections probes`, featureless, MS on by default, so it runs the corrected non-lobe path.
+  - 439 306 of 518 400 pixels differ, all brighter: the probe radiance at N exceeds the declared environment there.
+  - Max absolute delta 1.6e-4, mean 9.5e-5; frame mean luminance 0.57573 -> 0.57581.
+- MS-off control, `--specular-ms off` on the 5 scenes: e01bb209 and 991b2f95 are cmp-identical on all 5, `manylights-restir` included,
+  and MS off differs from MS on (the flag is effective).  The change is confined to the MS term.
+- The final battery's exactness step compares with the same reference, so it shows this DIFF; it is not a new difference.
