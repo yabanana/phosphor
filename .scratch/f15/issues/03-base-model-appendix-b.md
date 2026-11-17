@@ -101,3 +101,27 @@ Roadmap: F15.1, F15.3 (prefactor)
   of the cold Metal shader cache, not of the option; f15_exact.sh (no shader validation) x5 is byte-identical to the pre-change binary with `--specular-ms off`.
 
 2026-11-16 — status reconciliation (closure): the archive_check / hitch_check box is ticked on the runs that ticket 24 and ticket 21 record on the cumulative tip (720ee63, 038eb10; the final-tip rerun is pending the final battery, ticket 24); the Status no longer lists the closure-log diff as open (ticket 24 holds the per-bench table); the D2 'recorded in ticket 24 and the handoff' wording now reads pending the final battery. Keys 101-148 evaluation stays pending (not re-derived here).
+
+## 2026-11-17 round 4: multiple-scattering mismatches of the final battery (owner option B)
+
+Two keys failed with MS on (ADR-0007) and passed with MS off in engine AND reference; the wrong side of each was found and fixed.
+
+- **Engine side (`sheen-probe-env`, mean 7.0 % on the worst sphere).**  Under `--reflections probes` the composite skips the declared-environment sheen
+  (`REFLECT_COMPOSE_SHEEN_FROM_PROBE`) and the lobe probe kernel adds it with the probe radiance at N; the MS term `F_ms L` had no such guard: the composite lit it
+  with the declared environment (0.5) instead of the probe radiance (0.2), and the probe pass added none.  Fix (`e6078212`): the `_lobe` probe kernel adds the MS
+  term (same lobe, sheen scale, coat attenuation and coat lobe as the composite) lit by the probe radiance at N, roughest level, exactly like the sheen; the
+  composite skips its environment-lit copy when `SHEEN_FROM_PROBE` and `SPECULAR_MS` are both set (lobe variant only).  Bit 15 of `GPUReflectionParams.flags`
+  (`kProbeSpecularMs`, set by `reflection_passes.cpp` when the lobe guide is valid, `--specular-ms` is on and reflections are `probes`) tells the probe kernel;
+  it is defined next to its two users, not in `gpu_types.h` (no ABI change; move it there at the next gpu_types edit).  Result: `sheen-probe-env` PASS,
+  worst-sphere mean 7.02e-02 -> 1.78e-04 (p99 8.25e-02 -> 6.43e-04), threshold unchanged.
+- **Non-lobe `_ms` composite under probes (open, not touched).**  The base `reflection_composite_ms` kernel still lights `msTerm` with the declared
+  environment under probe reflections and the base probe kernel has no MS variant: no key exercises it (every probe key with a gradient from the
+  environment has probe == environment radiance), kept byte-identical.
+- **Reference side (`texture-coat-sun`, p99 1.55 % against 1 %).**  `tools/f15_reference.py` evaluated the coat's own MS lobe on the shading normal N while the
+  base path (`coat_lobe`, `coat_attenuation`) and the engine (`msCoat`: |V.Nc|, Nc.L) use the coat normal Nc (glTF KHR_materials_clearcoat evaluates the coat
+  BRDF with clearcoatNormal).  Fixed in `bsdf` (coat MS value), `sun_radiance` (centre attenuation F_c(|V.Nc|), coat lobe at |V.Nc|, Nc.L), the declared and the
+  exact environment coat term (`coat["mu"]`).  Identical without a coat normal texture (Nc = N).  Unit test
+  `tools/test_f15_ms.py Layers.test_the_coat_lobe_lives_on_the_coat_normal` (N != Nc analytic case) fails on the old reference and passes on the new.
+- Selected for before/after: every key with `reflections: probes` or a probe capture, every key with a coat, `ms-*`, `furnace-*`, `layers-furnace`
+  (enumerated from `SCENARIOS` by name/field).  Results in ticket 24's round-4 section if the orchestrator records them; per key BEFORE/AFTER are in the
+  writer report (all unchanged to float noise except the two keys above and `texture-coat-env-resolve`: sphere-weighted mean 7.36e-04 -> 4.76e-04, the same Nc fix).

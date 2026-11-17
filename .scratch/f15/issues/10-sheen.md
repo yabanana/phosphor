@@ -234,3 +234,8 @@ Open: captured-probe sheen fixture; sheen texture numeric fixture; reference qua
   F13 denoiser variants raw / custom / rt8-control in `tools/f13_f14_check.py` (same scene, same radiance, denoiser on and off, compared) and kept out of this fixture by running it unfiltered.
 - visual_check re-run with the timing trap neutralised (`EXTRA_ARGS=--pipeline-sync BENCH8_ARGS="--instances 100000"`, build of the round-3 tip before the last fixture edits): all 8 benches 0 px
   (`build/visual2.log`), bench 6 included.
+
+## 2026-11-17 round 4: `sheen-probe-env` with MS on
+
+The failure (worst sphere mean 7.0 %) was the engine's: under probe reflections the MS term was lit with the declared environment (0.5) instead of the probe radiance (0.2)
+like the sheen already was.  Fixed in `e6078212` (see ticket 03 round 4): PASS with MS on, worst-sphere mean 1.78e-04, threshold and fixture unchanged.

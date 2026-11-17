@@ -187,3 +187,11 @@ Open item: "coat-only union (mask 2) not archived (no fixture uses it)".  DONE.
   Targeted update, +2 compute descriptors, `.scratch/f15/harvest/tex-1.json` (harvested from the 10 texture scenarios, `--constant 22
   --skip-present`); the class manifest `shaders/material_classes/material.json` was re-exported for the 10 new scenes.
 - Open: nothing in this ticket's list.
+
+## 2026-11-17 round 4: the coat's multiple-scattering lobe lives on the coat normal (reference)
+
+`tools/f15_reference.py` evaluated the coat's own dielectric MS lobe (ADR-0007) and its centre attenuation with the shading normal N, while `coat_lobe`, `coat_attenuation`
+and the engine (`msCoat`, |V.Nc| and Nc.L) use the coat normal Nc; KHR_materials_clearcoat evaluates the coat BRDF with clearcoatNormal.  Fixed in `dae35a82`
+(bsdf, sun quadrature, declared and exact environment); no effect without a coat normal texture (Nc = N).  New analytic unit test with N != Nc in `tools/test_f15_ms.py`
+(fails without the change).  `texture-coat-env-resolve` improves (sphere mean 7.36e-04 -> 4.76e-04); every other coat key (clearcoat-grid-*, combo-*-coat-*,
+furnace-clearcoat*, layers-*-coat*) is unchanged to float noise.  `texture-coat-sun`: see ticket 03 round 4.
