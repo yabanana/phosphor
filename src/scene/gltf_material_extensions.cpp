@@ -437,6 +437,34 @@ void bakeUvTransform(const UvTransform& transform, std::vector<glm::vec2>& uvs) 
     }
 }
 
+void bakeTangentFrame(const UvTransform& transform, const std::vector<glm::vec3>& normals, std::vector<glm::vec4>& tangents) {
+    // The linear part of the transform, read through applyUvTransform so the bake and the frame share one convention:
+    // uv'.x = m00 u + m01 v + o.x, uv'.y = m10 u + m11 v + o.y.
+    const auto o  = applyUvTransform(transform, 0.0f, 0.0f);
+    const auto cu = applyUvTransform(transform, 1.0f, 0.0f);
+    const auto cv = applyUvTransform(transform, 0.0f, 1.0f);
+    const double m00 = double(cu[0]) - o[0], m10 = double(cu[1]) - o[1];
+    const double m01 = double(cv[0]) - o[0], m11 = double(cv[1]) - o[1];
+    const double det = m00 * m11 - m01 * m10;
+    if (std::fabs(det) <= 1e-12) return;
+    const double i00 = m11 / det, i01 = -m01 / det, i10 = -m10 / det, i11 = m00 / det;
+    const size_t n = std::min(normals.size(), tangents.size());
+    for (size_t i = 0; i < n; ++i) {
+        const glm::dvec3 N = glm::dvec3(normals[i]);
+        const glm::dvec3 T = glm::dvec3(glm::vec3(tangents[i]));
+        const double     w = tangents[i].w < 0.0f ? -1.0 : 1.0;
+        const glm::dvec3 B = glm::cross(N, T) * w;
+        const glm::dvec3 T2 = T * i00 - B * i10;
+        const glm::dvec3 B2 = B * i11 - T * i01;
+        const glm::dvec3 T3 = T2 - N * glm::dot(N, T2);
+        const double     tl = glm::length(T3);
+        if (tl <= 1e-12 || glm::length(B2) <= 1e-12) continue;
+        const glm::dvec3 Tn = T3 / tl;
+        const double     w2 = glm::dot(glm::cross(N, Tn), B2) < 0.0 ? -1.0 : 1.0;
+        tangents[i] = glm::vec4(glm::vec3(Tn), float(w2));
+    }
+}
+
 bool isContainedRelativePath(const std::string& baseDir, const std::string& path, std::string& error) {
     namespace fs = std::filesystem;
     if (path.empty()) {

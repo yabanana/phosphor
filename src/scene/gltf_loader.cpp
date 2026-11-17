@@ -403,7 +403,12 @@ MeshHandle GltfLoader::processPrimitive(const tinygltf::Model& model,
                 }
             }
         }
-        if (hasUVs && analysis.status == TextureTransformStatus::Uniform) bakeUvTransform(analysis.transform, geom.uvs);
+        if (hasUVs && analysis.status == TextureTransformStatus::Uniform) {
+            bakeUvTransform(analysis.transform, geom.uvs);
+            // Supplied tangents describe the ORIGINAL uvs: turn them into the axes of the baked ones, as the per-slot GPU path turns the
+            // frame of a transformed normal slot (generated tangents come from the baked uvs and need nothing).
+            if (hasNormals && hasTangents) bakeTangentFrame(analysis.transform, geom.normals, geom.tangents);
+        }
     }
 
     // Indices (generate sequential ones for non-indexed primitives)

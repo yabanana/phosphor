@@ -489,6 +489,24 @@ bool saveMaterialDescriptionFile(const std::string& file, const std::vector<Name
     return true;
 }
 
+namespace {
+/// What the glTF loader baked into a primitive's UV0 for a material (gltf_loader.cpp, ticket 22): the UV set copied into UV0 and the
+/// uniform transform applied to it.  A description edited after loading must keep this state: the mesh UVs are not baked again.
+struct BakedUvState {
+    u32         uvSet = 0;
+    UvTransform transform;
+    bool operator==(const BakedUvState&) const = default;
+};
+BakedUvState bakedUvState(const MaterialDescription& d) {
+    const TextureTransformAnalysis a = analyzeTextureTransforms(d);
+    BakedUvState s;
+    if (a.status == TextureTransformStatus::Unsupported) return s;
+    s.uvSet = a.uvSet;
+    if (a.status == TextureTransformStatus::Uniform) s.transform = a.transform;
+    return s;
+}
+} // namespace
+
 bool applyMaterialOverridesToScene(const std::string& json, GpuScene& scene, const TexturePathResolver& resolve,
                                    std::string& error) {
     std::vector<NamedMaterial> named;
@@ -501,6 +519,17 @@ bool applyMaterialOverridesToScene(const std::string& json, GpuScene& scene, con
     }
     std::vector<size_t> changed;
     if (!applyMaterialOverrides(json, named, error, &changed)) return false;
+    // The loader baked a uniform transform (and the UV set) into the mesh UVs; an override that changes that state would be silently
+    // ignored (no rebake) or applied twice (a per-slot transform on baked UVs), so it is refused before any material changes.  Per-slot
+    // transforms on unbaked UVs stay editable: the GPU evaluates them from the material's transform block.
+    for (size_t c : changed) {
+        const size_t i = sceneIndex[c];
+        if (!(bakedUvState(scene.materialDescriptions()[i]) == bakedUvState(named[c].description))) {
+            error = "material '" + names[i] + "': the override changes a texture transform or UV set that the glTF loader baked into "
+                    "the mesh UVs (a uniform KHR_texture_transform or texCoord); edit the glTF instead";
+            return false;
+        }
+    }
     for (size_t c : changed) {
         MaterialDescription d = named[c].description;
         forEachTexture(d, [&](const char* slot, MaterialTextureRef& ref) {

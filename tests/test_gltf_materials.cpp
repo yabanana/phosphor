@@ -532,6 +532,48 @@ TEST_CASE("glTF materials: uv bake of a worked example") {
     CHECK(uvs[1].y == doctest::Approx(0.25f));
 }
 
+TEST_CASE("glTF materials: a supplied tangent frame follows a baked uniform transform") {
+    // A plane P(u, v) = u X + v Y with N = +Z.  Engine convention: T = dP/du = X, B = -dP/dv = cross(N, T) * w = -Y, so w = -1.
+    // After uv' = M uv + o the analytic texel axes are dP/du' = inv00 X + inv10 Y and -dP/dv' = -(inv01 X + inv11 Y).
+    const glm::vec3 X{1, 0, 0}, Y{0, 1, 0}, N{0, 0, 1};
+    const auto check = [&](const UvTransform& t) {
+        const auto o = applyUvTransform(t, 0, 0), cu = applyUvTransform(t, 1, 0), cv = applyUvTransform(t, 0, 1);
+        const double m00 = cu[0] - o[0], m10 = cu[1] - o[1], m01 = cv[0] - o[0], m11 = cv[1] - o[1];
+        const double det = m00 * m11 - m01 * m10;
+        const double i00 = m11 / det, i01 = -m01 / det, i10 = -m10 / det, i11 = m00 / det;
+        const glm::vec3 expectT = glm::normalize(glm::vec3(float(i00)) * X + glm::vec3(float(i10)) * Y);
+        const glm::vec3 expectB = glm::normalize(-(glm::vec3(float(i01)) * X + glm::vec3(float(i11)) * Y));
+        std::vector<glm::vec3> normals{N};
+        std::vector<glm::vec4> tangents{glm::vec4(X, -1.0f)};
+        bakeTangentFrame(t, normals, tangents);
+        const glm::vec3 T = glm::vec3(tangents[0]);
+        const glm::vec3 B = glm::cross(N, T) * tangents[0].w;
+        CHECK(glm::length(T - expectT) < 1e-5f);
+        CHECK(glm::length(B - expectB) < 1e-5f);
+        CHECK(std::fabs(tangents[0].w) == 1.0f);
+    };
+    UvTransform rot90;
+    rot90.rotation = 1.57079632679f;
+    check(rot90);
+    UvTransform mirror;
+    mirror.scale = {-1.0f, 1.0f};
+    check(mirror); // flips the handedness
+    UvTransform combined;
+    combined.offset   = {0.3f, -0.2f};
+    combined.rotation = 0.5235987756f;
+    combined.scale    = {2.0f, 2.0f};
+    check(combined);
+    // Negative control: the frame a bake of the uvs alone would keep (the supplied T) is NOT the frame of the rotated uvs.
+    std::vector<glm::vec3> normals{N};
+    std::vector<glm::vec4> tangents{glm::vec4(X, -1.0f)};
+    bakeTangentFrame(rot90, normals, tangents);
+    CHECK(glm::length(glm::vec3(tangents[0]) - X) > 0.5f);
+    // The identity keeps the frame bit for bit.
+    std::vector<glm::vec4> same{glm::vec4(X, -1.0f)};
+    bakeTangentFrame(UvTransform{}, normals, same);
+    CHECK(same[0] == glm::vec4(X, -1.0f));
+}
+
 TEST_CASE("glTF extensions: required extensions must be rendered, not merely parsed, or the asset is refused") {
     const std::string irid = R"({"asset":{"version":"2.0"},
         "extensionsUsed":["KHR_materials_transmission"],"extensionsRequired":["KHR_materials_transmission"]})";

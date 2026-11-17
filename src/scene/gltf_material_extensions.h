@@ -78,6 +78,12 @@ struct RequiredExtensionProblem {
 /// Apply the transform to the UV0 stream in place (uv' = T * R * S * uv).
 void bakeUvTransform(const UvTransform& transform, std::vector<glm::vec2>& uvs);
 
+/// The supplied tangent frame of uvs baked through `transform`, in place: the same texel axes the per-slot GPU path derives
+/// (texXfFrameOn, shaders/texture_transform_core.h).  T = dP/du and B = -dP/dv = cross(N, T) * w (engine convention); with
+/// uv' = M uv + o the axes are T' = inv00 T - inv10 B and B' = -inv01 T + inv11 B.  T' is orthogonalised against N and w' is the
+/// side of B'.  A singular M, or a degenerate frame, leaves the tangent unchanged.  `normals` and `tangents` have the same size.
+void bakeTangentFrame(const UvTransform& transform, const std::vector<glm::vec3>& normals, std::vector<glm::vec4>& tangents);
+
 /// Image URI containment (decision: image URIs resolve only inside the asset
 /// directory).  `data:` URIs are always accepted.  Rejects absolute paths,
 /// URL schemes, `..` segments and symlink escapes (canonical prefix check).

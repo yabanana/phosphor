@@ -251,3 +251,39 @@ TEST_CASE("material overrides apply to a loaded scene's GPU records") {
 
     CHECK_FALSE(applyMaterialOverridesToScene(std::string(OVERRIDES_HEAD) + R"({"name":"ghost"}]})", scene, resolve, error));
 }
+
+TEST_CASE("material overrides cannot change the uv state the glTF loader baked") {
+    // "plain": one untransformed texture (nothing baked).  "baked": one texture with a transform, i.e. a uniform transform that the
+    // loader baked into the mesh uvs.  "slots": two slots with different transforms (per-slot, evaluated on the GPU, uvs untouched).
+    GpuScene scene;
+    GPUMaterial g{};
+    MaterialDescription plain;
+    plain.base.baseColorTexture.index = 1;
+    MaterialDescription baked = plain;
+    baked.base.baseColorTexture.transform = UvTransform{{0.5f, 0.0f}, 0.0f, {2.0f, 2.0f}};
+    MaterialDescription slots = baked;
+    slots.base.normalTexture.index     = 2;
+    slots.base.normalTexture.transform = UvTransform{{0.0f, 0.0f}, 0.0f, {3.0f, 3.0f}};
+    scene.addMaterial(g, plain, "plain", MaterialSupportReport{});
+    scene.addMaterial(g, baked, "baked", MaterialSupportReport{});
+    scene.addMaterial(g, slots, "slots", MaterialSupportReport{});
+    const auto resolve = [](const std::string&, bool) { return 7u; };
+    std::string error;
+    const auto apply = [&](const char* body) {
+        return applyMaterialOverridesToScene(std::string(OVERRIDES_HEAD) + body + "]}", scene, resolve, error);
+    };
+    // Adding a transform to a plain material makes it uniform: the uvs were never baked, the edit would be ignored.
+    CHECK_FALSE(apply(R"({"name":"plain","base":{"baseColorTexture":{"path":"a.png","transform":{"scale":[4,4]}}}})"));
+    CHECK(error.find("baked") != std::string::npos);
+    CHECK_FALSE(scene.materialDescriptions()[0].base.baseColorTexture.transform.has_value()); // nothing changed
+    // Changing a baked uniform transform: the old one stays in the uvs.
+    CHECK_FALSE(apply(R"({"name":"baked","base":{"baseColorTexture":{"path":"a.png","transform":{"scale":[4,4]}}}})"));
+    // Adding an untransformed slot to a baked material makes it per-slot: the GPU would transform already baked uvs.
+    CHECK_FALSE(apply(R"({"name":"baked","base":{"normalTexture":{"path":"n.png"}}})"));
+    // Changing the UV set of a texture: the loader copied the old set into UV0.
+    CHECK_FALSE(apply(R"({"name":"plain","base":{"baseColorTexture":{"path":"a.png","texCoord":1}}})"));
+    // Allowed: edits that keep the baked state, and per-slot transforms on unbaked uvs.
+    CHECK_MESSAGE(apply(R"({"name":"baked","base":{"roughness":0.3}})"), error);
+    CHECK_MESSAGE(apply(R"({"name":"slots","base":{"normalTexture":{"path":"n.png","transform":{"scale":[5,5]}}}})"), error);
+    CHECK_MESSAGE(apply(R"({"name":"plain","base":{"baseColorTexture":{"path":"a.png"},"normalTexture":{"path":"n.png","transform":{"scale":[2,2]}}}})"), error);
+}
