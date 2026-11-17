@@ -1664,3 +1664,44 @@ measured run.
   pipelines 44.53 / 43.89 / 44.19 and 43.97 / 44.25 / 43.72 s (44.19 / 43.97 s), 420.7 MB.  Per round +27.2 % and +20.2 %; pooled median
   of the six runs 53.46 against 44.08 s, +21.3 %; minima +20.8 %.  The two rounds of the same window straddle the +25 % budget (round 3:
   +25.7 % median, +27.4 % minima), so the owner decision stands: not demonstrably met.
+
+## 2026-11-17 — F15 closure round 5: final window on the final binary (M5 Max)
+
+Binary `build/d2-final/final5` = `build/release` built from af1a2b5 (round 5: owner reversal of the combo fix 588f711, non-lobe MS
+kernel 47dcefe, targeted archive af1a2b5), frozen by APFS clone: phosphor `991b2f95…`, metallib `4518d6ea…`, archive `26742e85…` (full
+hashes in the handoff), the binary of the round-5 correctness battery.  Window 10:38-11:31 after part A (no Mitsuba, no other GPU job of
+ours, on AC, battery 77 -> 68 %).  quietgate passed the start (load 4.4) and flagged the window **disturbed**: the owner's Chrome and
+Codex renderers, WindowServer, git, a local `llama-server` in two samples and this Claude session were seen busy at some sample; the timed
+GPU steps ran at load 2.2-3.5, the metal-tt rounds at load 17-19 (metal-tt's own compilers, applegpu-nt / air-pack).  0 GPU allocations in
+every measured run.
+
+- hitch_check: 15 bench switches, 0 hitches, 21 / 21 archive hits, 0 compiler calls, 0 render-thread compiles; post-switch worst 1.28 ms
+  (steady p99 1.30 ms).
+- Sponza D2 rotation t03 / finalMS / final5, 3 replicas, order reversed every replica (`build/d2-final/rot-r5`):
+
+| binary | GPU p50 median | GPU p95 median (min-max) | refl. sample 0 p50 / p95 | sky p95 median (min-max) |
+|---|---|---|---|---|
+| final5 | 14.278 | 15.354 (15.28-16.56) | 2.520 / 3.547 | 0.758 (0.714-0.808) |
+| finalMS | 14.225 | 15.398 (15.28-15.48) | 2.490 / 3.533 | 0.712 (0.696-0.772) |
+| t03 | 14.425 | 15.362 (15.30-15.86) | 2.701 / 3.529 | 0.713 (0.709-0.801) |
+
+  t03 -> final5 +0.051 ms (pairs +0.70 / +0.05 / -0.08): band MET (decision 11, median <= 0.10 ms; absolute 15.35 ms <= 16.67);
+  finalMS -> final5 -0.044 ms.  Replica 1 of final5 has a 16.56 ms p95 outlier (its pair +0.70); the median rule absorbs it, the outlier is
+  kept in the table.
+- Transmission, chess back-light rig (`f15_costs t1`): frame GPU p50 A 37.128 / B 51.862 ms, B - A +12.242 ms (+7.836..+15.559; A-A
+  spread 2.266); `Local clustered RT shading` +9.242, `F13 reflection samples` +2.879 ms (round 4: +12.505 / +9.664 / +2.939).
+- RT walk with glass in the union (`transmissive-shadow-sss-pane` against `-open`, same binary, 1280x720, 64 walks, 512 steps, 3 replicas
+  interleaved; `build/f15-costs-r5/walk-glass2`): `Subsurface RT walk` p50 94.77 / 95.76 / 95.84 against 52.73 / 55.29 / 54.04 ms
+  (medians 95.76 / 54.04), +41.7 ms (+77 %), equal to round 4.
+- RT walk tier (`subsurface-volumetric-sun`, 1280x720, 3 replicas interleaved), pass p50 median: `Subsurface diffusion` 0.317 ms;
+  `Subsurface RT walk` 4 / 16 / 64 walks 3.918 / 15.145 / 60.113 ms.
+- Layer stack, terrain CC0 1080p, `Material resolve` (+ classification for bins), exact module, union / bin arm ms (single 0.095-0.099 /
+  0.113-0.116): layers-1 0.279 / 0.295, -2 0.310 / 0.333, -3 0.329 / 0.355, -4 0.383 / 0.376, full 0.492 / 0.532; feature blocks 1-4
+  1.260 / 1.501 / 1.689 / 2.530 union, 1.392 / 1.679 / 1.747 / 2.620 bin.  Binning never lowers the resolve by 5 %.
+- Material binning on the chess rigs (exact module; resolve + classification, mean): side-light +3.9 % (noise 7.7 %), shadow rig +4.0 %
+  (2.0 %), back-light +6.5 % (3.0 %): NOT adopted.
+- Archive build (`tools/archive_build_time.py`, 2 interleaved rounds x 3 runs): final archive (round 4 + 1 compute pipeline
+  `reflection_probe_only_ms`) runs 59.09 / 55.96 / 57.24 and 56.52 / 56.70 / 57.27 s (round medians 57.24 / 56.70 s), 495.9 MB; without
+  the 226 RESOLVE_BIN class pipelines 46.41 / 47.51 / 46.55 and 47.44 / 47.83 / 47.63 s (46.55 / 47.63 s), 420.4 MB.  Per round +23.0 % and
+  +19.0 %; pooled median of the six runs 56.97 against 47.48 s, +20.0 %; minima +20.6 %.  Below +25 % in this window (round 4 +27.2 /
+  +20.2 %, round 3 +25.7 % median): the owner decision "not demonstrably met" stands.

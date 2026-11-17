@@ -544,3 +544,61 @@ The run's RED exit comes only from `combo-all-lobes-env`.
 - MS-off control, `--specular-ms off` on the 5 scenes: e01bb209 and 991b2f95 are cmp-identical on all 5, `manylights-restir` included,
   and MS off differs from MS on (the flag is effective).  The change is confined to the MS term.
 - The final battery's exactness step compares with the same reference, so it shows this DIFF; it is not a new difference.
+
+### 2026-11-17 — round-5 final battery on 991b2f95 (part A and quiet window)
+
+Tip 2827765e, built from af1a2b5b (later commits documentation only): phosphor 991b2f95, metallib 4518d6ea, archive 26742e85.  Chain
+`run_r5.sh`: part A `build/battery-r5` 08:14-10:37 (no Mitsuba), quiet window on the frozen clone `build/d2-final/final5` 10:38-11:31,
+F13/F14 corpus `build/f15-corpus-r5` from 11:31 (fresh freeze; recorded separately).
+
+**Part A**, step log identical to the round-4 pre-check (e01bb209) except three lines:
+- Exactness: 4 / 5 SAME; `manylights-restir` DIFF, the expected red recorded above (pre-fix reference `build/exact-final-ms`, not
+  regenerated; MS-off A/B 5 / 5 identical).
+- f15_check: 287 captures (+ `ms-probe-env`), references from the round-4 cache (1 shard rendered, 0 errors).
+- Forced Apple9 `texture-coat-sun`: native vs apple9 51 714 px (max delta 124) against 0 px in round 4 (explained below).
+
+Everything else equals round 4: ctest 46 / 46; syntax emulation 48 / 49 (the known `__APPLE__` block); visual_check 0 px on every bench;
+variant_check indexed and mesh 284 compatible (worst 26 px, delta <= 1) / 52 incompatible; archive_check pass; subsurface overflow, JIT,
+XPC N=2 pass / N=4 fails as required; the other five forced-Apple9 rows unchanged (17 343 / 53 236 / 197 318 / 0 / 0 px); every
+round-2/3 fixture exit 0; chess GREEN, O7 and validation pass; chess subsurface bound RED as declared, output identical to round 4 (MS on
+and off); spot falloff DI pass, secondary arms RED as declared (identical lines); Khronos 24 / 24 with 0 misses, validation pass;
+transmission clip p95 0.0230 / 0.0234 / 0.0307 (max 0.0409 / 0.0480 / 0.0620), refract-axis control fails; permutation equivalence 238
+cases / 168 scenes 0 px / 0 ULP (+1 case: `ms-probe-env`), controls leave the envelope in 151 / 216, every feature bit discriminated,
+overflow 12 / 12 and repeats 7 / 7 exact.
+
+f15_check on 991b2f95 (210 evaluated): RED only by `aniso-narrow-sun` and `combo-all-lobes-env`, both declared OPEN.  Gate failures 14 =
+round 4's 13 + `combo-all-lobes-env` (the two default-tier subsurface keys and the ten `@rt-walk-*` negative controls fail by design).
+`ms-probe-env` GREEN.  Against the round-4 pre-check, 175 of 209 common engine captures are byte-identical; the 34 that changed all pass:
+- the revert moves the aniso/combo keys back to c2514d6f: `combo-all-lobes-env` 0.92 -> 5.12 % (FAIL, OPEN), `aniso-grid-env` 2.13 ->
+  1.93 %, `combo-aniso-panel-env` 2.49 -> 1.57 %, `combo-aniso-coat-env` 1.91 -> 1.69 %, `combo-thin-lobes-env` 2.15 -> 1.96 %,
+  `combo-aniso-sheen-env` 1.01 -> 1.35 %; `combo-irid-aniso-env`, `furnace-aniso`, `furnace-combinations` pass with float-noise changes;
+- 25 other captures change at float-rounding level: `base-grid-env`, `furnace-base`, `furnace-resolve`, `base-grid-env-resolve`,
+  `roughness-extremes`, `ms-grid-env(-resolve)`, `ms-furnace@resolve` (SSR or reflections off, not probes) and 17 `layers-*` exact-all
+  captures.  Max absolute difference <= 4.8e-7, max relative <= 2.1e-7 (`layers-hit-probe-e1` 8.5e-6), mean luminance identical to six
+  digits, every metric equal to round 4 at the printed precision, the layer-equal keys still 0 px / 0 ULP.  Both round-5 changes edit
+  `shaders/reflection_composite.metal`, which composes the environment term in these scenes too; recompiling it changes floating-point
+  rounding only (not attributed further).
+
+**Forced-Apple9 `texture-coat-sun` row: compile-timing artefact of the step, not a binary difference.**  The step runs the f15_check command
+without `--pipeline-sync` under API + shader validation.  Shader validation makes the archive unavailable, so the coat pipelines compile at run
+time and `FeaturePipelines::serve` draws those frames with the scene's base pipeline (no extension lobes), counted as fallback draws; with the
+temporal denoiser the captured frame 64 depends on how many frames that took (`build/tcs-repro`):
+
+| run | binary | fallback draws | PNG |
+|---|---|---|---|
+| battery r4, native | e01bb209 | 81 | f8a900b4 (= apple9) |
+| battery r5, native | 991b2f95 | 144 | 180d484d (51 714 px from apple9) |
+| re-run 1, native | 991b2f95 | 1 055 (compiler 231 s total, max 20 s) | 180d484d |
+| re-runs 2-3, native; apple9 | 991b2f95 | 18 | f8a900b4 |
+| re-runs 1-2, native | e01bb209 | 25 / 18 | f8a900b4 |
+| without validation (archive hits), 2 + 2 runs | both | 0 | f8a900b4 |
+| `--pipeline-sync`, native and apple9 | 991b2f95 | 0 | f8a900b4 |
+
+The f15_check capture of `texture-coat-sun` (which passes `--pipeline-sync`) is byte-identical between e01bb209 and 991b2f95.  The row is
+reported as 0 px with `--pipeline-sync`; the battery step is not changed after the fact (follow-up: `--pipeline-sync` in that step).
+
+**Quiet window** (`build/f15-costs-r5`, quietgate start load 4.4, flagged **disturbed**: the owner's Chrome and Codex renderers,
+WindowServer, git, a local `llama-server` in two samples, metal-tt's own compilers in the archive rounds; timed GPU steps at load 2.2-3.5;
+battery 77 -> 68 % on AC): numbers in docs/perf-log.md ("F15 closure round 5").  D2 band met (t03 -> final5 +0.051 ms, GPU p95 15.35 ms,
+0 allocations); hitch 0 / 15; transmission +12.24 ms; walk with glass +41.7 ms; archive build +20.0 % pooled (round 3 +25.7 %: the owner
+decision "not demonstrably met" stands).
