@@ -516,3 +516,21 @@ the declared gate: per-sphere mean <= 0.5 %, p99 <= 1 %.
 
 Integration: 588f7112 (revert of 817b080), 47dcefee (cherry-pick of 66243cbc, original message kept: "PREPARED ... NOT verified"; this
 section is the verification record).
+
+**Integrated binary and owner sanity gate** (tip af1a2b5b = 588f7112 revert + 47dcefee fix + af1a2b5b archive):
+- Identity: phosphor 991b2f95, metallib 4518d6ea, archive 26742e85.  ctest 46 / 46.
+- Archive: +1 compute pipeline (`reflection_probe_only_ms`, KEPT harvest `.scratch/f15/harvest/r4b-ms-nonlobe.json`, 13 lines added, 0 removed).
+- The owner's seven crossing keys (`f15_check --run --expect green`, references cached from `build/battery-r4`): every combo value is back
+  to c2514d6f, the binary without the fix.
+
+| key | c2514d6f | integrated 991b2f95 |
+|---|---|---|
+| `combo-all-lobes-env` worst sphere mean | 5.12 % (FAIL) | 5.12 % (FAIL, declared OPEN; all 5 controls fail) |
+| `aniso-grid-env` | 1.93 % | 1.93 % |
+| `combo-aniso-panel-env` | 1.57 % | 1.57 % |
+| `furnace-aniso`, 24 spheres | 0.5625-1.0001 | identical sphere by sphere (spheres 4-11 0.9999-1.0000) |
+| `furnace-combinations`, 20 spheres | 0.5127-1.0000 | identical sphere by sphere (spheres 1 / 2 / 6 / 9: 0.9976 / 1.0000 / 0.9714 / 0.9790) |
+| `ms-probe-env` | - (new key) | GREEN: worst mean 0.008 %, p99 0.038 %, 0 archive misses; both controls fail (49.6 %) |
+| `sheen-probe-env` | 7.02 % (round 3, before the W2 fix) | 0.018 % / p99 0.064 % (= e01bb209: the W2 probe fix stays) |
+
+The run's RED exit comes only from `combo-all-lobes-env`.
