@@ -195,6 +195,34 @@ class Layers(unittest.TestCase):
         self.assertGreater(own, 0.0)
         self.assertGreater(float(plain[0, 0]), 0.0)
 
+    def test_the_coat_lobe_lives_on_the_coat_normal(self):
+        # F15 closure round 4: KHR_materials_clearcoat evaluates the coat BRDF with clearcoatNormal (a coat normal texture makes Nc != N); the engine's msCoat
+        # uses |V.Nc| and Nc.L, and the reference's base path (coat_lobe) already used Nc: the coat's own multiple-scattering lobe must too.
+        n = np.array([[0.0, 0.0, 1.0]])
+        nc = ref.normalize(np.array([[0.6, 0.2, 0.8]]))
+        v = ref.normalize(np.array([[0.5, 0.0, 0.8]]))
+        l = ref.normalize(np.array([[-0.4, 0.3, 0.7]]))
+        base, metallic, roughness = np.ones((1, 3)), np.ones(1), np.array([0.8])
+        coat = {"factor": np.array([0.7]), "roughness": np.array([0.5]), "f0_ior": np.array([0.04]), "variant": "spec", "normal": nc,
+                "mu": np.abs(ref.dot(nc, v))}
+        on, off = {**ref.APPENDIX_B}, {**ref.APPENDIX_B, "ms": "off"}
+        with_coat = ref.bsdf(base, metallic, roughness, n, v, l, on, None, coat) - ref.bsdf(base, metallic, roughness, n, v, l, off, None, coat)
+        plain = ref.bsdf(base, metallic, roughness, n, v, l, on) - ref.bsdf(base, metallic, roughness, n, v, l, off)
+        attenuation = ref.coat_lobe(coat, n, v, l)[0][0]
+        own_nc = float(ms.coat_lobe_value(coat, np.array([0.7]), np.abs(ref.dot(nc, v)), ref.dot(nc, l), on)[0])
+        own_n = float(ms.coat_lobe_value(coat, np.array([0.7]), np.abs(ref.dot(n, v)), ref.dot(n, l), on)[0])
+        self.assertGreater(abs(own_nc - own_n), 1e-3 * own_nc)  # the two normals give different lobes: the test discriminates
+        np.testing.assert_allclose(with_coat[0], attenuation * plain[0] + own_nc, rtol=1e-12)
+        # the declared and the exact environment lobe of the coat use |V.Nc| as well
+        mu = float(coat["mu"][0])
+        env = ref.declared_environment_radiance(base, metallic, roughness, np.array([float(ref.dot(n, v)[0])]), 1.0, ref.DECLARED, None, coat)
+        env_off = ref.declared_environment_radiance(base, metallic, roughness, np.array([float(ref.dot(n, v)[0])]), 1.0, {**ref.DECLARED, "ms": "off"}, None, coat)
+        coat_part = ms.declared_coat_environment_value(coat, np.array([0.7]), np.array([mu]), "table")
+        coat_att = ref.coat_attenuation(coat, np.array([0.7]), ref.coat_fresnel_mu(coat, np.array([mu])))
+        plain_env = ref.declared_environment_radiance(base, metallic, roughness, np.array([float(ref.dot(n, v)[0])]), 1.0, ref.DECLARED, None)
+        plain_off = ref.declared_environment_radiance(base, metallic, roughness, np.array([float(ref.dot(n, v)[0])]), 1.0, {**ref.DECLARED, "ms": "off"}, None)
+        np.testing.assert_allclose((env - env_off)[0], coat_att[0] * (plain_env - plain_off)[0] + coat_part[0], rtol=1e-9)
+
     def test_an_anisotropic_lobe_carries_no_multiple_scattering_lobe(self):
         # ADR-0007: measured +3.3 % in the white furnace of a pure metal at strength 1 with the effective isotropic roughness (the lost energy of an
         # anisotropic lobe depends on the azimuth of the view against the lobe axis, which an isotropic table cannot follow): none is applied

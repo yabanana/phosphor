@@ -1461,7 +1461,10 @@ def bsdf(base, metallic, roughness, n, v, l, model=APPENDIX_B, dielectric=None, 
     attenuation, coat_value = coat_lobe(coat, n, v, l)
     if model.get("ms", "off") != "off":  # the coat's own dielectric lobe (not attenuated, like the coat lobe)
         import f15_ms
-        coat_value = coat_value + f15_ms.coat_lobe_value(coat, coat_weight(coat), np.abs(dot(n, v)), n_dot_l, model, model["ms"])
+        # round 4: the coat's own lobe lives on the coat normal Nc (KHR_materials_clearcoat: the coat BRDF is evaluated with clearcoatNormal), like
+        # coat_lobe above and the engine (msCoat uses coat.normal): |V.Nc| and Nc.L, not the shading normal's (the same value without a coat normal texture)
+        nc = coat.get("normal", n)
+        coat_value = coat_value + f15_ms.coat_lobe_value(coat, coat_weight(coat), np.abs(dot(nc, v)), dot(nc, l), model, model["ms"])
     return attenuation[..., None] * value + coat_value[..., None]
 
 
@@ -1591,7 +1594,7 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
         ms_centre = f15_ms.lobe_value(base, metallic, roughness, n_dot_v, n_dot_l, model, dielectric, model["ms"]) * n_dot_l[:, None] * \
             f15_ms.isotropic(aniso, n_pixels)[:, None]
         if coat is not None:
-            ms_centre = ms_centre * coat_attenuation(coat, coat_c, coat_fresnel(coat, n, v, h_c))[:, None]
+            ms_centre = ms_centre * coat_attenuation(coat, coat_c, coat_fresnel(coat, coat.get("normal", n), v, h_c))[:, None]  # round 4: F_c at |V.Nc|, like the base path
         result = result + ms_centre
     coat_sum = None
     if coat is not None:
@@ -1616,7 +1619,9 @@ def sun_radiance(base, metallic, roughness, n, v, toward_sun, irradiance, radius
         narrow = narrow | narrow_c
         if model.get("ms", "off") != "off":  # the coat's own dielectric lobe at the disk centre
             import f15_ms
-            coat_sum = coat_sum + f15_ms.coat_lobe_value(coat, coat_c, n_dot_v, n_dot_l, model, model["ms"]) * n_dot_l
+            # round 4: the coat's own lobe on Nc (|V.Nc|, Nc.L at the disk centre), not on the shading normal
+            n_dot_l_c = np.clip(dot(nc_all, np.broadcast_to(l, nc_all.shape)), 0.0, 1.0)
+            coat_sum = coat_sum + f15_ms.coat_lobe_value(coat, coat_c, n_dot_v_c, n_dot_l_c, model, model["ms"]) * n_dot_l_c
     swapped = sheen is not None and coat is not None and model.get("order") == "swapped"  # ticket 19 control: coat BELOW the sheen
     if sheen is not None:
         e_v = sheen_albedo(n_dot_v, sheen["roughness"], sheen["variant"])
@@ -2353,7 +2358,8 @@ def _declared_environment_radiance(base, metallic, roughness, n_dot_v, radiance,
             material = under_coat(material)
     if coat is not None and variant.get("ms", "off") != "off":  # the coat's own lobe, not attenuated
         import f15_ms
-        material = material + f15_ms.declared_coat_environment_value(coat, coat_weight({**coat, "variant": variant.get("coat", "spec")}), n_dot_v,
+        material = material + f15_ms.declared_coat_environment_value(coat, coat_weight({**coat, "variant": variant.get("coat", "spec")}),
+                                                                     np.maximum(np.asarray(coat.get("mu", n_dot_v), dtype=np.float64), MIN_NDOTV),  # round 4: |V.Nc|
                                                                      variant["ms"])
     return material * radiance
 
@@ -3283,7 +3289,7 @@ def render_frame(root, data, model=APPENDIX_B, threads=None, cast=None, environm
             else:
                 radiance += layered_environment(material, dot(n, v), coat, sheen, sky, model.get("order") == "swapped")
             if model.get("ms", "off") != "off" and coat is not None:  # the coat's own lobe, not attenuated
-                radiance += f15_ms.coat_environment_value(coat, coat_weight(coat), dot(n, v), sky, model, model["ms"])
+                radiance += f15_ms.coat_environment_value(coat, coat_weight(coat), coat.get("mu", dot(n, v)), sky, model, model["ms"])  # round 4: |V.Nc|
             terms.append("environment-quadrature")
         else:
             if env_aniso is not None:  # F15.1 (ticket 11, round 3): the declared anisotropic albedo table is indexed by the view azimuth in the lobe frame
