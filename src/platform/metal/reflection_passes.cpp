@@ -92,7 +92,7 @@ struct ReflectionPasses::Impl {
     Impl(MetalContext& context,PipelineCache& pipelines,SceneRenderer& s,DirectLightingPasses& d,AccelerationStructures* a,GiPasses* g,const LaunchOptions& o)
         :c(context),p(pipelines),scene(s),direct(d),rt(a),gi(g),options(o),denoise(c,p,o){
         if(o.reflectionSamples<1||o.reflectionSamples>8||!std::isfinite(o.aoRadius)||o.aoRadius<=0)throw std::invalid_argument("Invalid F13 source sampling preset");
-        reflectionSSR=p.request(lighting::kernel("reflection_ssr"));probeOnly=p.request(lighting::kernel("reflection_probe_only"));gtao=p.request(lighting::kernel("ao_gtao"));
+        reflectionSSR=p.request(lighting::kernel("reflection_ssr"));probeOnly=p.request(lighting::kernel(o.specularMs?"reflection_probe_only_ms":"reflection_probe_only"));gtao=p.request(lighting::kernel("ao_gtao"));
         if(rt){reflectionRT=p.request(lighting::kernel("reflection_rt",true,true));rtao=p.request(lighting::kernel("ao_rtao",true,true));captureRT=p.request(lighting::kernel("reflection_capture_rt",true));
             reflectionConsumer=std::make_unique<RtConsumer>(c,p,*rt);aoConsumer=std::make_unique<RtConsumer>(c,p,*rt);captureConsumer=std::make_unique<RtConsumer>(c,p,*rt);}
         pipe::PipelineDesc raster;raster.kind=pipe::PipelineKind::Render;raster.label="Static reflection probe scene capture";raster.functions={"reflection_probe_capture_vs","reflection_probe_capture_fs",""};

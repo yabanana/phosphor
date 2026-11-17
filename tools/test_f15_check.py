@@ -786,6 +786,26 @@ class RunnerLogic(unittest.TestCase):
             for name in declared:
                 self.assertIn(name, ref.ALL_DECLARED_CONTROLS)
 
+    def test_ms_probe_env_plans_the_non_lobe_probe_path(self):
+        # F15 closure round 4b: featureless scene (base grid), probe reflections, MS on, a probe of 0.2 against the declared 0.5, metal spheres only.
+        spec = check.SCENARIOS["ms-probe-env"]
+        self.assertEqual(check.bench_scenario("ms-probe-env"), "base-grid-env-resolve")  # no material feature: the non-lobe kernels run
+        self.assertEqual(spec["kind"], "declared")
+        self.assertEqual(spec["min_metallic"], 1.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(check.main(["--out", tmp, "--binary", "build/release/phosphor", "--only", "ms-probe-env"]), 0)
+            commands = json.loads((pathlib.Path(tmp) / "plan.json").read_text())["commands"]["ms-probe-env"]
+        capture, reference = commands["capture"], commands["reference"]
+        self.assertEqual(capture[capture.index("--reflections") + 1], "probes")
+        self.assertEqual(capture[capture.index("--specular-ms") + 1], "on")
+        self.assertIn("--reflection-probe", capture)
+        self.assertEqual(reference[reference.index("--sky-override") + 1], "0.2")
+        literal, declared = check.scenario_controls("ms-probe-env")
+        self.assertEqual((literal, declared), ([], ["declared-ms-ignored", "declared-ms-double"]))
+        for name in declared:
+            self.assertIn(name, ref.ALL_DECLARED_CONTROLS)
+
     def test_texture_keys_are_planned_with_controls_the_reference_knows(self):
         keys = [f"texture-{lobe}-{mode}" for lobe in ("coat", "aniso", "irid", "sheen", "thin") for mode in ("sun", "env-resolve")]
         with tempfile.TemporaryDirectory() as tmp:

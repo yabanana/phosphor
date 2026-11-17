@@ -2,7 +2,7 @@
 #include "texture_transform_core.h" // F15.1 (ticket 22)
 #include "renderer/dfg_table.h"
 
-#ifndef PHOSPHOR_REFL_LOBE
+#if !defined(PHOSPHOR_REFL_LOBE) && !defined(PHOSPHOR_REFL_MS)
 // Actual base-compatible STATIC scene capture. Host draws the full selected
 // static instance list for EACH face with a depth attachment; no camera cull
 // list reused. This baseline is explicitly unshadowed local/direct capture.
@@ -148,7 +148,7 @@ kernel void reflection_probe_prefilter(constant GPUProbeFilterParams& p [[buffer
     const bool valid=reflectionProbeStorageAccepts(value.x,value.y,value.z,p.storageFlags)&&isfinite(alpha)&&alpha>=0;
     filtered.write(float4(valid?value:float3(0),valid?alpha:-1.0f),pixel.xy,6*p.cubeIndex+pixel.z);
 }
-#endif // !PHOSPHOR_REFL_LOBE
+#endif // !PHOSPHOR_REFL_LOBE && !PHOSPHOR_REFL_MS
 #ifdef PHOSPHOR_REFL_LOBE
 constant constexpr uint kProbeSpecularMs=1u<<15; // F15 closure round 4: --specular-ms under probe reflections (set by reflection_passes.cpp)
 #endif
@@ -198,6 +198,15 @@ kernel void REFL_KERNEL(reflection_probe_only)(constant GPUReflectionParams& p [
 #endif
 const bool finiteFit=all(isfinite(fitWeight));
         result=L*fitWeight;
+#ifdef PHOSPHOR_REFL_MS
+        // F15 closure round 4b (ADR-0007, base scenes): the multiple-scattering term F_ms L lit by the PROBE radiance at N (roughest level), as the lobe kernel does;
+        // the "_ms" composite skips its environment-lit copy under REFLECT_COMPOSE_SHEEN_FROM_PROBE.  This variant exists only with --specular-ms on (the base
+        // kernel stays byte for byte), so the term is unconditional here.  GI on: the composite's GI irradiance stands for L(N) (REFLECTION_ENABLE_GI).
+        if(!(p.flags&REFLECTION_ENABLE_GI)&&dot(n,v)>0.0f){
+            const BsdfMs ms=bsdfMsPrepare(bsdfBaseF0(diVec(s.albedo),saturate(s.metallic)),1.0f,s.roughness,max(dot(n,v),1e-4f),phosphor::MsLogLossAvgTable,phosphor::MsLogLostTable);
+            const float3 w=bsdfMsEnv(ms);
+            if(any(w>0)){uint msPath;result+=reflectionProbeRadiance(diVec(s.position),n,1.0f,true,p,probes,atlas,msPath)*w;}}
+#endif
 #ifdef PHOSPHOR_REFL_LOBE
         result+=coatResult;
         // F15.1 (ticket 10, decision 06): the sheen environment term S E L(N) takes the PROBE radiance at N (the roughest filtered level), with the

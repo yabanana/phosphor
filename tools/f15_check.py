@@ -1301,6 +1301,15 @@ MS_SCENARIOS = {
                             "reflections": "off",
                             "controls": ["declared-ms-ignored", "declared-ms-double"],
                             "terms": "constant environment only (radiance 0.5, no sun), deterministic resolve terms, --specular-ms on"},
+    # F15 closure round 4b: the NON-lobe path (featureless scene, reflection_probe_only_ms + reflection_composite_ms) under probe reflections.  A cooked probe of
+    # constant radiance 0.2 with the declared environment 0.5: the multiple-scattering term must carry the probe radiance like the specular term.  The probe
+    # reference (--sky-override) keeps the declared environment for the diffuse term only on a black base, so the gate takes the metal spheres (metallic 1:
+    # no diffuse) of the base grid (`min_metallic`).  Without the fix the MS term is lit by 0.5: 2.7 % (roughness 0.35) to 44 % (roughness 1) mean error.
+    "ms-probe-env": {"kind": "declared", "always_green": True, "scene": "base-grid-env-resolve", "specular_ms": True, "reflections": "probes",
+                     "lighting": "clustered", "denoise": "off", "probe_constant": 0.2, "reference_args": ["--sky-override", "0.2"], "min_metallic": 1.0,
+                     "controls": ["declared-ms-ignored", "declared-ms-double"],
+                     "terms": "cooked constant probe (radiance 0.2) with the declared environment 0.5, metal spheres of the base grid (no diffuse), probe path "
+                              "(--reflections probes), --specular-ms on, featureless scene (non-lobe kernels)"},
     "ms-grid-env": {"kind": "environment", "always_green": True, "scene": "base-grid-env", "specular_ms": True,
                     "controls": ["ms-ignored", "ms-double"],
                     "terms": "constant environment only (radiance 0.5, no sun), SSR specular transport (composite), --specular-ms on"},
@@ -2288,6 +2297,8 @@ def evaluate_scenario(np, name, folder, mode):
         raise RuntimeError(f"{name}: engine capture {candidate.shape} and reference {reference.shape} differ in size")
     masks = dict(np.load(reference_dir / "masks.npz"))
     spheres = report["spheres"]
+    if spec.get("min_metallic") is not None:  # a key whose reference models the declared environment for the specular terms only (no diffuse): metal spheres
+        spheres = [t for t in spheres if t["metallic"] >= spec["min_metallic"]]
     entry = {"scenario": name, "kind": spec["kind"], "terms": spec["terms"], "reference_terms": report["terms"],
              "reference_maximum_radiance": report["maximum_radiance"],
              "quadrature_mask_pixels": report["quadrature_mask_pixels"], "roi_pixels": report["roi_pixels"],

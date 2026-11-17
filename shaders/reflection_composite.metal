@@ -203,12 +203,8 @@ kernel void REFL_KERNEL(reflection_composite)(constant GPUReflectionComposeParam
                 if(any(sheenTerm>0)&&!(p.flags&REFLECT_COMPOSE_SHEEN_FROM_PROBE))color+=float3(p.environment[0],p.environment[1],p.environment[2])*sheenTerm*as_type<float>(s.pad[0])*aoFactor;
 #endif
 #if defined(PHOSPHOR_REFL_LOBE) || defined(PHOSPHOR_REFL_MS)
-#ifdef PHOSPHOR_REFL_LOBE
-                // F15 closure round 4: under probe reflections the lobe probe kernel lights the multiple-scattering term with the probe radiance (like the sheen).
+                // F15 closure round 4 / 4b: under probe reflections the lobe and "_ms" probe kernels light the multiple-scattering term with the probe radiance (like the sheen).
                 if(any(msTerm>0)&&!((p.flags&REFLECT_COMPOSE_SHEEN_FROM_PROBE)&&(p.flags&REFLECT_COMPOSE_SPECULAR_MS)))
-#else
-                if(any(msTerm>0))
-#endif
                     color+=float3(p.environment[0],p.environment[1],p.environment[2])*msTerm*as_type<float>(s.pad[0])*aoFactor;
 #endif
 #ifdef PHOSPHOR_REFL_LOBE
