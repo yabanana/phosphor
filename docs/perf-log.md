@@ -1672,7 +1672,8 @@ kernel 47dcefe, targeted archive af1a2b5), frozen by APFS clone: phosphor `991b2
 hashes in the handoff), the binary of the round-5 correctness battery.  Window 10:38-11:31 after part A (no Mitsuba, no other GPU job of
 ours, on AC, battery 77 -> 68 %).  quietgate passed the start (load 4.4) and flagged the window **disturbed**: the owner's Chrome and
 Codex renderers, WindowServer, git, a local `llama-server` in two samples and this Claude session were seen busy at some sample; the timed
-GPU steps ran at load 2.2-3.5, the metal-tt rounds at load 17-19 (metal-tt's own compilers, applegpu-nt / air-pack).  0 GPU allocations in
+GPU steps ran at load 2.2-3.5, the metal-tt rounds at load 17-19 (metal-tt's own compilers, applegpu-nt / air-pack).  Not a quiet machine:
+every comparison below holds only as an interleaved A/B inside this window; the absolute times are not quiet-machine values.  0 GPU allocations in
 every measured run.
 
 - hitch_check: 15 bench switches, 0 hitches, 21 / 21 archive hits, 0 compiler calls, 0 render-thread compiles; post-switch worst 1.28 ms
