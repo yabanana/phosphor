@@ -4055,6 +4055,11 @@
         "label": "58D8F56DA402132DC3947F6F809CEB3FFFBFDC74D9E703FC3827898AFC80B325",
         "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
         "name": "phx_exact::visibility_lit_resolve"
+      },
+      {
+        "label": "405D652C96EB64FB2BEF828673A2E57AB0A3C7E3CCCB9D0168400AEBACEDD57F",
+        "library": "802F2E2430FEF2DBADDE5A57C7BA7E1FD28B67C0820B56276E01BAB9F631C41E",
+        "name": "reflection_probe_only_ms"
       }
     ],
     "specialized_function_descriptors": [
@@ -76448,6 +76453,14 @@
       },
       {
         "compute_function_descriptor": "fnd:9A2EF90423D285CBA26EA9FEF541168C10C50079530D08828CC5F63DC7CD0508",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "compute_function_descriptor": "fnd:405D652C96EB64FB2BEF828673A2E57AB0A3C7E3CCCB9D0168400AEBACEDD57F",
         "required_threads_per_threadgroup": [
           0,
           0,
