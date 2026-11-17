@@ -602,3 +602,39 @@ WindowServer, git, a local `llama-server` in two samples, metal-tt's own compile
 battery 77 -> 68 % on AC): numbers in docs/perf-log.md ("F15 closure round 5").  D2 band met (t03 -> final5 +0.051 ms, GPU p95 15.35 ms,
 0 allocations); hitch 0 / 15; transmission +12.24 ms; walk with glass +41.7 ms; archive build +20.0 % pooled (round 3 +25.7 %: the owner
 decision "not demonstrably met" stands).
+
+### 2026-11-17 — round-5 corpus and correction of the forced-Apple9 rows
+
+**F13/F14 corpus r5** (`build/f15-corpus-r5`, fresh freeze of 89 cases, binary 991b2f95 / metallib 4518d6ea, head 2827765e, empty
+worktree diff; 11:31-14:16): exit 0.  Gating by reference role: control 30 / 30, cross-check 2 / 2, full-rate-pair 17 / 17, functional
+13 / 13, independent-clip 12 / 12, numerical 14 / 14, repeatability-pair 1 / 1; "functional checks PASS; selected evidence complete;
+remaining controls PENDING; phase acceptance NOT CLAIMED" (the two missing controls are the F13/F14 ones named since 720ee63).  Every
+case has the same state and functional verdict as the last complete corpus (`build/f15-corpus-final`, 720ee63); 0 cases with errors.
+A sibling session reported a fork/resource storm of its own read-only command at about 14:02: during 13:58-14:16 the runner wrote one
+result (`clouds-screen-edge-deck-reconstructed`, 14:03:21, `errors: []`, `control_metrics.passed`) and later the deck-t pair and the
+summary; the pair analyses run in-process (the runner's only subprocess is the probe author, before the renders); the log and every
+`result.json` contain no fork / resource / EAGAIN / ENOMEM text.  No case needed a rerun.
+
+**Correction: the forced-Apple9 rows were compile-timing artefacts, all six are 0 px.**  The battery's forced-Apple9 step (native vs
+`--force-family apple9`, API + shader validation) drops `--pipeline-sync`.  Under shader validation the archive is unavailable, the
+native (Apple10-specialised) feature pipelines compile slowly and `FeaturePipelines::serve` draws those frames with the scene's base
+pipeline; the native runs of the battery drew 1 152 (`combo-all-lobes-sun`), 837 (`layers-patch`), 485-557 (`subsurface-volumetric-sun`)
+and 81-144 (`texture-coat-sun`) fallback draws against 17-18 on the apple9 side, in r4 and r5 alike.  Re-run on 991b2f95 with the same
+commands plus `--pipeline-sync` (`build/a9-sync`, 14:16-14:17, `a9_sync.sh`):
+
+| scenario | validation | fallback draws native / apple9 | native vs apple9 |
+|---|---|---|---|
+| `combo-all-lobes-sun` | API + shader | 0 / 0 | 0 px |
+| `subsurface-volumetric-sun` | API + shader | 0 / 0 | 0 px |
+| `layers-patch` | API + shader | 0 / 0 | 0 px |
+| `transmission-glass-behind-glass` | API | 0 / 0 | 0 px |
+| `transmissive-shadow-pane-sun@rt` | API | 0 / 0 | 0 px |
+| `texture-coat-sun` | API + shader | 0 / 0 | 0 px |
+
+Effective capabilities apple9 on every apple9 run (log: "physical apple10, effective apple9", Hi-Z compute, probe storage "forced Apple9
+1, reduced 0"), exit 0, 0 validation lines.  Consequences:
+- The 17 343 / 53 236 / 197 318 px differences recorded since round 3, and the explanation "Apple9 selects the reduced lighting preset"
+  (ce641430 and the round-3/4 handoffs), were wrong: they measured fallback frames on the native side.
+- **Limit of the battery:** the forced-Apple9 step's result depends on compile timing, so neither its differences nor its 0 px rows (round
+  4 `texture-coat-sun` included) prove anything.  The forced-Apple9 path of these six scenarios is verified only by this `--pipeline-sync`
+  re-run.  The step is not changed after the fact; follow-up: `--pipeline-sync` in the step.
