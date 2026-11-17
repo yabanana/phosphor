@@ -12,6 +12,7 @@
 #include <array>
 #include <bit>
 #include <cmath>
+#include <cstring>
 #include <fstream>
 #include <regex>
 #include <set>

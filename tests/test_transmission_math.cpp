@@ -2,6 +2,7 @@
 #include <doctest/doctest.h>
 #include "renderer/transmission_math.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>

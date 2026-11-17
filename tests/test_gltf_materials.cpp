@@ -9,6 +9,7 @@
 #include <json.hpp>
 #include <tiny_gltf.h>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>

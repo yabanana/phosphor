@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstring>
 
 namespace phosphor {
 
