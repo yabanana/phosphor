@@ -400,3 +400,30 @@ Identity for every row: phosphor e01bb209, metallib 0e5423c1, archive c2776814 (
 | F15.2 permutation equivalence | 237 cases / 168 scenes 0 px / 0 ULP; controls leave the envelope in 151 of 216; feature bits 0-8 discriminated; overflow 12 / 12 0 ULP; repeats 7 / 7 bit identical |
 | f15_check | 286 / 286 captures (03:54); missing references by 3 CPU shards (148 done, 0 errors); one `--evaluate`: RED only by `aniso-narrow-sun` (declared open, 3.77 % at one pixel, max 3 %).  FAIL rows 32 -> 13: the 16 layer-equal keys, `sheen-probe-env` (worst mean 1.8e-4, limit 5e-3), `texture-coat-sun` (worst p99 0.34 %) and `combo-all-lobes-env` (worst sphere mean 0.92 %, limit 5 %) now pass; the remaining rows are the two declared subsurface default-tier keys and the `@rt-walk-*` negative controls, which must fail |
 | hitch (quiet window, first step) | 15 switches, 0 hitches, worst post-switch frame 1.22 ms |
+
+### 2026-11-17 — round 4: before / after on the final binary, and two corrections to the round-3 record
+
+Every f15_check key with a coat, sheen, probe reflections, MS or a furnace, round 3 (`build/final2`, c2514d6f) against round 4
+(`build/battery-r4`, e01bb209), worst row over spheres; all pass on round 4.  Changed keys only (the other 60 are identical to the
+printed precision; table generated from both results.json files):
+
+| key | round 3 worst mean / p99 / max | round 4 worst mean / p99 / max |
+|---|---|---|
+| `sheen-probe-env` | 7.02e-2 / 8.25e-2 / - | 1.78e-4 / 6.43e-4 / - |
+| `texture-coat-sun` | 1.27e-2 / 1.48e-1 / 2.83e-1 | 2.74e-4 / 3.41e-3 / 1.46e-2 |
+| `texture-coat-env-resolve` | 7.36e-4 / 2.43e-3 / - | 4.76e-4 / 2.18e-3 / - |
+| `combo-aniso-coat-env` | 1.69e-2 | 1.91e-2 |
+| `combo-aniso-sheen-env` | 1.35e-2 | 1.01e-2 |
+| `furnace-aniso` spheres 4-7 / 8-11 (metallic 0, roughness 0.3) | 0.9999-1.0000 | 0.9856-0.9915 / 0.9640-0.9680 |
+| `furnace-combinations` spheres 1 / 2 / 6 / 9 | 0.9976 / 1.0000 / 0.9714 / 0.9790 | 0.9694 / 0.9808 / 0.9478 / 0.9764 |
+
+Corrections:
+- `texture-coat-sun` round 3: the worst sphere was sphere 3 (metallic 1, textures 0x4): p99 14.8 %, max 28.3 % (sphere 5: p99 5.1 %;
+  sphere 0: p99 1.55 %).  The diagnosis section above and tickets 03 / 09 quoted sphere 0's 1.55 % as the key's p99; the key failed by far
+  more.  On round 4 every sphere passes (worst p99 0.34 %, sphere 0; max 1.46 %).
+- Energy cost of 817b080 (combo fix), measured on the final binary: besides `furnace-aniso` spheres 4-11 and `furnace-combinations` sphere 1
+  (as reported by W3), `furnace-combinations` spheres 2 (1.0000 -> 0.9808) and 6 (0.9714 -> 0.9478) and 9 (0.9790 -> 0.9764) also lose
+  energy.  The reference loses 0.011-0.015 on `furnace-aniso` spheres 8-11 and gains 0.006-0.012 on spheres 4-7; on
+  `furnace-combinations` it loses 0.016 / 0.015 / 0.023 / 0.027 on spheres 1 / 2 / 6 / 9: the engine now loses up to 0.035 (aniso 8-11)
+  and 0.052 (combinations 6) where the reference loses 0.014 and 0.023.  The furnace gate is an upper bound (1.005), so every furnace key
+  passes; the `@resolve` furnaces are unchanged (no transported signal).
