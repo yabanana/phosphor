@@ -2,6 +2,7 @@
 #include <doctest/doctest.h>
 #include "renderer/lobe_select.h"
 
+#include <initializer_list>
 #include <cmath>
 
 using namespace phosphor;
