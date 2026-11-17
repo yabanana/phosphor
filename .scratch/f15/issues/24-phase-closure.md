@@ -376,3 +376,27 @@ frozen F14-numerical subset (build/f15-corpus-oracle-check).  The owner's round-
 investigation) change the binary: ONE complete final battery is re-run on the new hashes (f15_check in full, equivalence, archive_check,
 visual, hitch, D2 on a quiet machine, the full F13/F14 corpus), and only those results are the final evidence.
 
+
+### 2026-11-17 — round-4 final battery, part A (orchestrator, `build/battery-r4`, tip 817b080)
+
+Identity for every row: phosphor e01bb209, metallib 0e5423c1, archive c2776814 (one binary, one archive, no rebuild between steps;
+01:37-04:35, no Mitsuba running, battery 100 %).
+
+| check | result |
+|---|---|
+| build (no-op) / ctest | 46 / 46 |
+| metal_syntax_check | 49 files, 1 expected failure (metalfx_lifetime `__APPLE__` Objective-C block) |
+| visual_check | every bench 0 px |
+| variant_check (indexed / mesh) | 284 compatible (worst 26 px, delta <= 1), 52 incompatible differ; both pass |
+| archive_check | all scenarios pass |
+| subsurface overflow, exactness self-checks (5 scenes), JIT `reflection_rt_lobe`, XPC N=2 / N=4 | pass / pass / 0 failures / N=2 recovers, N=4 fails as required |
+| forced Apple9 (6 scenes) | exit 0, 0 validation lines both families; native vs apple9 0 px on glass-behind-glass, pane@rt, texture-coat-sun; combo-all-lobes-sun 17 343 px, subsurface-volumetric-sun 53 236 px, layers-patch 197 318 px (reduced preset / diffusion fallback, unchanged since round 3) |
+| round-2/3 fixtures (transport x5, glass receiver, thin GI back, texture transforms, vertex colour, GI glass shadow, spot DI, unlit, residue, shadowed hit, GI environment, walk clip, aniso lobe-id) | pass |
+| spot falloff arms | RED as declared (probe / GI arms, owner decision) |
+| chess, chess O7, chess validation | GREEN (every group passes, controls fail), O7 GREEN |
+| chess king / queen subsurface bound | RED as declared (ticket 20) |
+| Khronos corpus + validation | 24 / 24 render, 0 archive misses |
+| transmission temporal clip | converged control rebuilt for this binary (half-vs-half 0.0055 / 0.0069 / 0.0096); smooth ior 1.33 / 1.5 / 2.0 p95 0.0230 / 0.0234 / 0.0307, max 0.0409 / 0.0480 / 0.0620 (gate 0.06); negative-refract-axis fails (0.149) |
+| F15.2 permutation equivalence | 237 cases / 168 scenes 0 px / 0 ULP; controls leave the envelope in 151 of 216; feature bits 0-8 discriminated; overflow 12 / 12 0 ULP; repeats 7 / 7 bit identical |
+| f15_check | 286 / 286 captures (03:54); missing references by 3 CPU shards (148 done, 0 errors); one `--evaluate`: RED only by `aniso-narrow-sun` (declared open, 3.77 % at one pixel, max 3 %).  FAIL rows 32 -> 13: the 16 layer-equal keys, `sheen-probe-env` (worst mean 1.8e-4, limit 5e-3), `texture-coat-sun` (worst p99 0.34 %) and `combo-all-lobes-env` (worst sphere mean 0.92 %, limit 5 %) now pass; the remaining rows are the two declared subsurface default-tier keys and the `@rt-walk-*` negative controls, which must fail |
+| hitch (quiet window, first step) | 15 switches, 0 hitches, worst post-switch frame 1.22 ms |
