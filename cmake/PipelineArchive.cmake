@@ -9,12 +9,27 @@
 # metallib, so the JSON stays valid when shader bodies change.
 #
 #   PHOSPHOR_ARCHIVE_ARCHS = native (default: the local GPU, `xcrun metal-arch`)
-#                            | all   (every GPU arch; ~16 s instead of ~0.1 s.
-#                                     An archive without the local slice is
-#                                     rejected at open time.)
+#                            | floor (PHOSPHOR_ARCHIVE_FLOOR_ARCHS: the Apple
+#                                     GPUs of the hardware floor, Apple9 =
+#                                     applegpu_g15, and newer; what CI publishes)
+#                            | all   (every GPU arch metal-tt knows.  An archive
+#                                     without the local slice is rejected at
+#                                     open time.)
+#
+# A multi-arch archive is a Mach-O fat file whose struct fat_arch stores each
+# slice offset in 32 bits: every slice must START below 4 GiB.  Since F15
+# (2663 pipelines) an Apple slice is ~0.5 GB, so "all" (14 Apple slices on
+# macOS 26) fails in air-lipo ("fat file too large", offset 4.63 GB at
+# applegpu_g14s).  The 8 floor slices measured 3.98 GB in total, the last one
+# starting at 3.48 GB.  The list is pinned, not queried from metal-tt: a newer
+# host OS adds architectures (macOS 27: applegpu_g17d, applegpu_g18g) and a
+# 10th slice would start past 4 GiB.
 
-set(PHOSPHOR_ARCHIVE_ARCHS "native" CACHE STRING "GPU architectures of the pipeline archive: native | all")
-set_property(CACHE PHOSPHOR_ARCHIVE_ARCHS PROPERTY STRINGS native all)
+set(PHOSPHOR_ARCHIVE_ARCHS "native" CACHE STRING "GPU architectures of the pipeline archive: native | floor | all")
+set_property(CACHE PHOSPHOR_ARCHIVE_ARCHS PROPERTY STRINGS native floor all)
+set(PHOSPHOR_ARCHIVE_FLOOR_ARCHS
+    "applegpu_g15g;applegpu_g15s;applegpu_g15d;applegpu_g16g;applegpu_g16s;applegpu_g17g;applegpu_g17p;applegpu_g17s"
+    CACHE STRING "Architectures of PHOSPHOR_ARCHIVE_ARCHS=floor (each slice must start below 4 GiB)")
 option(PHOSPHOR_BUILD_PIPELINE_ARCHIVE "Build the harvested Metal pipeline archive (disable only to bootstrap a new harvest)" ON)
 
 if(PHOSPHOR_METAL_TOOLCHAIN_DIR)
@@ -70,12 +85,23 @@ else()
             set(PHOSPHOR_ARCHIVE_ARCH_ARGS -arch ${_native_arch})
             message(STATUS "Pipeline archive: native arch ${_native_arch}")
         else()
-            message(STATUS "Pipeline archive: metal-arch failed, building for all architectures")
+            message(STATUS "Pipeline archive: metal-arch failed, building for the floor architectures")
+            foreach(_arch IN LISTS PHOSPHOR_ARCHIVE_FLOOR_ARCHS)
+                list(APPEND PHOSPHOR_ARCHIVE_ARCH_ARGS -arch ${_arch})
+            endforeach()
         endif()
+    elseif(PHOSPHOR_ARCHIVE_ARCHS STREQUAL "floor")
+        if(NOT PHOSPHOR_ARCHIVE_FLOOR_ARCHS)
+            message(FATAL_ERROR "PHOSPHOR_ARCHIVE_ARCHS=floor needs PHOSPHOR_ARCHIVE_FLOOR_ARCHS")
+        endif()
+        foreach(_arch IN LISTS PHOSPHOR_ARCHIVE_FLOOR_ARCHS)
+            list(APPEND PHOSPHOR_ARCHIVE_ARCH_ARGS -arch ${_arch})
+        endforeach()
+        message(STATUS "Pipeline archive: floor architectures (${PHOSPHOR_ARCHIVE_FLOOR_ARCHS})")
     elseif(NOT PHOSPHOR_ARCHIVE_ARCHS STREQUAL "all")
-        message(FATAL_ERROR "PHOSPHOR_ARCHIVE_ARCHS must be 'native' or 'all'")
+        message(FATAL_ERROR "PHOSPHOR_ARCHIVE_ARCHS must be 'native', 'floor' or 'all'")
     else()
-        message(STATUS "Pipeline archive: all architectures")
+        message(STATUS "Pipeline archive: all architectures (fails past 4 GiB of slices, see above)")
     endif()
 
     # Placeholder substitution as a -P script (portable, no sed flavours).
