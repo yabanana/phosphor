@@ -458,3 +458,61 @@ Owner decisions, relayed by the aggregating session:
 
 The round-4 battery that started at 01:37 (`build/battery-r4`, `build/f15-costs-r4`, `build/f15-corpus-r4`, e01bb209) is therefore a
 pre-check of 817b080e, not the final battery of record.
+
+### 2026-11-17 — combo decision reversed, pre-check stopped, non-lobe MS fix verified and integrated
+
+**Owner decision on 817b080, text "Annullare il fix".**  It replaces the "Accettare" recorded above.  The acceptance had been given on
+W3's numbers; the corrected furnace numbers measured on e01bb209 are the ones that motivated the reversal:
+
+| furnace key | without the fix (c2514d6f) | with the fix (e01bb209) | reference's own loss |
+|---|---|---|---|
+| `furnace-aniso` spheres 4-7 | 0.9999-1.0000 | 0.9856-0.9915 | gains 0.006-0.012 |
+| `furnace-aniso` spheres 8-11 | 0.9999-1.0000 | 0.9640-0.9680 | loses 0.011-0.015 |
+| `furnace-combinations` sphere 1 | 0.9976 | 0.9694 | loses 0.016 |
+| `furnace-combinations` sphere 2 | 1.0000 | 0.9808 | loses 0.015 |
+| `furnace-combinations` sphere 6 | 0.9714 | 0.9478 | loses 0.023 |
+| `furnace-combinations` sphere 9 | 0.9790 | 0.9764 | loses 0.027 |
+
+- Only the composite correction for transported anisotropic pixels is reverted (588f7112, a clean revert of one hunk of
+  `shaders/reflection_composite.metal`).  The anisotropic table and the resolve stay.
+- `combo-all-lobes-env` sphere 2 is OPEN at 5.12 % against 5 % (bisection: 4.07 % on 7704b21).  Cause: on transported pixels the table's
+  diffuse complement is 0.910 where the exact weight is 0.830.
+- Follow-up: an exact diffuse complement for transported pixels, first trying the lobe-independent weight (ticket 11).
+
+**Pre-check stopped on purpose.**  The round-4 F13/F14 corpus (`build/f15-corpus-r4`, e01bb209) was stopped at 08:01 with SIGTERM
+(exit 143) by the orchestrator, because the GPU was needed to verify the non-lobe MS fix.
+- State at the stop: 89 / 89 cases rendered and judged functionally PASS, and 13 / 13 reconstructed-cloud pair analyses written (last
+  07:58).  The remaining CPU pair analyses and `summary.json` were not written (`build/f15-corpus-r4/STOPPED_ON_PURPOSE.txt`).
+- The chain log's "corpus exit 0" is the status of the script's last `tail`, not of the runner.
+- The whole round-4 run (part A, quiet window, corpus) is a pre-check of e01bb209 / 817b080e, not the battery of record.
+
+**`ms-probe-env`, the key of the non-lobe fix** (W4, 66243cbc).  The key was fixed before any GPU run.  It is a featureless base grid
+(non-lobe kernels), `--reflections probes`, `--specular-ms on`, a cooked constant probe of 0.2 against a declared environment of 0.5, and
+the declared gate: per-sphere mean <= 0.5 %, p99 <= 1 %.
+
+| metallic 1, roughness | 817b080e (e01bb209) mean / p99 | 66243cbc (2fc3ff1b, pixels evaluated offline) mean / p99 |
+|---|---|---|
+| 0.10 | 0.027 % / 0.146 % | 0.003 % / 0.038 % |
+| 0.20 | 0.49 % / 2.48 % | 0.002 % / 0.022 % |
+| 0.35 | 4.39 % / 12.7 % | 0.001 % / 0.008 % |
+| 0.50 | 14.4 % / 19.7 % | 0.008 % / 0.001 % |
+| 0.70 | 36.5 % / 38.1 % | 0.000 % / 0.004 % |
+| 0.85 | 56.1 % / 64.3 % | 0.001 % / 0.008 % |
+| 1.00 | 74.4 % / 88.6 % | 0.001 % / 0.012 % |
+
+- 817b080e is RED (exit 1, 6 of 7 spheres fail).  The two reference-side negative controls fail on both binaries:
+  `declared-ms-ignored` and `declared-ms-double` give a worst mean of 49.6 %, the same for both because each sits plus or minus F_ms L from
+  the reference.
+- The defect is larger than the writer's estimate (2.7-44 %, quoted earlier as 21-44 % at roughness 0.7-1.0).  The measured error is
+  36.5-74.4 % at roughness 0.7-1.0 on metals.  At roughness 1 the multiple-scattering term is 49.6 % of a metal's environment response,
+  and it was lit by 0.5 instead of 0.2, so the error is 1.5 x 49.6 %.
+- The 66243cbc capture itself was rejected by `run_checked` (exit 6).  Its only flagged line is the expected archive miss of the new
+  `reflection_probe_only_ms` kernel, whose text "Failed with error:" matches `\berror:`; the process exit and the EXIT marker are 0.  Its
+  pixels were evaluated offline with `--evaluate` for information only.  The gating run is the one on the integrated binary, after the
+  targeted harvest (below).
+- **Limit of the test, declared:** only the metal spheres are gated (`min_metallic` 1.0).  The reference's `--sky-override 0.2` lights
+  every term with 0.2, while the engine's diffuse term stays lit by the declared environment 0.5.  The dielectric spheres would therefore
+  differ by design, so the key does not cover the diffuse / MS split of dielectrics under probes.
+
+Integration: 588f7112 (revert of 817b080), 47dcefee (cherry-pick of 66243cbc, original message kept: "PREPARED ... NOT verified"; this
+section is the verification record).
