@@ -1,5 +1,27 @@
 #include "restir_common.h"
 #include "renderer/denoise_history_layout.h"
+// F15.1 (ticket 08): the specular kernels also exist as "<name>_lobe" entry points (denoise_lobe.metal compiles this file with
+// PHOSPHOR_DENOISE_LOBE, linked into the material module like the DI and reflection lobe kernels).  They carry the reserved
+// MATERIAL_FEATURES constant (never referenced by the base kernels: metal-tt cannot lower such a descriptor) and bind the lobe
+// guide (buffer 9 of the temporal kernel, buffer 4 of the atrous kernels).  The lobe contract (decision 06): a pixel's sampled lobe
+// (id, axis: GPUSpecularSample.flags) selects the edge-stopping roughness and the spatial guide axis, neighbours and history with
+// another (id, axis) key are rejected, and the history stores the key.  The transport keys the pixel (ticket 09: the stable coat-or-base key; reflect only until ticket 13), so the
+// lobe kernels compute the base results; src/renderer/denoise_settings.cpp is the CPU mirror of every rule marked "lobe contract".
+#ifdef PHOSPHOR_DENOISE_LOBE
+#ifndef PHOSPHOR_DI_LOBE
+#error "PHOSPHOR_DENOISE_LOBE needs the lobe-mode restir_common.h (kMaterialFeatures)"
+#endif
+#define DN_KERNEL(name) name##_lobe
+#define DN_FN(name) name##_lobe // helpers whose body differs between the two modes: distinct symbols (no ODR merge)
+#define DN_GUIDE_PARAM(index) , const device GPULobeGuide* guides [[buffer(index)]]
+// F15.1 ticket 13: the endpoint history extension (previous 10, next 11); allocated only when the feature union has transmission, touched only then
+#define DN_ENDPOINT_PARAM ,const device GPUDenoiseEndpointHistory* previousEndpoint [[buffer(10)]],device GPUDenoiseEndpointHistory* nextEndpoint [[buffer(11)]]
+#else
+#define DN_KERNEL(name) name
+#define DN_FN(name) name
+#define DN_GUIDE_PARAM(index)
+#define DN_ENDPOINT_PARAM
+#endif
 
 constant uint FC_DENOISE_SIGNAL [[function_constant(40)]];
 constant uint kDenoiseSignal=is_function_constant_defined(FC_DENOISE_SIGNAL)?FC_DENOISE_SIGNAL:0xffffffffu;
@@ -24,14 +46,83 @@ inline float3 denoiseGuide(GPUDISurface s,uint signal){
 // F13.6 lobe bound: neighbours whose reflection axes differ by more than the
 // centre's GGX lobe (angle ~ alpha) see a different reflected image.
 inline float denoiseLobe(float cosine,float roughness){const float a=max(roughness*roughness,0.002f);return exp(-max(0.0f,1.0f-cosine)/(a*a));}
+#ifdef PHOSPHOR_DENOISE_LOBE
+constant bool kDenoiseLobes=(kMaterialFeatures&LOBE_GUIDE_RESOLVED_FEATURES)!=0u;
+// One specular pixel through the lobe contract: the key the neighbours and the history compare, and the roughness and spatial axis of
+// the SAMPLED lobe (denoiseLobeRoughness / denoiseLobeAxis of the CPU mirror).
+struct DenoiseLobe {uint key;float roughness;float3 axis;};
+inline bool denoiseLobesActive(constant GPUDenoiseParams& p){return kDenoiseLobes&&denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR&&(p.flags&DENOISE_LOBE_GUIDE_VALID)!=0u;}
+// Diagnostics (PHOSPHOR_DIAGNOSTIC_DENOISE_LOBE): force lobe id 1 on 16 px stripes (static) or on alternating-parity stripes of alternating
+// frames (every pixel's key changes each frame). Only the comparison key changes; roughness and axis follow the real lobe.
+inline uint denoiseLobeCompareKey(constant GPUDenoiseParams& p,uint2 pixel,uint key){
+    if(p.flags&DENOISE_DIAGNOSTIC_LOBE_STRIPES){if((pixel.x>>4)&1u)key=(key&4u)|SPECULAR_LOBE_CLEARCOAT;}
+    else if(p.flags&DENOISE_DIAGNOSTIC_LOBE_FLIP){if(((pixel.x>>4)^p.frameIndex)&1u)key=(key&4u)|SPECULAR_LOBE_CLEARCOAT;}
+    return key;
+}
+inline DenoiseLobe denoiseLobeLoad_lobe(constant GPUDenoiseParams& p,const device GPULobeGuide* guides,GPUDISurface s,uint flags,uint index,uint2 pixel){
+    DenoiseLobe l;uint real=specularSampleLobeKey(flags);
+    // F15.1 (ticket 13): a transmissive pixel (factor >= 0.5) has ONE key, the refract key, whichever branch of the one-sample reflect/refract estimator this
+    // frame drew (denoiseStableLobeKey of the CPU mirror).  Only scenes that resolve transmission pay the guide read.
+    if((kMaterialFeatures&MATERIAL_FEATURE_TRANSMISSION)!=0u){const LobeParams t0=unpackLobeGuide(guides[index]);
+        if(isfinite(t0.transmissionFactor)&&t0.transmissionFactor>=0.5f)real=SPECULAR_LOBE_TRANSMISSION|4u;}
+    // F15.1 (ticket 13) negative: a refract-axis sample handled as a reflect-axis one (key without the axis bit, reflect spatial axis).
+    if(p.flags&DENOISE_DIAGNOSTIC_LOBE_REFLECT_AXIS)real&=~4u;
+    l.key=denoiseLobeCompareKey(p,pixel,real);
+    l.roughness=s.roughness;l.axis=denoiseGuide(s,DENOISE_SIGNAL_SPECULAR);
+    if(real!=0u){ // the guide is only read for a sampled lobe other than the base reflection
+        const LobeParams u=unpackLobeGuide(guides[index]);const uint id=real&3u;
+        if(id==SPECULAR_LOBE_CLEARCOAT)l.roughness=isfinite(u.clearcoatRoughness)?min(s.roughness,clamp(u.clearcoatRoughness,0.0f,1.0f)):s.roughness; // ticket 09: stable key = significant coat; the sharper lobe sets the edge-stopping roughness
+        else if(id==SPECULAR_LOBE_TRANSMISSION)l.roughness=(isfinite(u.ior)&&isfinite(s.roughness))?s.roughness*clamp(2.0f*(u.ior>=1.0f?u.ior:1.5f)-2.0f,0.0f,1.0f):s.roughness;
+        if(real&4u){
+            const float3 n=diVec(s.shadingNormal),v=diVec(s.viewDirection);
+            if(dot(n,n)>0&&dot(v,v)>0&&all(isfinite(n))&&all(isfinite(v))){const float ior=(isfinite(u.ior)&&u.ior>=1.0f)?u.ior:1.5f;
+                const float3 t=u.volumeThickness>0?refract(-normalize(v),normalize(n),1.0f/ior):-normalize(v);if(dot(t,t)>0)l.axis=normalize(t);}
+        }
+    }
+    return l;
+}
+// F15.1 (ticket 13, temporal clip): endpoint-matched history of a transmissive pixel (renderer/denoise_endpoint.h, CPU mirror
+// denoiseEndpointSelect).  Only the transmission-specialised lobe kernels compile it: kMaterialFeatures is a pipeline constant.
+constant bool kDenoiseEndpoints=(kMaterialFeatures&MATERIAL_FEATURE_TRANSMISSION)!=0u;
+inline bool denoiseSampleHasEndpoint(GPUSpecularSample s){return (s.flags&SPECULAR_SAMPLE_ENDPOINT)&&(s.flags&SPECULAR_SAMPLE_VALID)&&!(s.flags&SPECULAR_SAMPLE_ERROR)&&
+    isfinite(s.direction[0])&&isfinite(s.direction[1])&&isfinite(s.direction[2]);}
+// The previous-frame pixel (index `found`) whose endpoint is nearest the current one in the (2R+1)^2 window around the surface reprojection `c`,
+// accepted when within kDenoiseEndpointAccept of the footprint of the current endpoint field (the largest distance to a same-key 4-neighbour).
+inline bool denoiseEndpointFind(constant GPUDenoiseParams& p,const device GPUSpecularSample* specular,const device GPUDenoiseEndpointHistory* previousEndpoint,
+    uint2 pixel,int2 c,GPUSpecularSample spec,thread uint& found){
+    if(!denoiseSampleHasEndpoint(spec))return false;
+    const uint key=denoiseEndpointKeyDecode(spec.proposalSolidAngle);const float3 e(spec.direction[0],spec.direction[1],spec.direction[2]);
+    const int2 size=int2(p.width,p.height);float footprint=0;
+    for(uint k=0;k<4u;++k){const int2 q=int2(pixel)+int2(k==0u?-1:(k==1u?1:0),k==2u?-1:(k==3u?1:0));if(any(q<0)||any(q>=size))continue;
+        const GPUSpecularSample n=specular[uint(q.y)*p.width+uint(q.x)];
+        if(!denoiseSampleHasEndpoint(n)||denoiseEndpointKeyDecode(n.proposalSolidAngle)!=key)continue;
+        footprint=max(footprint,denoiseEndpointDistance(e.x,e.y,e.z,n.direction[0],n.direction[1],n.direction[2]));}
+    const uint want=denoiseEndpointHistoryKey(key);float best=INFINITY;bool have=false;
+    for(int dy=-kDenoiseEndpointRadius;dy<=kDenoiseEndpointRadius;++dy)for(int dx=-kDenoiseEndpointRadius;dx<=kDenoiseEndpointRadius;++dx){
+        const int2 q=c+int2(dx,dy);if(any(q<0)||any(q>=size))continue;const uint index=uint(q.y)*p.width+uint(q.x);
+        const GPUDenoiseEndpointHistory h=previousEndpoint[index];if(h.endpointKey!=want)continue;
+        const float d=denoiseEndpointDistance(e.x,e.y,e.z,h.endpoint[0],h.endpoint[1],h.endpoint[2]);if(d<best){best=d;found=index;have=true;}}
+    return have&&denoiseEndpointAccept(best,footprint);
+}
+#endif
 inline DenoiseHistory denoiseLoad(constant GPUDenoiseParams& p,const device GPUDenoiseHistoryHeader* header,const device GPUDenoiseHistoryRecord* records,
     const device GPUDenoiseSpecularHistory* specular,uint index){
     return denoiseUnpack(header[0],records[index],denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?specular[index]:GPUDenoiseSpecularHistory{});}
-inline bool denoiseCompatible(GPUDISurface s,DenoiseHistory h,constant GPUDenoiseParams& p,GPUSpecularSample spec){
+#ifdef PHOSPHOR_DENOISE_LOBE
+#define DN_COMPAT_ARGS ,bool lobes,DenoiseLobe lobe,bool surfaceChecks
+#define DN_SURFACE (surfaceChecks)
+#define DN_ROUGHNESS(s) (lobes?lobe.roughness:(s).roughness)
+#else
+#define DN_COMPAT_ARGS
+#define DN_SURFACE true
+#define DN_ROUGHNESS(s) (s).roughness
+#endif
+inline bool DN_FN(denoiseCompatible)(GPUDISurface s,DenoiseHistory h,constant GPUDenoiseParams& p,GPUSpecularSample spec DN_COMPAT_ARGS){
     if((p.flags&DENOISE_RESET)||!s.valid||!h.valid||!h.length||h.signal!=denoiseSignal(p)||h.viewID!=p.viewID||h.historyEpoch!=p.historyEpoch||h.signalRevision!=p.signalRevision||
         h.slot!=s.instanceSlot||h.instanceGeneration!=s.instanceGeneration||h.materialRevision!=s.materialRevision||
         !isfinite(s.depth)||!isfinite(h.depth)||s.depth<=0||h.depth<=0||!all(isfinite(diVec(h.color)))||
         !isfinite(h.firstMoment)||!isfinite(h.secondMoment)||!isfinite(h.variance)||h.variance<0)return false;
+    if(DN_SURFACE){ // F15.1 ticket 13: an endpoint-matched candidate skips the receiver geometry tests (the lobe kernels only)
     const float3 n=denoiseNormal(s,denoiseSignal(p)),old=diVec(h.normal);if(!all(isfinite(n))||!all(isfinite(old))||dot(n,n)<=0||dot(old,old)<=0||dot(normalize(n),normalize(old))<p.normalThreshold)return false;
     // Compare both receivers in this camera's space; stored h.depth belongs
     // to the previous camera and can change for an unchanged world surface.
@@ -40,12 +131,17 @@ inline bool denoiseCompatible(GPUDISurface s,DenoiseHistory h,constant GPUDenois
     if(!isfinite(oldDepth)||oldDepth<=0)return false;
     const float scale=max(s.depth,oldDepth);if(abs(s.depth-oldDepth)>p.depthThreshold*scale||!all(isfinite(diVec(s.position)))||!all(isfinite(diVec(h.position)))||
         abs(dot(diVec(s.position)-diVec(h.position),normalize(n)))>p.planeThreshold*scale)return false;
+    }
     if(h.flags&~(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?DENOISE_HISTORY_STOCHASTIC:0u))return false;
     if(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR){
         const bool stochastic=(spec.flags&SPECULAR_SAMPLE_STOCHASTIC)!=0&&!(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS);
         if(!(spec.flags&SPECULAR_SAMPLE_VALID)||(spec.flags&SPECULAR_SAMPLE_ERROR)||
            stochastic!=bool(h.flags&DENOISE_HISTORY_STOCHASTIC)||!isfinite(h.roughness)||!isfinite(s.roughness)||
-           abs(h.roughness-s.roughness)>p.roughnessThreshold||!isfinite(spec.hitDistance)||spec.hitDistance<0)return false;
+           abs(h.roughness-DN_ROUGHNESS(s))>p.roughnessThreshold||!isfinite(spec.hitDistance)||spec.hitDistance<0)return false;
+#ifdef PHOSPHOR_DENOISE_LOBE
+        // lobe contract: history accumulated from another sampled lobe (id or axis) is a different signal
+        if(lobes&&h.lobe!=lobe.key)return false;
+#endif
         if(!stochastic&&(h.path!=spec.path||h.secondarySlot!=spec.secondarySlot||h.secondaryGeneration!=spec.secondaryGeneration||
            !isfinite(h.hitDistance)||abs(h.hitDistance-spec.hitDistance)>p.hitDistanceThreshold*max(1.0f,max(h.hitDistance,spec.hitDistance))))return false;
     }
@@ -55,25 +151,40 @@ inline bool denoiseNeighbor(GPUDISurface a,GPUDISurface b,constant GPUDenoisePar
     const float3 n=denoiseNormal(a,denoiseSignal(p)),m=denoiseNormal(b,denoiseSignal(p));return a.valid&&b.valid&&all(isfinite(n))&&all(isfinite(m))&&dot(n,n)>0&&dot(m,m)>0&&
         dot(normalize(n),normalize(m))>=p.normalThreshold&&abs(a.depth-b.depth)<=p.depthThreshold*max(a.depth,b.depth);
 }
-kernel void denoise_temporal(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
+kernel void DN_KERNEL(denoise_temporal)(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
     const device GPUDenoiseHistoryRecord* previous [[buffer(2)]],const device GPUSpecularSample* specular [[buffer(3)]],device GPUDenoiseHistoryRecord* next [[buffer(4)]],
     const device GPUDenoiseHistoryHeader* previousHeader [[buffer(5)]],device GPUDenoiseHistoryHeader* nextHeader [[buffer(6)]],
-    const device GPUDenoiseSpecularHistory* previousSpecular [[buffer(7)]],device GPUDenoiseSpecularHistory* nextSpecular [[buffer(8)]],
+    const device GPUDenoiseSpecularHistory* previousSpecular [[buffer(7)]],device GPUDenoiseSpecularHistory* nextSpecular [[buffer(8)]]DN_GUIDE_PARAM(9)DN_ENDPOINT_PARAM,
     texture2d<float,access::read> raw [[texture(0)]],texture2d<float,access::read> motion [[texture(1)]],
     texture2d<float,access::write> output [[texture(2)]],texture2d<float,access::write> moments [[texture(3)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.width*p.height)return;const uint2 pixel(tid%p.width,tid/p.width);const GPUDISurface s=surfaces[tid];
     DenoiseHistory h{};h.signal=denoiseSignal(p);h.viewID=p.viewID;h.historyEpoch=p.historyEpoch;h.signalRevision=p.signalRevision;
     float3 current=raw.read(pixel).rgb;const float3 normal=denoiseNormal(s,denoiseSignal(p));GPUSpecularSample spec{};
     if(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR)spec=specular[tid];
+#ifdef PHOSPHOR_DENOISE_LOBE
+    const bool lobes=denoiseLobesActive(p);DenoiseLobe lobe{0u,s.roughness,float3(0)};
+    if(lobes&&s.valid)lobe=denoiseLobeLoad_lobe(p,guides,s,spec.flags,tid,pixel);
+#endif
     if(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR&&(spec.flags&SPECULAR_SAMPLE_STOCHASTIC)&&!(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS))h.flags|=DENOISE_HISTORY_STOCHASTIC;
     if(s.valid&&(!all(isfinite(current))||!all(isfinite(normal))||dot(normal,normal)<=0))h.flags=1u;
     if(s.valid&&all(isfinite(current))&&all(isfinite(normal))&&dot(normal,normal)>0){current=max(current,0.0f);if(denoiseSignal(p)==DENOISE_SIGNAL_AO)current=saturate(current);
-        DenoiseHistory old{};bool reuse=false;
+        DenoiseHistory old{};bool reuse=false;bool endpointHistory=false;
         if(!(p.flags&DENOISE_RESET)){const float2 delta=motion.read(pixel).xy,center=float2(pixel)+.5f+delta;
-            if(all(isfinite(delta))&&all(center>=0)&&all(center<float2(p.width,p.height))){const uint2 q=uint2(center);old=denoiseLoad(p,previousHeader,previous,previousSpecular,q.y*p.width+q.x);reuse=denoiseCompatible(s,old,p,spec);}}
+            if(all(isfinite(delta))&&all(center>=0)&&all(center<float2(p.width,p.height))){const uint2 q=uint2(center);
+#ifdef PHOSPHOR_DENOISE_LOBE
+                // F15.1 ticket 13: a transmissive pixel matches the previous pixel by its refracted endpoint (no history when none is accepted)
+                const bool endpointMatch=kDenoiseEndpoints&&lobes&&lobe.key==(SPECULAR_LOBE_TRANSMISSION|4u)&&(spec.flags&SPECULAR_SAMPLE_ENDPOINT)!=0u;
+                uint found=q.y*p.width+q.x;const bool matched=endpointMatch?denoiseEndpointFind(p,specular,previousEndpoint,pixel,int2(q),spec,found):true;
+                if(matched){old=denoiseLoad(p,previousHeader,previous,previousSpecular,found);
+                    reuse=DN_FN(denoiseCompatible)(s,old,p,spec,lobes,lobe,!endpointMatch);const bool smoothInterface=max(s.roughness*s.roughness,0.002f)<=phosphor::kTransmissionSmoothAlpha;endpointHistory=endpointMatch&&reuse&&smoothInterface;} // only a SMOOTH interface (h = n) has an exact endpoint: a rough pixel keeps the soft test and the blend floor
+#else
+                old=denoiseLoad(p,previousHeader,previous,previousSpecular,q.y*p.width+q.x);
+                reuse=denoiseCompatible(s,old,p,spec);
+#endif
+            }}
         float3 oldColor=diVec(old.color);
         float localVariance=0;
-        const bool softTest=reuse&&(p.flags&DENOISE_SOFT_CHANGE);
+        const bool softTest=reuse&&(p.flags&DENOISE_SOFT_CHANGE)&&!endpointHistory; // an endpoint-matched history is the same refracted point: it is not an out-of-date reprojection
         if(!reuse||old.length<p.minHistoryForVariance||(p.flags&DENOISE_CLAMP_HISTORY)||softTest){float3 sum=0,square=0,lo=INFINITY,hi=-INFINITY;float count=0,lumSum=0,lumSquare=0;
             for(int y=-1;y<=1;++y)for(int x=-1;x<=1;++x){const int2 q=int2(pixel)+int2(x,y);if(any(q<0)||any(q>=int2(p.width,p.height)))continue;
                 const uint index=uint(q.y)*p.width+uint(q.x);if(!denoiseNeighbor(s,surfaces[index],p))continue;const float3 value=raw.read(uint2(q)).rgb;
@@ -90,47 +201,128 @@ kernel void denoise_temporal(constant GPUDenoiseParams& p [[buffer(0)]],const de
         const uint frames=reuse?min(old.length,p.maxHistory-1u)+1u:1u;
         const uint spp=denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?max(1u,(spec.flags>>SPECULAR_SAMPLE_COUNT_SHIFT)&SPECULAR_SAMPLE_COUNT_MASK):1u;
         const bool still=(p.flags&DENOISE_STATIONARY)!=0;const uint length=still?min(reuse?old.length+spp:spp,p.maxHistory):frames;
-        const float alpha=reuse?(still?min(1.0f,float(spp)/float(length)):max((p.flags&DENOISE_SOFT_CHANGE)?2*p.temporalAlpha:p.temporalAlpha,1.0f/float(length))):1;
+        // F15.1 ticket 13: an endpoint-matched history is the same refracted point (no reprojection error to outrun), so it integrates over the whole
+        // history cap: the floor of the blend is 1 / maxHistory instead of temporalAlpha (denoiseEndpointAlpha of the CPU mirror).
+        const float baseAlpha=endpointHistory?min(p.temporalAlpha,1.0f/float(p.maxHistory)):((p.flags&DENOISE_SOFT_CHANGE)?2*p.temporalAlpha:p.temporalAlpha);
+        const float alpha=reuse?(still?min(1.0f,float(spp)/float(length)):max(baseAlpha,1.0f/float(length))):1;
         const float ma=reuse?max(p.momentsAlpha,1.0f/float(frames)):1,L=diLuminance(current);float3 color=reuse?mix(oldColor,current,alpha):current;if(denoiseSignal(p)==DENOISE_SIGNAL_AO)color=saturate(color);
         h.length=length;h.firstMoment=reuse?mix(old.firstMoment,L,ma):L;h.secondMoment=reuse?mix(old.secondMoment,L*L,ma):L*L;
-        h.variance=max(p.varianceFloor,h.secondMoment-h.firstMoment*h.firstMoment);if(frames<p.minHistoryForVariance)h.variance=max(h.variance,localVariance/float(frames));h.depth=s.depth;h.roughness=s.roughness;
+        h.variance=max(p.varianceFloor,h.secondMoment-h.firstMoment*h.firstMoment);if(frames<p.minHistoryForVariance)h.variance=max(h.variance,localVariance/float(frames));h.depth=s.depth;h.roughness=DN_ROUGHNESS(s);
+#ifdef PHOSPHOR_DENOISE_LOBE
+        if(lobes)h.lobe=lobe.key;
+#endif
         h.slot=s.instanceSlot;h.instanceGeneration=s.instanceGeneration;h.materialRevision=s.materialRevision;
         h.hitDistance=spec.hitDistance;h.path=spec.path;h.secondarySlot=spec.secondarySlot;h.secondaryGeneration=spec.secondaryGeneration;
+#ifdef PHOSPHOR_DENOISE_LOBE
+        if(kDenoiseEndpoints&&lobes&&denoiseSampleHasEndpoint(spec)){h.endpointKey=denoiseEndpointHistoryKey(denoiseEndpointKeyDecode(spec.proposalSolidAngle));
+            for(uint i=0;i<3;++i)h.endpoint[i]=spec.direction[i];}
+#endif
         for(uint i=0;i<3;++i){h.color[i]=color[i];h.position[i]=s.position[i];h.normal[i]=normalize(normal)[i];}
         h.valid=all(isfinite(color))&&isfinite(h.variance);if(!h.valid)h.flags=1u;
     }
+#ifdef PHOSPHOR_DENOISE_LOBE
+    if(kDenoiseEndpoints&&denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR)nextEndpoint[tid]=denoisePackEndpoint(h);
+#endif
     next[tid]=denoisePackRecord(h);if(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR)nextSpecular[tid]=denoisePackSpecular(h);
     if(tid==0)nextHeader[0]=denoisePackHeader(h); // the same domain identity for every pixel of this dispatch
     output.write(float4(h.color[0],h.color[1],h.color[2],1),pixel);
     moments.write(float4(h.firstMoment,h.secondMoment,h.variance,float(h.length)),pixel);
 }
 
-inline float denoiseWeight(GPUDISurface a,GPUDISurface b,float la,float lb,float variance,constant GPUDenoiseParams& p){
-    if(!a.valid||!b.valid)return 0;const float3 na=denoiseGuide(a,denoiseSignal(p)),nb=denoiseGuide(b,denoiseSignal(p));if(dot(na,na)<=0||dot(nb,nb)<=0)return 0;
+#ifdef PHOSPHOR_DENOISE_LOBE
+#define DN_WEIGHT_ARGS ,bool lobes,DenoiseLobe lobeA,DenoiseLobe lobeB
+#define DN_AXIS(s,which) (lobes?(which).axis:denoiseGuide(s,denoiseSignal(p)))
+#define DN_ROUGH(s,which) (lobes?(which).roughness:(s).roughness)
+#else
+#define DN_WEIGHT_ARGS
+#define DN_AXIS(s,which) denoiseGuide(s,denoiseSignal(p))
+#define DN_ROUGH(s,which) (s).roughness
+#endif
+inline float DN_FN(denoiseWeight)(GPUDISurface a,GPUDISurface b,float la,float lb,float variance,constant GPUDenoiseParams& p DN_WEIGHT_ARGS){
+    if(!a.valid||!b.valid)return 0;const float3 na=DN_AXIS(a,lobeA),nb=DN_AXIS(b,lobeB);if(dot(na,na)<=0||dot(nb,nb)<=0)return 0;
     const float cosine=dot(normalize(na),normalize(nb));const float normal=pow(max(0.0f,cosine),p.normalPhi);
     const float depth=exp(-abs(a.depth-b.depth)/max(1e-6f,p.depthThreshold*max(a.depth,b.depth)*float(p.atrousStep)));
     const float color=exp(-abs(la-lb)/(p.luminancePhi*sqrt(max(variance,p.varianceFloor))+1e-6f));
-    const float rough=denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?exp(-abs(a.roughness-b.roughness)/max(p.roughnessThreshold,1e-6f))*denoiseLobe(cosine,a.roughness):1;
+    const float rough=denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?exp(-abs(DN_ROUGH(a,lobeA)-DN_ROUGH(b,lobeB))/max(p.roughnessThreshold,1e-6f))*denoiseLobe(cosine,DN_ROUGH(a,lobeA)):1;
     return normal*depth*color*rough;
 }
 // params0/surfaces1/optionalSpecMetadata3. Textures input0, moments1, output2.
 // One pass per stride1/2/4 (up to16), all separate resources/graph versions.
 // Output variance is not fed into temporal raw/reference moments.
-kernel void denoise_atrous(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
-    const device GPUSpecularSample* specular [[buffer(3)]],texture2d<float,access::read> input [[texture(0)]],
+kernel void DN_KERNEL(denoise_atrous)(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
+    const device GPUSpecularSample* specular [[buffer(3)]]DN_GUIDE_PARAM(4),texture2d<float,access::read> input [[texture(0)]],
     texture2d<float,access::read> moments [[texture(1)]],texture2d<float,access::write> output [[texture(2)]],uint tid [[thread_position_in_grid]]){
     if(tid>=p.width*p.height)return;const uint2 pixel(tid%p.width,tid/p.width);const GPUDISurface center=surfaces[tid];const float3 value=input.read(pixel).rgb;
     if(!center.valid){output.write(float4(value,1),pixel);return;}
+#ifdef PHOSPHOR_DENOISE_LOBE
+    const bool lobes=denoiseLobesActive(p);DenoiseLobe centerLobe{0u,center.roughness,float3(0)};
+    if(lobes)centerLobe=denoiseLobeLoad_lobe(p,guides,center,specular[tid].flags,tid,pixel);
+#endif
     const float variance=moments.read(pixel).z,lum=diLuminance(value);float3 sum=0;float weights=0;const float taps[5]={1,4,6,4,1};
     for(int y=-2;y<=2;++y)for(int x=-2;x<=2;++x){const int2 q=int2(pixel)+int2(x,y)*int(p.atrousStep);if(any(q<0)||any(q>=int2(p.width,p.height)))continue;
         const uint index=uint(q.y)*p.width+uint(q.x);const float3 color=input.read(uint2(q)).rgb;if(!all(isfinite(color)))continue;
         if(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR){const GPUSpecularSample a=specular[tid],b=specular[index];
             if((a.flags|b.flags)&SPECULAR_SAMPLE_ERROR||((a.flags^b.flags)&SPECULAR_SAMPLE_STOCHASTIC))continue;
             if((!(a.flags&SPECULAR_SAMPLE_STOCHASTIC)||(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS))&&(a.path!=b.path||a.secondarySlot!=b.secondarySlot||a.secondaryGeneration!=b.secondaryGeneration))continue;}
+#ifdef PHOSPHOR_DENOISE_LOBE
+        DenoiseLobe neighborLobe{0u,surfaces[index].roughness,float3(0)};
+        if(lobes){neighborLobe=denoiseLobeLoad_lobe(p,guides,surfaces[index],specular[index].flags,index,uint2(q));if(neighborLobe.key!=centerLobe.key)continue;} // lobe contract
+        const float weight=taps[x+2]*taps[y+2]*DN_FN(denoiseWeight)(center,surfaces[index],lum,diLuminance(color),variance,p,lobes,centerLobe,neighborLobe);sum+=color*weight;weights+=weight;
+#else
         const float weight=taps[x+2]*taps[y+2]*denoiseWeight(center,surfaces[index],lum,diLuminance(color),variance,p);sum+=color*weight;weights+=weight;
+#endif
     }
     float3 result=weights>0?sum/weights:value;if(denoiseSignal(p)==DENOISE_SIGNAL_AO)result=saturate(result);output.write(float4(result,1),pixel);
 }
+
+#ifndef PHOSPHOR_DENOISE_LOBE
+// F13.4 experiment (--lighting-denoise-energy on): ENERGY-PRESERVING a-trous, two dispatches per iteration.
+// The weight is SYMMETRIC, w(p,q)==w(q,p) bit for bit: tap product, normal term, depth term (max of both depths), luminance term with the
+// MEAN of the two variances, specular roughness term with the MINIMUM roughness for the lobe bound, and symmetric pair rejection rules.
+// Pass 1 (denoise_atrous_norm): W(p) = sum_q w(p,q) over the 5x5 stride footprint (the sender's total).
+// Pass 2 (denoise_atrous_energy): out(q) = sum_p w(q,p) x(p) / W(p).  Sum_q out(q) = sum_p x(p) W(p)/W(p) = sum_p x(p): the filter conserves
+// the signal energy exactly (up to float summation), unlike the receiver-normalised gather whose mass per source differs from 1.
+inline float denoiseWeightSym(GPUDISurface a,GPUDISurface b,float la,float lb,float va,float vb,constant GPUDenoiseParams& p){
+    if(!a.valid||!b.valid)return 0;const float3 na=denoiseGuide(a,denoiseSignal(p)),nb=denoiseGuide(b,denoiseSignal(p));if(dot(na,na)<=0||dot(nb,nb)<=0)return 0;
+    const float cosine=dot(normalize(na),normalize(nb));const float normal=pow(max(0.0f,cosine),p.normalPhi);
+    const float depth=exp(-abs(a.depth-b.depth)/max(1e-6f,p.depthThreshold*max(a.depth,b.depth)*float(p.atrousStep)));
+    const float color=exp(-abs(la-lb)/(p.luminancePhi*sqrt(max(0.5f*(va+vb),p.varianceFloor))+1e-6f));
+    const float rough=denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?exp(-abs(a.roughness-b.roughness)/max(p.roughnessThreshold,1e-6f))*denoiseLobe(cosine,min(a.roughness,b.roughness)):1;
+    return normal*depth*color*rough;
+}
+inline bool denoiseEnergyPair(constant GPUDenoiseParams& p,const device GPUSpecularSample* specular,uint i,uint j){
+    if(denoiseSignal(p)!=DENOISE_SIGNAL_SPECULAR)return true;const GPUSpecularSample a=specular[i],b=specular[j];
+    if((a.flags|b.flags)&SPECULAR_SAMPLE_ERROR||((a.flags^b.flags)&SPECULAR_SAMPLE_STOCHASTIC))return false;
+    if((!(a.flags&SPECULAR_SAMPLE_STOCHASTIC)||(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS))&&(a.path!=b.path||a.secondarySlot!=b.secondarySlot||a.secondaryGeneration!=b.secondaryGeneration))return false;
+    return true;
+}
+// params0/surfaces1/optionalSpecMetadata3. Textures input0, moments1, W output2.
+kernel void denoise_atrous_norm(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
+    const device GPUSpecularSample* specular [[buffer(3)]],texture2d<float,access::read> input [[texture(0)]],
+    texture2d<float,access::read> moments [[texture(1)]],texture2d<float,access::write> weightSum [[texture(2)]],uint tid [[thread_position_in_grid]]){
+    if(tid>=p.width*p.height)return;const uint2 pixel(tid%p.width,tid/p.width);const GPUDISurface center=surfaces[tid];const float3 value=input.read(pixel).rgb;
+    float total=0;const float taps[5]={1,4,6,4,1};
+    if(center.valid&&all(isfinite(value))){const float variance=moments.read(pixel).z,lum=diLuminance(value);
+        for(int y=-2;y<=2;++y)for(int x=-2;x<=2;++x){const int2 q=int2(pixel)+int2(x,y)*int(p.atrousStep);if(any(q<0)||any(q>=int2(p.width,p.height)))continue;
+            const uint index=uint(q.y)*p.width+uint(q.x);const float3 color=input.read(uint2(q)).rgb;if(!all(isfinite(color))||!denoiseEnergyPair(p,specular,tid,index))continue;
+            total+=taps[x+2]*taps[y+2]*denoiseWeightSym(center,surfaces[index],lum,diLuminance(color),variance,moments.read(uint2(q)).z,p);}}
+    weightSum.write(float4(total,0,0,1),pixel);
+}
+// params0/surfaces1/optionalSpecMetadata3. Textures input0, moments1, output2, W3.
+kernel void denoise_atrous_energy(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
+    const device GPUSpecularSample* specular [[buffer(3)]],texture2d<float,access::read> input [[texture(0)]],
+    texture2d<float,access::read> moments [[texture(1)]],texture2d<float,access::write> output [[texture(2)]],
+    texture2d<float,access::read> weightSum [[texture(3)]],uint tid [[thread_position_in_grid]]){
+    if(tid>=p.width*p.height)return;const uint2 pixel(tid%p.width,tid/p.width);const GPUDISurface center=surfaces[tid];const float3 value=input.read(pixel).rgb;
+    if(!center.valid||!all(isfinite(value))){output.write(float4(value,1),pixel);return;}
+    const float variance=moments.read(pixel).z,lum=diLuminance(value);float3 sum=0;const float taps[5]={1,4,6,4,1};
+    for(int y=-2;y<=2;++y)for(int x=-2;x<=2;++x){const int2 q=int2(pixel)+int2(x,y)*int(p.atrousStep);if(any(q<0)||any(q>=int2(p.width,p.height)))continue;
+        const uint index=uint(q.y)*p.width+uint(q.x);const float3 color=input.read(uint2(q)).rgb;if(!all(isfinite(color))||!denoiseEnergyPair(p,specular,tid,index))continue;
+        const float sender=weightSum.read(uint2(q)).x;if(!(sender>0))continue;
+        sum+=color*(taps[x+2]*taps[y+2]*denoiseWeightSym(center,surfaces[index],lum,diLuminance(color),variance,moments.read(uint2(q)).z,p)/sender);}
+    if(denoiseSignal(p)==DENOISE_SIGNAL_AO)sum=saturate(sum);output.write(float4(sum,1),pixel); // AO is not routed here by the host (see denoise_passes.cpp); the clamp is kept for the contract
+}
+#endif
 
 constant constexpr uint DENOISE_TILE_VALID=1u<<30;
 static_assert((DENOISE_TILE_VALID&(SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_PREFILTERED|SPECULAR_SAMPLE_ERROR|SPECULAR_SAMPLE_STOCHASTIC|SPECULAR_SAMPLE_MIXED))==0,
@@ -140,31 +332,52 @@ static_assert((DENOISE_TILE_VALID&(SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_PREFILT
 // identical to denoise_atrous. Specializing the stride bounds the shared tile
 // (largest: 24x16x40 = 15360 bytes), without per-pixel guide copies.
 // Larger strides retain the measured-faster scalar reference kernel.
+// One halo pixel of a shared tile: guide (axis, depth) and metadata (roughness bits, tile validity | specular flags).  The lobe kernels
+// take axis and roughness of the SAMPLED lobe and put the comparison key into the flags, so that the stencil loops compare plain bits.
+#ifdef PHOSPHOR_DENOISE_LOBE
+#define DN_TILE_GUIDES_PARAM ,const device GPULobeGuide* guides
+#define DN_TILE_GUIDES_ARG ,guides
+#else
+#define DN_TILE_GUIDES_PARAM
+#define DN_TILE_GUIDES_ARG
+#endif
+inline void DN_FN(denoiseTilePixel)(constant GPUDenoiseParams& p,const device GPUDISurface* surfaces,const device GPUSpecularSample* specular DN_TILE_GUIDES_PARAM,
+    uint2 q,thread float4& guide,thread uint2& meta){
+    const uint index=q.y*p.width+q.x;const GPUDISurface surface=surfaces[index];
+#ifdef PHOSPHOR_DENOISE_LOBE
+    if(denoiseLobesActive(p)){
+        const uint flags=specular[index].flags;const DenoiseLobe l=surface.valid?denoiseLobeLoad_lobe(p,guides,surface,flags,index,q):DenoiseLobe{0u,surface.roughness,float3(0)};
+        if(surface.valid&&dot(l.axis,l.axis)>0){
+            guide=float4(normalize(l.axis),surface.depth);meta.x=as_type<uint>(l.roughness);
+            meta.y=DENOISE_TILE_VALID|((flags&~SPECULAR_SAMPLE_LOBE_KEY_MASK)|(l.key<<SPECULAR_SAMPLE_LOBE_SHIFT));
+        }
+        return;
+    }
+#endif
+    const float3 n=denoiseGuide(surface,denoiseSignal(p));
+    if(surface.valid&&dot(n,n)>0){guide=float4(normalize(n),surface.depth);meta.x=as_type<uint>(surface.roughness);
+        meta.y=DENOISE_TILE_VALID|(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?specular[index].flags:0u);}
+}
 template<uint Step>
-inline void denoiseAtrousTile(constant GPUDenoiseParams& p,const device GPUDISurface* surfaces,
-    const device GPUSpecularSample* specular,texture2d<float,access::read> input,
+inline void DN_FN(denoiseAtrousTile)(constant GPUDenoiseParams& p,const device GPUDISurface* surfaces,
+    const device GPUSpecularSample* specular DN_TILE_GUIDES_PARAM,texture2d<float,access::read> input,
     texture2d<float,access::read> moments,texture2d<float,access::write> output,
     uint2 group,uint2 local,uint lane,
-    threadgroup float4* colors,threadgroup float4* guides,threadgroup uint2* metadata) {
+    threadgroup float4* colors,threadgroup float4* tileGuides,threadgroup uint2* metadata) {
     constexpr uint W=16+4*Step,H=8+4*Step,N=W*H;
     const int2 origin=int2(group*uint2(16,8))-int2(2*Step);
     for(uint i=lane;i<N;i+=128) {
         const int2 q=origin+int2(i%W,i/W);float4 color=0,guide=0;uint2 meta=0;
         if(all(q>=0)&&all(q<int2(p.width,p.height))) {
-            const uint index=uint(q.y)*p.width+uint(q.x);const GPUDISurface surface=surfaces[index];
-            color=input.read(uint2(q));const float3 n=denoiseGuide(surface,denoiseSignal(p));
-            if(surface.valid&&dot(n,n)>0) {
-                guide=float4(normalize(n),surface.depth);meta.x=as_type<uint>(surface.roughness);
-                meta.y=DENOISE_TILE_VALID|(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?specular[index].flags:0u);
-            }
+            color=input.read(uint2(q));DN_FN(denoiseTilePixel)(p,surfaces,specular DN_TILE_GUIDES_ARG,uint2(q),guide,meta);
         }
-        colors[i]=color;guides[i]=guide;metadata[i]=meta;
+        colors[i]=color;tileGuides[i]=guide;metadata[i]=meta;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
     const uint2 pixel=group*uint2(16,8)+local;
     if(any(pixel>=uint2(p.width,p.height)))return;
     const uint centerIndex=(local.y+2*Step)*W+local.x+2*Step,tid=pixel.y*p.width+pixel.x;
-    const float3 value=colors[centerIndex].rgb;const float4 center=guides[centerIndex];const uint2 centerMeta=metadata[centerIndex];
+    const float3 value=colors[centerIndex].rgb;const float4 center=tileGuides[centerIndex];const uint2 centerMeta=metadata[centerIndex];
     if(!(centerMeta.y&DENOISE_TILE_VALID)){output.write(float4(value,1),pixel);return;}
     const float variance=moments.read(pixel).z,lum=diLuminance(value);
     const float taps[5]={1,4,6,4,1};float3 sum=0;float weights=0;
@@ -172,10 +385,13 @@ inline void denoiseAtrousTile(constant GPUDenoiseParams& p,const device GPUDISur
         const int2 q=int2(pixel)+int2(x,y)*int(Step);
         if(any(q<0)||any(q>=int2(p.width,p.height)))continue;
         const uint i=uint(int(centerIndex)+y*int(Step*W)+x*int(Step));
-        const float3 color=colors[i].rgb;const float4 neighbor=guides[i];const uint2 meta=metadata[i];
+        const float3 color=colors[i].rgb;const float4 neighbor=tileGuides[i];const uint2 meta=metadata[i];
         if(!all(isfinite(color))||!(meta.y&DENOISE_TILE_VALID))continue;
         if(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR) {
             if((centerMeta.y|meta.y)&SPECULAR_SAMPLE_ERROR||((centerMeta.y^meta.y)&SPECULAR_SAMPLE_STOCHASTIC))continue;
+#ifdef PHOSPHOR_DENOISE_LOBE
+            if(((centerMeta.y^meta.y)&SPECULAR_SAMPLE_LOBE_KEY_MASK)!=0u)continue; // lobe contract: never filter across sampled lobes
+#endif
             if(!(centerMeta.y&SPECULAR_SAMPLE_STOCHASTIC)||(p.flags&DENOISE_DIAGNOSTIC_ENDPOINTS)) {
                 const GPUSpecularSample a=specular[tid],b=specular[uint(q.y)*p.width+uint(q.x)];
                 if(a.path!=b.path||a.secondarySlot!=b.secondarySlot||a.secondaryGeneration!=b.secondaryGeneration)continue;
@@ -192,13 +408,13 @@ inline void denoiseAtrousTile(constant GPUDenoiseParams& p,const device GPUDISur
     output.write(float4(result,1),pixel);
 }
 #define DENOISE_TILE_KERNEL(Name,Step) \
-kernel void Name(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]], \
-    const device GPUSpecularSample* specular [[buffer(3)]],texture2d<float,access::read> input [[texture(0)]], \
+kernel void DN_KERNEL(Name)(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]], \
+    const device GPUSpecularSample* specular [[buffer(3)]]DN_GUIDE_PARAM(4),texture2d<float,access::read> input [[texture(0)]], \
     texture2d<float,access::read> moments [[texture(1)]],texture2d<float,access::write> output [[texture(2)]], \
     uint2 group [[threadgroup_position_in_grid]],uint2 local [[thread_position_in_threadgroup]],uint lane [[thread_index_in_threadgroup]]) { \
-    threadgroup float4 colors[(16+4*Step)*(8+4*Step)],guides[(16+4*Step)*(8+4*Step)]; \
+    threadgroup float4 colors[(16+4*Step)*(8+4*Step)],tileGuides[(16+4*Step)*(8+4*Step)]; \
     threadgroup uint2 metadata[(16+4*Step)*(8+4*Step)]; \
-    denoiseAtrousTile<Step>(p,surfaces,specular,input,moments,output,group,local,lane,colors,guides,metadata); \
+    DN_FN(denoiseAtrousTile)<Step>(p,surfaces,specular DN_TILE_GUIDES_ARG,input,moments,output,group,local,lane,colors,tileGuides,metadata); \
 }
 DENOISE_TILE_KERNEL(denoise_atrous_tile1,1)
 DENOISE_TILE_KERNEL(denoise_atrous_tile2,2)
@@ -206,8 +422,8 @@ DENOISE_TILE_KERNEL(denoise_atrous_tile2,2)
 
 // Stride4 needs a large halo. Cache only geometry (13.5KiB), retaining the
 // original color reads/tap order instead of exceeding validation shared memory.
-kernel void denoise_atrous_guide4(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
-    const device GPUSpecularSample* specular [[buffer(3)]],texture2d<float,access::read> input [[texture(0)]],
+kernel void DN_KERNEL(denoise_atrous_guide4)(constant GPUDenoiseParams& p [[buffer(0)]],const device GPUDISurface* surfaces [[buffer(1)]],
+    const device GPUSpecularSample* specular [[buffer(3)]]DN_GUIDE_PARAM(4),texture2d<float,access::read> input [[texture(0)]],
     texture2d<float,access::read> moments [[texture(1)]],texture2d<float,access::write> output [[texture(2)]],
     uint2 group [[threadgroup_position_in_grid]],uint2 local [[thread_position_in_threadgroup]],uint lane [[thread_index_in_threadgroup]]) {
     constexpr uint W=24,N=24*24;
@@ -216,9 +432,7 @@ kernel void denoise_atrous_guide4(constant GPUDenoiseParams& p [[buffer(0)]],con
     for(uint i=lane;i<N;i+=64){
         const int2 q=origin+int2(i%W,i/W);float4 guide=0;uint2 meta=0;
         if(all(q>=0)&&all(q<int2(p.width,p.height))){
-            const uint index=uint(q.y)*p.width+uint(q.x);const GPUDISurface s=surfaces[index];const float3 n=denoiseGuide(s,denoiseSignal(p));
-            if(s.valid&&dot(n,n)>0){guide=float4(normalize(n),s.depth);meta.x=as_type<uint>(s.roughness);
-                meta.y=DENOISE_TILE_VALID|(denoiseSignal(p)==DENOISE_SIGNAL_SPECULAR?specular[index].flags:0u);}
+            DN_FN(denoiseTilePixel)(p,surfaces,specular DN_TILE_GUIDES_ARG,uint2(q),guide,meta);
         }
         geometry[i]=guide;metadata[i]=meta;
     }
@@ -248,6 +462,7 @@ kernel void denoise_atrous_guide4(constant GPUDenoiseParams& p [[buffer(0)]],con
     float3 result=weights>0?sum/weights:value;if(denoiseSignal(p)==DENOISE_SIGNAL_AO)result=saturate(result);output.write(float4(result,1),pixel);
 }
 
+#ifndef PHOSPHOR_DENOISE_LOBE // the diffuse stride, the history corruption control and the state checker have no lobe variant
 // DI/GI/AO share the same geometric receiver. The final stride computes its
 // geometry weights once; each signal retains its own variance/color weights.
 constant bool kDenoiseDiffuseDI=kDenoiseSignal!=DENOISE_SIGNAL_GI;
@@ -304,3 +519,4 @@ kernel void denoise_check(constant GPUDenoiseParams& p [[buffer(0)]],const devic
     const uint longest=simd_max(h.valid?h.length:0u);if(lane==0&&longest)atomic_fetch_max_explicit(counts+5,longest,memory_order_relaxed);
     if(tid==0){atomic_store_explicit(counts+6,p.viewID,memory_order_relaxed);atomic_store_explicit(counts+7,p.frameIndex,memory_order_relaxed);}
 }
+#endif // !PHOSPHOR_DENOISE_LOBE

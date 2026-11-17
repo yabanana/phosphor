@@ -33,10 +33,11 @@ struct Fixture {
     // Simulated GPU state.
     std::vector<GPUInstance> instances;
     std::vector<GPUMaterial> materials;
+    std::vector<GPUMaterialExtRecord> extensions;
     std::vector<u32> prefix, visible, drawArgs;
     GPUSceneCounters counters{};
 
-    Fixture() {
+    explicit Fixture(bool extended = false) {
         const MeshData cube = ProceduralMeshes::generateCube(0.5f);
         const MeshHandle mesh = scene.uploadMesh(cube.positions, cube.normals, cube.tangents, cube.uvs, cube.indices);
         scene.addMaterial(GPUMaterial{});
@@ -61,7 +62,16 @@ struct Fixture {
                 parent = e;
             }
             if (i == 4) ecs.addComponent(e, HierarchyComponent{parent}); // child of the moving root
-            if (i == 9) ecs.addComponent(e, MaterialComponent{});
+            if (i == 9) {
+                MaterialComponent mc;
+                if (extended) {
+                    auto d = std::make_shared<MaterialDescription>();
+                    d->specular.emplace();
+                    d->specular->ior = 1.33f;
+                    mc.extension = d;
+                }
+                ecs.addComponent(e, std::move(mc));
+            }
         }
         store.sync(ecs, scene);
         ecs.endFrame();
@@ -80,6 +90,7 @@ struct Fixture {
         referenceWorlds(store, sinCos.data(), worlds);
         for (size_t s = 0; s < instances.size(); ++s) std::memcpy(instances[s].modelMatrix, &worlds[s * 16], 64);
         materials.assign(store.materials().begin(), store.materials().end());
+        extensions.assign(store.extensions().begin(), store.extensions().end());
         std::vector<u8> result;
         cullReference(instances, scene.meshInfos(), cull, result);
         compactReference(result, visible, prefix);
@@ -95,6 +106,7 @@ struct Fixture {
         SceneReadback r;
         r.instances = instances;
         r.materials = materials;
+        r.extensions = extensions;
         r.prefix    = prefix;
         r.visible   = visible;
         r.drawArgs  = drawArgs;
@@ -173,5 +185,34 @@ TEST_CASE("scene check: negative controls, every corruption is reported") {
         Fixture f; // queue overflow
         f.counters.queueOverflow = 1;
         CHECK_FALSE(f.check().pass);
+    }
+}
+
+TEST_CASE("scene check: extension records are compared, a record that did not land fails") {
+    {
+        Fixture f(true);
+        REQUIRE_FALSE(f.extensions.empty());
+        const SceneCheckResult r = f.check();
+        CHECK_MESSAGE(r.pass, formatSceneCheck(r));
+        CHECK(r.extensionErrors == 0);
+    }
+    {
+        Fixture f(true); // negative control: one word of one record is stale
+        f.extensions[0].w[19] ^= 0x5A5A5A5Au;
+        const SceneCheckResult r = f.check();
+        CHECK_FALSE(r.pass);
+        CHECK(r.extensionErrors == 1);
+    }
+    {
+        Fixture f(true); // the read-back is too short
+        f.extensions.pop_back();
+        const SceneCheckResult r = f.check();
+        CHECK_FALSE(r.pass);
+        CHECK(r.extensionErrors >= 1);
+    }
+    {
+        Fixture f(false); // no extended material: nothing to compare, still passes
+        CHECK(f.extensions.empty());
+        CHECK(f.check().pass);
     }
 }

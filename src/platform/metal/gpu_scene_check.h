@@ -38,6 +38,7 @@ private:
     MetalContext& context_;
     MTL::Buffer*  instances_ = nullptr;
     MTL::Buffer*  materials_ = nullptr;
+    MTL::Buffer*  extensions_ = nullptr;
     MTL::Buffer*  prefix_    = nullptr;
     MTL::Buffer*  visible_   = nullptr;
 };

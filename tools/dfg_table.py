@@ -69,15 +69,26 @@ PHOSPHOR_GPU_CONSTANT u32 DfgTableSize = {args.size};
 PHOSPHOR_GPU_CONSTANT float DfgTable[{args.size * args.size * 2}] = {{
 {body}
 }};
-// Bilinear lookup; component 0 = A (scale of f0), 1 = B (bias).
-inline float dfgTableLookup(float nv, float roughness, u32 component) {{
+#if defined(__METAL_VERSION__)
+#define PHOSPHOR_DFG_TABLE const constant float*
+#else
+#define PHOSPHOR_DFG_TABLE const float*
+#endif
+// Bilinear lookup on any copy of the table: the program-scope array above or a
+// GPU buffer holding the same values (F15: fragment functions read the buffer
+// referenced by FrameConstants, because MTL_SHADER_VALIDATION corrupts their
+// reads of program-scope constant arrays). Component 0 = A (scale of f0), 1 = B.
+inline float dfgTableLookup(PHOSPHOR_DFG_TABLE table, float nv, float roughness, u32 component) {{
     const float n = float(DfgTableSize - 1);
     const float x = (nv > 0 ? (nv < 1 ? nv : 1.0f) : 0.0f) * n, y = (roughness > 0 ? (roughness < 1 ? roughness : 1.0f) : 0.0f) * n;
     const u32 x0 = u32(x) < DfgTableSize - 1 ? u32(x) : DfgTableSize - 2, y0 = u32(y) < DfgTableSize - 1 ? u32(y) : DfgTableSize - 2;
     const float fx = x - float(x0), fy = y - float(y0);
-    const float v00 = DfgTable[(y0 * DfgTableSize + x0) * 2 + component], v10 = DfgTable[(y0 * DfgTableSize + x0 + 1) * 2 + component];
-    const float v01 = DfgTable[((y0 + 1) * DfgTableSize + x0) * 2 + component], v11 = DfgTable[((y0 + 1) * DfgTableSize + x0 + 1) * 2 + component];
+    const float v00 = table[(y0 * DfgTableSize + x0) * 2 + component], v10 = table[(y0 * DfgTableSize + x0 + 1) * 2 + component];
+    const float v01 = table[((y0 + 1) * DfgTableSize + x0) * 2 + component], v11 = table[((y0 + 1) * DfgTableSize + x0 + 1) * 2 + component];
     return (v00 * (1 - fx) + v10 * fx) * (1 - fy) + (v01 * (1 - fx) + v11 * fx) * fy;
+}}
+inline float dfgTableLookup(float nv, float roughness, u32 component) {{
+    return dfgTableLookup(DfgTable, nv, roughness, component);
 }}
 }} // namespace phosphor
 ''')

@@ -1,0 +1,508 @@
+#include "testbench/transmission_validation.h"
+#include "renderer/gpu_scene.h"
+#include "renderer/material_description.h"
+#include "scene/components.h"
+#include "scene/ecs.h"
+#include "scene/procedural.h"
+#include "scene/texture_manager.h"
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <memory>
+#include <stdexcept>
+#include <utility>
+#include <glm/gtc/quaternion.hpp>
+
+namespace phosphor {
+namespace {
+// The names are mirrored by tools/f15_check.py SCENARIOS (tests/test_transmission_validation.cpp compares both).
+// transmission-rtoff (the last) is the declared --rt off model (see below).
+constexpr std::array<std::string_view, 11> kAll{
+    "transmission-roughness-ior", "transmission-attenuation", "transmission-factor-tint", "transmission-thin-volume",
+    "transmission-single-sided", "transmission-glass-behind-glass", "transmission-emissive-panel", "transmission-rtoff",
+    "transmission-rtoff-combinations", "transmission-tinted-bodies", "transmission-thin-rough"};
+constexpr float pi = 3.14159265358979323846f;
+
+using Glass = GlassObject;
+
+GlassObject sphere(glm::vec3 centre, float roughness, float ior, float thickness = 0.8f) {
+    GlassObject g;
+    g.shape = Glass::Shape::Sphere;
+    g.center = centre;
+    g.roughness = roughness;
+    g.ior = ior;
+    g.thickness = thickness;
+    return g;
+}
+
+std::vector<TransmissionScenarioSpec> specs() {
+    static const glm::vec3 tint(0.9f, 0.55f, 0.25f);
+    std::vector<TransmissionScenarioSpec> all;
+
+    // 1. roughness {0, 0.1, 0.3, 0.6} (rows, bottom to top) x ior {1.33, 1.5, 2.0} (columns): volume spheres without
+    // absorption (attenuationDistance +inf), factor 1, white base: a lens image of the checkerboard whose sharpness
+    // follows the roughness and whose bend and Fresnel follow the ior.  Spacing 1.2 keeps the neighbours' reflections small.
+    {
+        TransmissionScenarioSpec s;
+        s.name = "transmission-roughness-ior";
+        const float roughness[4] = {0.0f, 0.1f, 0.3f, 0.6f}, ior[3] = {1.33f, 1.5f, 2.0f};
+        for (int r = 0; r < 4; ++r)
+            for (int c = 0; c < 3; ++c) s.glass.push_back(sphere({(float(c) - 1.0f) * 1.2f, 0.4f + 1.2f * float(r), 0.0f}, roughness[r], ior[c]));
+        s.cameraTarget = {0.0f, 2.2f, 0.0f};
+        all.push_back(std::move(s));
+    }
+    // 2. AttenuationTest-like: attenuation colour (rows) x attenuation distance (columns) on clear ior 1.5 spheres of
+    // roughness 0.1; the path through the sphere centre is 0.8 m, so the transmittance there is colour^(0.8 / distance).
+    {
+        TransmissionScenarioSpec s;
+        s.name = "transmission-attenuation";
+        // Moderate absorption: a strongly absorbing smooth sphere (distance 0.3, blue 0.15) makes the glTF Schlick Fresnel differ
+        // from Mitsuba's exact one by 8 % mean / 19 % p95 on the dark pixels (measured, tools/f15_transmission_reference.py
+        // model-differences), so extreme attenuation would gate the Fresnel model, not the volume; here at most 1.2 % / 3.1 %.
+        const glm::vec3 colour[2] = {{0.5f, 0.75f, 1.0f}, {1.0f, 0.65f, 0.4f}};
+        const float distance[3] = {0.6f, 1.2f, 3.0f};
+        for (int r = 0; r < 2; ++r)
+            for (int c = 0; c < 3; ++c) {
+                GlassObject g = sphere({(float(c) - 1.0f) * 1.2f, 0.4f + 1.2f * float(r), 0.0f}, 0.1f, 1.5f);
+                g.attenuationColor = colour[r];
+                g.attenuationDistance = distance[c];
+                s.glass.push_back(g);
+            }
+        s.cameraTarget = {0.0f, 1.0f, 0.0f};
+        all.push_back(std::move(s));
+    }
+    // 3. Transmission factor x tint, thin pane (column 0, ONE crossing: the tint is unambiguous) and volume slab
+    // (column 1, white base, attenuating).  Rows: (factor 1, white), (1, tint), (0.5, white), (0.5, tint); the slab rows
+    // alternate the attenuation distance {0.2, 0.6} and ignore the tint (white base).  Slabs are cubes scaled to
+    // 0.9 x 0.9 x 0.3 and yawed 20 degrees (parallel faces: a shifted, not inverted image).
+    {
+        TransmissionScenarioSpec s;
+        s.name = "transmission-factor-tint";
+        const float factor[4] = {1.0f, 1.0f, 0.5f, 0.5f};
+        const bool tinted[4] = {false, true, false, true};
+        const float distance[4] = {0.2f, 0.6f, 0.2f, 0.6f};
+        for (int r = 0; r < 4; ++r) {
+            GlassObject pane;
+            pane.shape = Glass::Shape::Pane;
+            pane.center = {-1.0f, 0.5f + 1.2f * float(r), 0.0f};
+            pane.scale = {0.9f, 1.0f, 0.9f};
+            pane.transmission = factor[r];
+            pane.baseColor = tinted[r] ? tint : glm::vec3(1.0f);
+            pane.doubleSided = true; // a one-quad thin-walled surface is seen from both sides
+            s.glass.push_back(pane);
+            GlassObject slab;
+            slab.shape = Glass::Shape::Cube;
+            slab.center = {1.0f, 0.5f + 1.2f * float(r), 0.0f};
+            slab.scale = {0.9f, 0.9f, 0.3f};
+            slab.yawDegrees = 20.0f;
+            slab.transmission = factor[r];
+            slab.thickness = 1.0f; // mesh-local: 0.3 m in the world after the scale
+            slab.attenuationColor = {0.6f, 0.85f, 1.0f};
+            slab.attenuationDistance = distance[r];
+            s.glass.push_back(slab);
+        }
+        s.cameraTarget = {0.0f, 2.0f, 0.0f};
+        all.push_back(std::move(s));
+    }
+    // 4. Thin-walled vs volume: a thin-walled sphere (no volume: no bend, two Fresnel surfaces), a clear volume sphere
+    // and an attenuating volume sphere, all smooth, ior 1.5.
+    {
+        TransmissionScenarioSpec s;
+        s.name = "transmission-thin-volume";
+        s.glass.push_back(sphere({-1.2f, 1.0f, 0.0f}, 0.0f, 1.5f, 0.0f)); // thickness 0: thin-walled
+        s.glass.push_back(sphere({0.0f, 1.0f, 0.0f}, 0.0f, 1.5f, 0.8f));
+        GlassObject absorbing = sphere({1.2f, 1.0f, 0.0f}, 0.0f, 1.5f, 0.8f);
+        absorbing.attenuationColor = {0.4f, 0.8f, 1.0f};
+        absorbing.attenuationDistance = 0.8f;
+        s.glass.push_back(absorbing);
+        s.cameraDistance = 4.5f;
+        all.push_back(std::move(s));
+    }
+    // 5. SINGLE-SIDED closed meshes (doubleSided = false, the default): a lens sphere, a yawed cube and an absorbing
+    // sphere.  The exit surface of each is a back face of its own mesh: today's back-face rejection never finds it.
+    {
+        TransmissionScenarioSpec s;
+        s.name = "transmission-single-sided";
+        s.glass.push_back(sphere({-1.3f, 1.0f, 0.0f}, 0.0f, 1.5f, 0.8f));
+        GlassObject cube;
+        cube.shape = Glass::Shape::Cube;
+        cube.center = {0.0f, 1.0f, 0.0f};
+        cube.scale = {0.8f, 0.8f, 0.8f};
+        cube.yawDegrees = 25.0f;
+        cube.pitchDegrees = 0.0f; // no top face: its mirror reflection of the checkerboard is not part of the opaque control's p95 (measured 17 %)
+        cube.thickness = 1.0f;
+        s.glass.push_back(cube);
+        GlassObject absorbing = sphere({1.3f, 1.0f, 0.0f}, 0.0f, 1.5f, 0.8f);
+        absorbing.attenuationColor = {0.5f, 0.8f, 1.0f};
+        absorbing.attenuationDistance = 0.6f;
+        s.glass.push_back(absorbing);
+        s.cameraDistance = 4.5f;
+        all.push_back(std::move(s));
+    }
+    // 6. Glass behind glass: a clear volume sphere in front of an attenuating one (they overlap on the screen: four
+    // interface crossings along the central rays), and a thin pane in front of an ior 2.0 sphere.
+    {
+        TransmissionScenarioSpec s;
+        s.name = "transmission-glass-behind-glass";
+        s.glass.push_back(sphere({-0.25f, 1.0f, 0.7f}, 0.0f, 1.5f, 0.8f));
+        GlassObject back = sphere({0.25f, 1.0f, -0.7f}, 0.0f, 1.5f, 0.8f);
+        back.attenuationColor = {0.5f, 0.8f, 1.0f};
+        back.attenuationDistance = 0.6f;
+        s.glass.push_back(back);
+        GlassObject pane;
+        pane.shape = Glass::Shape::Pane;
+        pane.center = {1.7f, 2.4f, 0.6f};
+        pane.scale = {0.9f, 1.0f, 0.9f};
+        pane.doubleSided = true;
+        s.glass.push_back(pane);
+        s.glass.push_back(sphere({1.7f, 2.4f, -0.4f}, 0.0f, 2.0f, 0.8f));
+        s.cameraTarget = {0.3f, 1.7f, 0.0f};
+        all.push_back(std::move(s));
+    }
+    // 7. Emissive panels behind thin panes: a clear pane and a tinted pane each in front of an emissive panel (radiance 3)
+    // that is smaller than the pane, so both the panel and the environment are seen through it.  Lit with ReSTIR DI
+    // (the panels are sampled area lights): the thin-walled DI BTDF covers only delta lights, the transport owns the
+    // panels, the radiance must be counted once.
+    {
+        TransmissionScenarioSpec s;
+        s.name = "transmission-emissive-panel";
+        s.backdrop = TransmissionScenarioSpec::Backdrop::Panels;
+        s.emission = 3.0f;
+        const glm::vec3 colours[2] = {glm::vec3(1.0f), tint};
+        for (int c = 0; c < 2; ++c) {
+            GlassObject pane;
+            pane.shape = Glass::Shape::Pane;
+            pane.center = {(c == 0 ? -1.0f : 1.0f), 1.2f, 0.2f};
+            pane.scale = {1.2f, 1.0f, 1.2f};
+            pane.baseColor = colours[c];
+            pane.doubleSided = true;
+            s.glass.push_back(pane);
+            s.panels.push_back({pane.center.x, 1.2f, 0.5f, 0.5f});
+        }
+        s.cameraTarget = {0.0f, 1.2f, 0.0f};
+        s.cameraDistance = 4.5f;
+        all.push_back(std::move(s));
+    }
+    // 8. The declared --rt off model: no backdrop (without RT the engine sees only the probes/environment along the
+    // refracted ray).  Rows factor {1, 0.5}; columns: thin white, thin tinted, attenuating volume, clear volume.  Roughness 0.1.
+    {
+        TransmissionScenarioSpec s;
+        s.name = "transmission-rtoff";
+        s.backdrop = TransmissionScenarioSpec::Backdrop::None;
+        const float factor[2] = {1.0f, 0.5f};
+        for (int r = 0; r < 2; ++r)
+            for (int c = 0; c < 4; ++c) {
+                GlassObject g = sphere({(float(c) - 1.5f) * 1.1f, 0.4f + 1.1f * float(r), 0.0f}, 0.1f, 1.5f, c >= 2 ? 0.8f : 0.0f);
+                g.transmission = factor[r];
+                if (c == 1) g.baseColor = tint;
+                if (c == 2) {
+                    g.attenuationColor = {0.4f, 0.8f, 1.0f};
+                    g.attenuationDistance = 0.8f;
+                }
+                s.glass.push_back(g);
+            }
+        s.cameraTarget = {0.0f, 0.95f, 0.0f};
+        all.push_back(std::move(s));
+    }
+    // 9. (ticket 19) The declared --rt off model of the critical transmission combinations, no backdrop like the scene above.  Rows are the
+    // transmission factor {1, 0.5, 0}; columns (tinted base, roughness 0.1, ior 1.5): (a) thin-walled with iridescence (factor 1, film
+    // ior 1.3, 400 nm), (b) an attenuating volume (thickness 0.8) with iridescence (800 nm), (c) thin-walled with diffuse transmission
+    // (weight 0.7, warm colour: at factor 1 the transmission REPLACES it), (d) iridescence,
+    // diffuse transmission (weight 0.7, teal) and an attenuating volume together.
+    {
+        TransmissionScenarioSpec s;
+        s.name = "transmission-rtoff-combinations";
+        s.backdrop = TransmissionScenarioSpec::Backdrop::None;
+        const float factor[2] = {1.0f, 0.5f};
+        for (int r = 0; r < 2; ++r)
+            for (int c = 0; c < 4; ++c) {
+                GlassObject g = sphere({(float(c) - 1.5f) * 1.1f, 0.4f + 1.1f * float(r), 0.0f}, 0.1f, 1.5f, (c == 1 || c == 3) ? 0.8f : 0.0f);
+                g.transmission = factor[r];
+                g.baseColor = tint;
+                if (c == 1 || c == 3) {
+                    g.attenuationColor = {0.4f, 0.8f, 1.0f};
+                    g.attenuationDistance = 0.8f;
+                }
+                if (c == 0 || c == 3) {
+                    g.iridescenceFactor = 1.0f;
+                    g.iridescenceThickness = c == 0 ? 400.0f : 600.0f;
+                }
+                if (c == 1) {
+                    g.iridescenceFactor = 1.0f;
+                    g.iridescenceThickness = 800.0f;
+                }
+                if (c == 2 || c == 3) {
+                    g.diffuseTransmission = 0.7f;
+                    g.diffuseTransmissionColor = c == 2 ? glm::vec3(1.0f, 0.55f, 0.25f) : glm::vec3(0.1f, 0.7f, 0.6f);
+                }
+                s.glass.push_back(g);
+            }
+        s.cameraTarget = {0.0f, 0.95f, 0.0f};
+        all.push_back(std::move(s));
+    }
+    // 10. (F15 closure, ticket 13) TINTED closed bodies: the glTF tint rule (baseColor once per closed solid at its entering interface,
+    // at every thin-walled surface) matters only for tinted solids.  Row 0 (bottom): smooth solid sphere, rough solid sphere (roughness 0.3),
+    // thin-walled sphere (two panes: baseColor^2 through it); row 1: single-sided cube yawed 25 degrees, slab with absorption (0.9 x 0.9 x 0.3
+    // m, yawed 20), absorbing smooth solid sphere.  Base colour = the shared tint (the thin-walled sphere a lighter one, see below), factor 1, ior 1.5.  A reading that tints the exit as well
+    // squares the tint of every solid (the control `tint-every-event`).
+    {
+        TransmissionScenarioSpec s;
+        s.name = "transmission-tinted-bodies";
+        const float x[3] = {-1.3f, 0.0f, 1.3f};
+        GlassObject smooth = sphere({x[0], 0.4f, 0.0f}, 0.0f, 1.5f, 0.8f);
+        smooth.baseColor = tint;
+        s.glass.push_back(smooth);
+        GlassObject rough = sphere({x[1], 0.4f, 0.0f}, 0.3f, 1.5f, 0.8f);
+        rough.baseColor = tint;
+        s.glass.push_back(rough);
+        // A thin-walled body tints twice (each wall is a surface): a lighter tint keeps the doubly tinted channel bright enough for a per-pixel
+        // relative gate (the first run with the shared tint matched the reference mean to 0.1 % but was noise-limited at 5.2 % in blue = 0.09).
+        GlassObject thinSphere = sphere({x[2], 0.4f, 0.0f}, 0.0f, 1.5f, 0.0f);
+        thinSphere.baseColor = glm::vec3(0.95f, 0.8f, 0.6f);
+        s.glass.push_back(thinSphere);
+        GlassObject cube;
+        cube.shape = Glass::Shape::Cube;
+        cube.center = {x[0], 1.6f, 0.0f};
+        cube.scale = {0.8f, 0.8f, 0.8f};
+        cube.yawDegrees = 25.0f;
+        cube.thickness = 1.0f;
+        cube.baseColor = tint;
+        s.glass.push_back(cube);
+        GlassObject slab;
+        slab.shape = Glass::Shape::Cube;
+        slab.center = {x[1], 1.6f, 0.0f};
+        slab.scale = {0.9f, 0.9f, 0.3f};
+        slab.yawDegrees = 20.0f;
+        slab.thickness = 1.0f;
+        slab.baseColor = tint;
+        slab.attenuationColor = {0.6f, 0.85f, 1.0f};
+        slab.attenuationDistance = 0.6f;
+        s.glass.push_back(slab);
+        GlassObject absorbing = sphere({x[2], 1.6f, 0.0f}, 0.0f, 1.5f, 0.8f);
+        absorbing.baseColor = tint;
+        absorbing.attenuationColor = {0.5f, 0.8f, 1.0f};
+        absorbing.attenuationDistance = 0.6f;
+        s.glass.push_back(absorbing);
+        s.cameraTarget = {0.0f, 1.0f, 0.0f};
+        s.cameraDistance = 4.5f;
+        all.push_back(std::move(s));
+    }
+    // 11. (F15 closure, ticket 13) ROUGH thin-walled glass (thicknessFactor 0, no refraction, GGX blur of the straight transmission): panes
+    // yawed 25 degrees, rows white / tinted with roughness {0.1, 0.3, 0.6}; third row: a thin-walled rough sphere (two walls), a tinted one
+    // and a pane with transmission factor 0.5 (roughness 0.3).  The ground truth is `gltf_thin_rough` of tools/f15_transmission_reference.py.
+    {
+        TransmissionScenarioSpec s;
+        s.name = "transmission-thin-rough";
+        const float roughness[3] = {0.1f, 0.3f, 0.6f};
+        auto pane = [&](glm::vec3 centre, float r, glm::vec3 colour, float factor) {
+            GlassObject g;
+            g.shape = Glass::Shape::Pane;
+            g.center = centre;
+            g.scale = {0.9f, 1.0f, 0.9f};
+            g.yawDegrees = 25.0f;
+            g.roughness = r;
+            g.baseColor = colour;
+            g.transmission = factor;
+            g.doubleSided = true;
+            return g;
+        };
+        for (int c = 0; c < 3; ++c) {
+            s.glass.push_back(pane({(float(c) - 1.0f) * 1.2f, 0.3f, 0.0f}, roughness[c], glm::vec3(1.0f), 1.0f));
+            s.glass.push_back(pane({(float(c) - 1.0f) * 1.2f, 1.5f, 0.0f}, roughness[c], tint, 1.0f));
+        }
+        GlassObject rough = sphere({-1.2f, 2.7f, 0.0f}, 0.3f, 1.5f, 0.0f);
+        s.glass.push_back(rough);
+        GlassObject roughTinted = sphere({0.0f, 2.7f, 0.0f}, 0.3f, 1.5f, 0.0f);
+        roughTinted.baseColor = glm::vec3(0.95f, 0.8f, 0.6f); // two walls: see transmission-tinted-bodies
+        s.glass.push_back(roughTinted);
+        s.glass.push_back(pane({1.2f, 2.7f, 0.0f}, 0.3f, glm::vec3(1.0f), 0.5f));
+        s.cameraTarget = {0.0f, 1.5f, 0.0f};
+        s.cameraDistance = 5.5f;
+        all.push_back(std::move(s));
+    }
+    return all;
+}
+const std::vector<TransmissionScenarioSpec>& table() {
+    static const std::vector<TransmissionScenarioSpec> all = specs();
+    return all;
+}
+
+glm::quat orientation(const GlassObject& g) {
+    glm::quat q = glm::angleAxis(glm::radians(g.yawDegrees), glm::vec3(0, 1, 0)) *
+                  glm::angleAxis(glm::radians(g.pitchDegrees), glm::vec3(1, 0, 0));
+    if (g.shape == GlassObject::Shape::Pane) q = q * glm::angleAxis(pi * 0.5f, glm::vec3(1, 0, 0)); // the plane faces +Y: turn it to +Z
+    return q;
+}
+} // namespace
+
+TransmissionValidation::TransmissionValidation(std::string scenario, bool motion) : scenario_(std::move(scenario)), motion_(motion) {
+    if (!validScenario(scenario_)) throw std::invalid_argument("Unknown transmission validation scenario: " + scenario_);
+    name_ = "Transmission validation: " + scenario_;
+}
+bool TransmissionValidation::validScenario(std::string_view scenario) {
+    return std::find(kAll.begin(), kAll.end(), scenario) != kAll.end();
+}
+std::span<const std::string_view> TransmissionValidation::scenarios() { return kAll; }
+const TransmissionScenarioSpec& TransmissionValidation::spec(std::string_view scenario) {
+    for (const auto& s : table())
+        if (s.name == scenario) return s;
+    throw std::invalid_argument("Unknown transmission validation scenario: " + std::string(scenario));
+}
+float TransmissionValidation::environmentRadiance(std::string_view scenario) {
+    return validScenario(scenario) ? spec(scenario).environment : 0.0f;
+}
+
+void TransmissionValidation::setup(ECS& ecs, GpuScene& scene, TextureManager& textures) {
+    if (!glass_.empty() || !emitters_.empty()) throw std::logic_error("Transmission fixture already set up");
+    textures.createDefaultTextures(); // idempotent; materials reference none of them
+    const auto& s = spec(scenario_);
+    auto upload = [&](const MeshData& m) { return scene.uploadMesh(m.positions, m.normals, m.tangents, m.uvs, m.indices); };
+    const u32 sphereMesh = upload(ProceduralMeshes::generateSphere(SphereRadius, SphereSlices, SphereStacks));
+    const u32 cubeMesh = upload(ProceduralMeshes::generateCube(CubeHalfExtent));
+    const u32 planeMesh = upload(ProceduralMeshes::generatePlane(1.0f, 1.0f, 1, 1)); // unit square, scaled per instance
+    u32 materialIndex = 0;
+    for (const GlassObject& g : s.glass) {
+        const EntityID e = ecs.createEntity();
+        glass_.push_back(e);
+        TransformComponent transform;
+        transform.position = g.center;
+        transform.rotation = orientation(g);
+        transform.scale = g.scale;
+        transform.updateMatrix();
+        ecs.addComponent(e, std::move(transform));
+        MeshInstanceComponent instance;
+        instance.meshHandle = g.shape == GlassObject::Shape::Sphere ? sphereMesh : g.shape == GlassObject::Shape::Cube ? cubeMesh : planeMesh;
+        instance.materialIndex = materialIndex++;
+        instance.setVisible(true);
+        instance.setCastsShadows(true);
+        instance.setStatic(true);
+        ecs.addComponent(e, std::move(instance));
+        MaterialComponent material;
+        auto description = std::make_shared<MaterialDescription>();
+        description->specular.emplace();
+        description->specular->ior = g.ior;
+        description->transmission.emplace();
+        description->transmission->factor = g.transmission;
+        description->volume.emplace();
+        description->volume->thickness = g.thickness;
+        description->volume->attenuationColor = {g.attenuationColor.x, g.attenuationColor.y, g.attenuationColor.z};
+        description->volume->attenuationDistance = g.attenuationDistance;
+        if (g.iridescenceFactor > 0.0f) {
+            description->iridescence.emplace();
+            description->iridescence->factor       = g.iridescenceFactor;
+            description->iridescence->ior          = g.iridescenceIor;
+            description->iridescence->thicknessMax = g.iridescenceThickness;
+        }
+        if (g.diffuseTransmission > 0.0f) {
+            description->subsurface.emplace();
+            description->subsurface->mode   = SubsurfaceMode::Thin;
+            description->subsurface->weight = g.diffuseTransmission;
+            description->subsurface->color  = {g.diffuseTransmissionColor.x, g.diffuseTransmissionColor.y, g.diffuseTransmissionColor.z};
+        }
+        material.extension = std::move(description);
+        material.baseColorFactor = glm::vec4(g.baseColor, 1.0f);
+        material.metallicFactor = 0.0f;
+        material.roughnessFactor = g.roughness;
+        material.doubleSided = g.doubleSided;
+        // INVALID texture indices intentionally use the exact shader fallbacks (factors stay untouched).
+        ecs.addComponent(e, std::move(material));
+    }
+    auto emitter = [&](glm::vec3 centre, float width, float height) {
+        const EntityID e = ecs.createEntity();
+        emitters_.push_back(e);
+        TransformComponent transform;
+        transform.position = centre;
+        transform.rotation = glm::angleAxis(pi * 0.5f, glm::vec3(1, 0, 0)); // faces +Z, towards the camera
+        transform.scale = {width, 1.0f, height};
+        transform.updateMatrix();
+        ecs.addComponent(e, std::move(transform));
+        MeshInstanceComponent instance;
+        instance.meshHandle = planeMesh;
+        instance.materialIndex = materialIndex++;
+        instance.setVisible(true);
+        instance.setCastsShadows(true); // the snapshot reader requires visible AND shadow roles to be equal (equivalent in Mitsuba)
+        instance.setStatic(true);
+        ecs.addComponent(e, std::move(instance));
+        MaterialComponent material;
+        material.baseColorFactor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f); // purely emissive: no diffuse base to light through the glass
+        material.metallicFactor = 0.0f;
+        material.roughnessFactor = 1.0f;
+        material.emissiveFactor = glm::vec3(s.emission);
+        ecs.addComponent(e, std::move(material));
+    };
+    if (motion_) {
+        // The moving light: one extra purely emissive panel, dynamic, not part of emitters() (the static backdrop).
+        const EntityID e = ecs.createEntity();
+        movingPanel_ = e;
+        TransformComponent transform;
+        transform.position = movingPanelCenter(0.0);
+        transform.rotation = glm::angleAxis(pi * 0.5f, glm::vec3(1, 0, 0));
+        transform.scale = {PanelSize, 1.0f, PanelSize};
+        transform.updateMatrix();
+        ecs.addComponent(e, std::move(transform));
+        MeshInstanceComponent instance;
+        instance.meshHandle = planeMesh;
+        instance.materialIndex = materialIndex++;
+        instance.setVisible(true);
+        instance.setCastsShadows(true);
+        instance.setStatic(false);
+        ecs.addComponent(e, std::move(instance));
+        MaterialComponent material;
+        material.baseColorFactor = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+        material.metallicFactor = 0.0f;
+        material.roughnessFactor = 1.0f;
+        material.emissiveFactor = glm::vec3(s.emission * PanelEmissionScale);
+        ecs.addComponent(e, std::move(material));
+    }
+    if (s.backdrop == TransmissionScenarioSpec::Backdrop::Checker) {
+        for (int row = 0; row < CheckerRows; ++row)
+            for (int column = 0; column < CheckerColumns; ++column)
+                if ((row + column) % 2 == 0)
+                    emitter({CheckerOriginX + (float(column) + 0.5f) * CellSize, CheckerOriginY + (float(row) + 0.5f) * CellSize, BackdropZ},
+                            CellSize, CellSize);
+    } else if (s.backdrop == TransmissionScenarioSpec::Backdrop::Panels) {
+        for (const glm::vec4& panel : s.panels) emitter({panel.x, panel.y, PanelZ}, 2.0f * panel.z, 2.0f * panel.w);
+    }
+}
+
+void TransmissionValidation::teardown(ECS& ecs, GpuScene&) {
+    for (EntityID e : glass_) ecs.destroyEntity(e);
+    for (EntityID e : emitters_) ecs.destroyEntity(e);
+    if (movingPanel_ != INVALID_ENTITY) ecs.destroyEntity(movingPanel_);
+    glass_.clear();
+    emitters_.clear();
+    movingPanel_ = INVALID_ENTITY;
+    time_ = 0.0;
+}
+
+float TransmissionValidation::orbitYawRadians(double t) {
+    return glm::radians(OrbitAmplitudeDegrees) * float(std::sin(double(OrbitRate) * t));
+}
+glm::vec3 TransmissionValidation::movingPanelCenter(double t) {
+    return {PanelAmplitude * float(std::sin(double(PanelRate) * t)), PanelY, PanelMotionZ};
+}
+void TransmissionValidation::update(float dt, ECS& ecs) {
+    if (!std::isfinite(dt) || dt < 0.0f) throw std::invalid_argument("Transmission fixture dt must be finite nonnegative");
+    if (!motion_ || dt == 0.0f || movingPanel_ == INVALID_ENTITY) return;
+    time_ += dt;
+    const glm::vec3 p = movingPanelCenter(time_);
+    if (std::as_const(ecs).getComponent<TransformComponent>(movingPanel_).position == p) return;
+    auto& t = ecs.getComponent<TransformComponent>(movingPanel_);
+    t.position = p;
+    t.updateMatrix();
+}
+bool TransmissionValidation::scriptedCamera(double t, glm::vec3& position, glm::vec3& target, bool& cut) const {
+    cut = false; // a continuous orbit: never a camera cut
+    if (!motion_ || !std::isfinite(t) || t < 0.0) return false;
+    const auto& s = spec(scenario_);
+    const float yaw = orbitYawRadians(t);
+    target = s.cameraTarget;
+    position = target + s.cameraDistance * glm::vec3(std::sin(yaw), 0.0f, std::cos(yaw));
+    return true;
+}
+
+CameraSetup TransmissionValidation::getDefaultCamera() const {
+    const auto& s = spec(scenario_);
+    return {{s.cameraTarget.x, s.cameraTarget.y, s.cameraTarget.z + s.cameraDistance}, s.cameraTarget, s.cameraDistance, false};
+}
+} // namespace phosphor

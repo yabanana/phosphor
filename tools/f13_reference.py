@@ -9,8 +9,10 @@ convergence. Mitsuba 3 (llvm_ad_rgb) supplies ray casting and emitter
 sampling; the BRDF and the path integrator below are this file's own.
 
 Declared reference model (every item is part of the report):
-- Material: Lambert (1-F)(1-metallic)albedo/pi plus GGX with height-correlated
-  Smith visibility and Schlick Fresnel, f0 = mix(0.04, albedo, metallic),
+- Material (glTF Appendix B, ADR-0006): Lambert (1-F(0.04))(1-metallic)albedo/pi
+  plus GGX with height-correlated Smith visibility and Schlick Fresnel,
+  f0 = mix(0.04, albedo, metallic) plus (ADR-0007, default on) the Kulla-Conty multiple-scattering lobe, folded into the
+  cosine-sampled strategy (tables from tools/ms_table.py `albedo`, no engine table),
   roughness clamped to [0.04, 1], alpha = max(roughness^2, 0.002).
 - Camera: one ray through each pixel centre, no reconstruction filter.
 - Transport: full material at the camera vertex with both lobes continued;
@@ -19,7 +21,18 @@ Declared reference model (every item is part of the report):
   reduction albedo(1-metallic)/pi. Emitters are counted once (light and BSDF
   sampling combined with the power heuristic).
 - Excluded by construction: light reaching a diffuse receiver through a
-  specular bounce (caustics) and specular inter-reflection beyond one bounce.
+  specular bounce (caustics) and, unless --mirror-bounces N is given,
+  specular inter-reflection beyond one bounce.  With --mirror-bounces N
+  (F15 ticket 22, A1) the first hit of the camera's specular lobe, when its
+  roughness is at most MIRROR_ROUGHNESS (alpha <= 0.01, a near-delta lobe), also
+  continues along its ideal mirror direction, up to N further hits, weighted
+  by the Schlick Fresnel of every hit (any f0, dielectric or metal); every hit
+  of the chain is lit and continued with its diffuse lobe like the first hit.
+  Light accounting at a hit that continues: the environment reaches the camera
+  through the continuation (its regularised light connection skips the
+  environment sample), emitters (sun disk, panels) through that hit's
+  regularised light connection (D5), so an emitter the continuation ray hits
+  does not count a second time.
 - Secondary specular light connections use alpha' = max(alpha_secondary,
   k * alpha_camera), k = 8 by owner decision D5, the engine default
   (path regularisation), unless --secondary-specular raw|off is selected.
@@ -42,10 +55,11 @@ from f12_reference import read_pfm, scene_digest, snapshot, write_pfm  # noqa: E
 
 INVALID = 0xFFFFFFFF
 MIN_ROUGHNESS, MIN_ALPHA, DIELECTRIC_F0, MIN_NDOTV = 0.04, 0.002, 0.04, 1e-4
+MIRROR_ROUGHNESS = 0.1  # F15 ticket 22: a hit whose roughness is at most this reflects like an ideal mirror (alpha <= 0.01)
 SEEDS = (1234, 5678)
 CONVERGENCE = 0.02
 MODEL = {
-    "material": "Lambert(1-F)(1-metallic) + GGX height-correlated Smith + Schlick; roughness>=0.04, alpha>=0.002",
+    "material": "glTF Appendix B: Lambert(1-F(0.04))(1-metallic) + GGX height-correlated Smith + Schlick(mix(0.04, albedo, metallic)); roughness>=0.04, alpha>=0.002",
     "camera": "pixel-centre rays, no reconstruction filter",
     "transport": "full material at camera vertex and at the first hit after its specular lobe; diffuse reduction deeper",
     "excluded": ["caustics through a specular bounce", "specular inter-reflection beyond one bounce"],
@@ -78,9 +92,10 @@ def require_texture_free(data):
 
 
 class Context:
+    ms_lobe = True  # ADR-0007: the engine default; `--specular-ms off` renders the glTF Appendix B lobe alone
     """Scene, per-shape material tables and camera for one snapshot."""
 
-    def __init__(self, root, data, threads, secondary_specular, max_bounces=16, rr_depth=5, regularization_scale=8.0):
+    def __init__(self, root, data, threads, secondary_specular, max_bounces=16, rr_depth=5, regularization_scale=8.0, mirror_bounces=0):
         import drjit as dr
         import mitsuba as mi
         import numpy as np
@@ -96,6 +111,10 @@ class Context:
         if not (self.regularization_scale >= 1.0):
             raise ValueError("regularization scale must be >= 1")
         self.max_bounces, self.rr_depth = max_bounces, rr_depth
+        self.mirror_min_alpha = 0.5 * MIN_ALPHA  # a real surface has alpha >= MIN_ALPHA; the sun disk has no material row (alpha 0)
+        self.mirror_bounces = int(mirror_bounces)  # F15 ticket 22: extra ideal-mirror hits after the camera's specular lobe (0 = declared F13 model)
+        if not 0 <= self.mirror_bounces <= 8:
+            raise ValueError("mirror bounces must be in 0..8")
         require_texture_free(data)
         transform = getattr(mi, "ScalarAffineTransform4f", None) or mi.ScalarTransform4f
         description = {"type": "scene"}
@@ -143,6 +162,8 @@ class Context:
             table[identifier] = [*material["base"][:3], min(1.0, max(0.0, float(material["metallic"]))),
                                  max(roughness * roughness, MIN_ALPHA)]
         self.table = [mi.Float(table[:, column].copy()) for column in range(5)]
+        if self.ms_lobe:
+            self.build_multiple_scattering_tables(table)
         camera = data["camera"]
         if any(camera.get("jitter_pixels", [0, 0])):
             raise ValueError("pixel-centre reference requires an unjittered camera")
@@ -159,6 +180,50 @@ class Context:
         self.sampler = mi.load_dict({"type": "independent"})
         self.vector, self.colour = mi.Vector3d, getattr(mi, "Color3d", mi.Vector3d)
 
+    # -- multiple-scattering lobe (ADR-0007) -----------------------------
+    MS_NODES = 129  # cos(theta) nodes of the lost-energy tables, 1e-3 .. 1
+
+    def build_multiple_scattering_tables(self, table):
+        """Lost energy L(mu) = 1 - E(mu) and 1 - E_avg of every material (Kulla-Conty 2017): deterministic quadrature of the GGX lobe
+        (tools/ms_table.py `albedo`, independent of the engine tables and of its split-sum DFG), one row per material identifier."""
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+        import ms_table
+        mi, np = self.mi, self.np
+        nodes = np.concatenate([[1e-3], np.linspace(0.0, 1.0, self.MS_NODES)[1:]])
+        cache = {}
+        lost = np.zeros((table.shape[0], self.MS_NODES), dtype=np.float32)
+        loss = np.zeros(table.shape[0], dtype=np.float32)
+        for identifier in range(table.shape[0]):
+            alpha = float(table[identifier, 4])
+            if alpha <= 0:
+                continue
+            if alpha not in cache:
+                roughness = max(math.sqrt(alpha), MIN_ROUGHNESS)
+                row = np.array([max(0.0, 1.0 - ms_table.albedo(float(mu), roughness, 8192, 128)) for mu in nodes])
+                average = 2.0 * float(np.sum(0.5 * (row[1:] * nodes[1:] + row[:-1] * nodes[:-1]) * np.diff(nodes)))
+                cache[alpha] = (row, average)
+            lost[identifier], loss[identifier] = cache[alpha]
+        self.ms_lost, self.ms_loss = mi.Float(lost.reshape(-1).copy()), mi.Float(loss.copy())
+
+    def multiple_scattering(self, material, wo, nl, valid, f0):
+        """f_ms cos(theta_i) of the extra lobe: F_ms L(mu_o) L(mu_i) / (pi (1 - E_avg)) cos(theta_i), F_ms from F_avg = f0 + (1 - f0) / 21."""
+        mi, dr = self.mi, self.dr
+        identifier = material["id"]
+        loss = mi.Float64(dr.gather(mi.Float, self.ms_loss, identifier))
+        favg = f0 + (1 - f0) / 21.0
+        fms = favg * favg * ((1 - loss) / (1 - favg * loss))
+
+        def lost(mu):
+            x = dr.clip((mu - 1e-3) / (1 - 1e-3), 0.0, 1.0) * (self.MS_NODES - 1)
+            i0 = dr.minimum(mi.UInt32(x), self.MS_NODES - 2)
+            fraction = x - mi.Float64(i0)
+            base = identifier * self.MS_NODES + i0
+            return ((1 - fraction) * mi.Float64(dr.gather(mi.Float, self.ms_lost, base)) +
+                    fraction * mi.Float64(dr.gather(mi.Float, self.ms_lost, base + 1)))
+
+        scale = lost(dr.clip(wo.z, 1e-3, 1.0)) * lost(dr.clip(nl, 1e-3, 1.0)) / (math.pi * dr.maximum(loss, 1e-9))
+        return dr.select(valid, fms * (scale * nl), 0)
+
     # -- camera ---------------------------------------------------------
     def primary_ray(self, pixel):
         mi, dr = self.mi, self.dr
@@ -174,7 +239,7 @@ class Context:
         identifier = dr.reinterpret_array(mi.UInt32, si.shape)
         values = [dr.gather(mi.Float, column, identifier, si.is_valid()) for column in self.table]
         return {"albedo": self.colour(values[0], values[1], values[2]), "metallic": mi.Float64(values[3]),
-                "alpha": mi.Float64(values[4])}
+                "alpha": mi.Float64(values[4]), "id": identifier}
 
     def lobes(self, material, wo, wi, alpha):
         """Engine BRDF times cos(theta_i) for local unit vectors; returns diffuse, specular, VNDF pdf."""
@@ -195,7 +260,13 @@ class Context:
         f0 = material["albedo"] * material["metallic"] + DIELECTRIC_F0 * (1 - material["metallic"])
         fresnel = f0 + (1 - f0) * (1 - vh) ** 5
         valid = (wi.z > 0) & (length > 1e-10)
-        diffuse = dr.select(valid, (1 - fresnel) * (1 - material["metallic"]) * material["albedo"] * (nl / math.pi), 0)
+        # glTF Appendix B (ADR-0006): the diffuse lobe is weighted by the dielectric Fresnel only.
+        dielectric = 0.04 + (1 - 0.04) * (1 - vh) ** 5
+        diffuse = dr.select(valid, (1 - dielectric) * (1 - material["metallic"]) * material["albedo"] * (nl / math.pi), 0)
+        if "id" in material and self.ms_lobe:
+            # ADR-0007: the multiple-scattering lobe joins the cosine-sampled strategy (smooth, ~ L(mu_i) cos); the closed-form checks
+            # below (no material id) test the single-scattering lobe and keep it out.
+            diffuse = diffuse + self.multiple_scattering(material, wo, nl, valid, f0)
         specular = dr.select(valid, fresnel * (distribution * visibility * nl), 0)
         g1 = 2 * nv / (nv + dr.sqrt(a2 + (1 - a2) * nv * nv))
         pdf = dr.select(valid, g1 * distribution / (4 * nv), 0)
@@ -223,7 +294,7 @@ class Context:
         return dr.select(first2 + second2 > 0, first2 / (first2 + second2), 0)
 
     # -- transport ------------------------------------------------------
-    def tail(self, previous, direction, beta, pdf_previous, active, full_first, alpha_floor):
+    def tail(self, previous, direction, beta, pdf_previous, active, full_first, alpha_floor, skip_specular=None, mirror_continuation=False):
         """Follow one sampled direction from `previous`; diffuse continuation only."""
         mi, dr, scene, sampler = self.mi, self.dr, self.scene, self.sampler
         radiance = mi.Color3f(0)
@@ -234,7 +305,11 @@ class Context:
             sample = mi.DirectionSample3f(scene, si, previous)
             pdf_light = scene.pdf_emitter_direction(previous, sample, active)
             weight = self.mis(dr, mi.Float64(pdf_previous), mi.Float64(pdf_light))
-            radiance += dr.select(active, beta * emitter.eval(si, active) * mi.Float(weight), 0)
+            # mirror_continuation (F15 ticket 22): the ray is an ideal-mirror continuation; at its first hit only the environment (a miss) counts,
+            # an emitter it hits (the sun disk, a panel) is reached by the regularised light connection of the mirror hit (D5: light sampling is the
+            # only strategy for the specular lobe), counting both would count that light twice
+            counted = active & ~si.is_valid() if (mirror_continuation and depth == 0) else active
+            radiance += dr.select(counted, beta * emitter.eval(si, active) * mi.Float(weight), 0)
             outgoing = -ray.d
             active &= si.is_valid() & (dr.dot(si.n, outgoing) > 0)
             material = self.material(si)
@@ -254,7 +329,10 @@ class Context:
                 diffuse, specular, _ = self.lobes(material, wo, wi, alpha)
                 value = diffuse * light_weight
                 if self.secondary_specular != "off":
-                    value = value + specular  # light sampling is the only strategy for this lobe
+                    # light sampling is the only strategy for this lobe; skip_specular (F15 ticket 22): a hit that continues as an
+                    # ideal mirror gets the environment through the continuation, so that light sample is skipped (counted twice otherwise)
+                    value = value + (specular if skip_specular is None else
+                                     dr.select(skip_specular & light.emitter.is_environment(), 0, specular))
             else:
                 value = reduced * (dr.maximum(wi.z, 0) / math.pi) * light_weight
             radiance += dr.select(lit, beta * emitted * mi.Color3f(value), 0)
@@ -275,6 +353,50 @@ class Context:
                 beta = dr.select(active, beta / dr.maximum(survival, 1e-30), 0)
             previous, ray = si, si.spawn_ray(direction)
             dr.eval(radiance, beta, active, pdf_previous, ray, previous)
+            if not dr.any(active):
+                break
+        return radiance
+
+    def mirror_hit(self, hit, direction, active):
+        """F15 ticket 22 (A1): which lanes of `hit` reflect like an ideal mirror, with the mirror direction and the Schlick Fresnel weight.
+
+        A hit does when it is front facing and its roughness is at most MIRROR_ROUGHNESS (alpha <= 0.01); the weight is the Schlick Fresnel at
+        the incoming angle with f0 = mix(0.04, albedo, metallic), any surface (no f0 floor)."""
+        mi, dr = self.mi, self.dr
+        material = self.material(hit)
+        normal = hit.sh_frame.n
+        cosine = dr.dot(normal, -direction)
+        smooth = (active & hit.is_valid() & (material["alpha"] <= MIRROR_ROUGHNESS * MIRROR_ROUGHNESS) & (cosine > 0) &
+                  (material["alpha"] >= self.mirror_min_alpha))  # shapes without a material row (the sun disk) have alpha 0 and absorb
+        reflected = dr.normalize(direction + normal * (2 * cosine))
+        smooth &= dr.dot(hit.n, reflected) > 0
+        f0 = material["albedo"] * material["metallic"] + DIELECTRIC_F0 * (1 - material["metallic"])
+        fresnel = f0 + (1 - f0) * (1 - dr.clip(mi.Float64(cosine), 0.0, 1.0)) ** 5
+        return smooth, reflected, mi.Color3f(fresnel)
+
+    def mirror_chain(self, hit, direction, beta, active, alpha_floor):
+        """F15 ticket 22 (A1): ideal specular continuation through smooth hits, written from the physics of a smooth surface.
+
+        `hit` is the first hit of the camera's specular sample along `direction` with throughput `beta` (the camera lobe's weight).  A smooth
+        hit (mirror_hit) sends the light that arrives along its mirror direction: the throughput is multiplied by its Fresnel and the next
+        hit is lit and continued with its diffuse lobe exactly like the first one (tail with full_first), with no specular light connection
+        at a hit that itself continues (the continuation carries that light).  At most `mirror_bounces` further hits; the hit at the bound
+        keeps its regularised specular connection.  Delta direction: the emitter MIS weight is 1."""
+        mi, dr = self.mi, self.dr
+        radiance = mi.Color3f(0)
+        for bounce in range(self.mirror_bounces):
+            smooth, reflected, fresnel = self.mirror_hit(hit, direction, active)
+            beta = beta * fresnel
+            beta = mi.Color3f(dr.select(smooth, beta.x, 0), dr.select(smooth, beta.y, 0), dr.select(smooth, beta.z, 0))
+            ray = hit.spawn_ray(reflected)
+            following = self.scene.ray_intersect(ray, smooth)
+            skip = None
+            if bounce + 1 < self.mirror_bounces:
+                skip = dr.copy(self.mirror_hit(following, ray.d, smooth)[0])
+            # tail narrows its masks in place (drjit &=): hand it copies
+            radiance += self.tail(hit, reflected, beta, mi.Float(1e30), dr.copy(smooth), True, alpha_floor, skip, True)
+            hit, direction, active = following, ray.d, smooth
+            dr.eval(radiance, beta, active, direction, hit)
             if not dr.any(active):
                 break
         return radiance
@@ -321,8 +443,17 @@ class Context:
         beta = mi.Color3f(specular / dr.maximum(specular_pdf, 1e-30))
         direction = si.to_world(mi.Vector3f(local))
         go = active & (local.z > 0) & (specular_pdf > 0) & (dr.dot(si.n, direction) > 0) & (dr.max(beta) > 0)
+        chain_go = dr.copy(go) if self.mirror_bounces else None  # tail() narrows its mask in place (drjit &=): keep a copy
+        skip = first_hit = sample_ray = None
+        if self.mirror_bounces:
+            sample_ray = si.spawn_ray(direction)
+            first_hit = self.scene.ray_intersect(sample_ray, chain_go)
+            skip = dr.copy(self.mirror_hit(first_hit, sample_ray.d, chain_go)[0])
         radiance += self.tail(si, direction, beta, mi.Float(specular_pdf), go, True,
-                              dr.minimum(alpha * self.regularization_scale, 1.0))
+                              dr.minimum(alpha * self.regularization_scale, 1.0), skip)
+        if self.mirror_bounces:
+            radiance += self.mirror_chain(first_hit, sample_ray.d, beta, chain_go & first_hit.is_valid(),
+                                          dr.minimum(alpha * self.regularization_scale, 1.0))
         image = np.zeros((pixels, 3), dtype=np.float64)
         for channel, values in enumerate((radiance.x, radiance.y, radiance.z)):
             target = dr.zeros(mi.Float64, pixels)
@@ -495,6 +626,19 @@ def closed_form_checks(threads=8):
     head = context.vector(0.0, 0.0, 1.0) + dr.zeros(mi.Vector3d, count)
     diffuse, _, _ = context.lobes(plastic, head, head, mi.Float64(0.64))
     record("Lambert term at normal incidence", diffuse.x[0], 0.96 * 0.65 / math.pi, 1e-9)
+    # ADR-0007: with the multiple-scattering lobe a rough white conductor returns all the light (the entries above, without a material id,
+    # are the single-scattering negative control: 1 - ln 2 = 0.307 at alpha 1).
+    one_row = np.zeros((1, 5), dtype=np.float32)
+    for alpha in (0.25, 1.0):
+        one_row[0] = [1.0, 1.0, 1.0, 1.0, alpha]
+        context.build_multiple_scattering_tables(one_row)
+        metal_ms = {**material(1.0, 1.0), "alpha": mi.Float64(alpha), "id": dr.zeros(mi.UInt32, count)}
+        for cosine in (1.0, 0.5):
+            wo = view(cosine)
+            wi, pdf = uniform()
+            diffuse, specular, _ = context.lobes(metal_ms, wo, wi, mi.Float64(alpha))
+            record(f"white conductor furnace with the multiple-scattering lobe alpha={alpha} cos={cosine}",
+                   dr.mean((diffuse.x + specular.x) / pdf)[0], 1.0, 1.5e-2)
     return results
 
 
@@ -503,6 +647,7 @@ def render_frame(context, args, out, positions=None, regions=None):
     out.mkdir(parents=True, exist_ok=False)
     report = {"schema": 1, "tool": "tools/f13_reference.py", "tool_sha256": sha(__file__), "model": MODEL,
               "secondary_specular": context.secondary_specular, "regularization_scale": context.regularization_scale,
+              "mirror_bounces": context.mirror_bounces,
               "seeds": list(SEEDS),
               "convergence_relative_rmse": CONVERGENCE, "frame": context.data["frame"],
               "candidate_read": False, "phase_accepted": False}
@@ -538,7 +683,8 @@ def command_validate(args):
 def command_render(args):
     root, data = snapshot(args.snapshot)
     context = Context(root, data, args.threads, args.secondary_specular,
-                      regularization_scale=getattr(args, "regularization_scale", 8.0))
+                      regularization_scale=getattr(args, "regularization_scale", 8.0),
+                      mirror_bounces=getattr(args, "mirror_bounces", 0))
     regions = json.loads(pathlib.Path(args.regions).read_text()) if args.regions else None
     report = render_frame(context, args, pathlib.Path(args.out).resolve(), args.positions, regions)
     report["snapshot_sha256"] = scene_digest(root)
@@ -563,9 +709,15 @@ def main(argv=None):
     p.add_argument("--secondary-specular", choices=["regularized", "raw", "off"], default="regularized")
     p.add_argument("--regularization-scale", type=float, default=8.0,
                    help="k in alpha' = max(alpha_secondary, k * alpha_camera); default 8, owner decision D5 (engine default)")
+    p.add_argument("--mirror-bounces", type=int, default=0,
+                   help="F15 ticket 22: extra ideal-mirror hits after the camera's specular lobe through smooth surfaces (0 = declared F13 model)")
     p.add_argument("--threads", type=int, default=min(12, os.cpu_count() or 1))
+    p.add_argument("--specular-ms", choices=["on", "off"], default="on",
+                   help="ADR-0007: the Kulla-Conty multiple-scattering lobe of the engine default (on) or the Appendix B lobe alone (off)")
     p.set_defaults(function=command_render)
     args = parser.parse_args(argv)
+    if hasattr(args, "specular_ms"):
+        Context.ms_lobe = args.specular_ms == "on"
     if hasattr(args, "spp") and (any(n < 1 for n in args.spp) or args.spp != sorted(set(args.spp))):
         parser.error("strictly increasing positive SPP checkpoints required")
     try:

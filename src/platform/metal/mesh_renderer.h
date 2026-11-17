@@ -3,6 +3,7 @@
 #include "core/launch_options.h"
 #include "core/types.h"
 #include "pipeline/pipeline_registry.h"
+#include "platform/metal/feature_pipelines.h"
 #include "platform/metal/hiz_builder.h"
 #include "platform/metal/metal_context.h"
 #include "renderer/gpu_types.h"
@@ -185,9 +186,14 @@ private:
     // Pipelines.
     pipe::PipelineHandle generic_ = pipe::INVALID_PIPELINE, debug_ = pipe::INVALID_PIPELINE;
     std::vector<pipe::PipelineHandle> variants_;
+    FeaturePipelines featurePipelines_; // F15.1
     MTL::RenderPipelineState* pipeline_ = nullptr;
     bool usingFallback_ = false;
     pipe::PipelineHandle visibilityOpaque_ = pipe::INVALID_PIPELINE, visibilityAlpha_ = pipe::INVALID_PIPELINE;
+    // F15.1 (ticket 22): the alpha raster pipeline that compiles per-slot texture transforms (scenes that have them), and the one drawn.
+    pipe::PipelineHandle visibilityAlphaTT_ = pipe::INVALID_PIPELINE, alphaServed_ = pipe::INVALID_PIPELINE;
+    std::array<pipe::PipelineHandle, 2> visibilityAlphaVC_{pipe::INVALID_PIPELINE, pipe::INVALID_PIPELINE}; // F15 closure (COLOR_0): [tt]
+    [[nodiscard]] pipe::PipelineDesc visibilityRasterDesc(u32 pass, bool textureTransform = false) const;
     pipe::PipelineHandle kCandCount_ = pipe::INVALID_PIPELINE, kCandScan_ = pipe::INVALID_PIPELINE,
                          kCandWrite_ = pipe::INVALID_PIPELINE, kBCount_ = pipe::INVALID_PIPELINE,
                          kBScan_ = pipe::INVALID_PIPELINE, kBWrite_ = pipe::INVALID_PIPELINE;

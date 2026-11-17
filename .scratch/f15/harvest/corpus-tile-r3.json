@@ -1,0 +1,132 @@
+{
+  "function_descriptors": {
+    "library_function_descriptors": [
+      {
+        "label": "7ED28E301E9BD1C88783E22304D9D927E078E4E7A56AA061A8E101702F6E7AE4",
+        "library": "92C28E2C9E81D1BDC980D6E173D5EAEDA4135C67C8B06B4EF1EEB4C624BA3FF2",
+        "name": "visibility_tile"
+      }
+    ],
+    "specialized_function_descriptors": [
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 38
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 25
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 1
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 26
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 1
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:7ED28E301E9BD1C88783E22304D9D927E078E4E7A56AA061A8E101702F6E7AE4",
+        "label": "110D1BE301EFA9A0753A07DD340A5B56225C974B3959793752B9E42E7F7D2884"
+      },
+      {
+        "constant_values": [
+          {
+            "id": {
+              "data": 22
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 5
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 25
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 1
+            },
+            "value_type": "ConstantUInt"
+          },
+          {
+            "id": {
+              "data": 26
+            },
+            "id_type": "FunctionConstantIndex",
+            "value": {
+              "data": 1
+            },
+            "value_type": "ConstantUInt"
+          }
+        ],
+        "function_descriptor": "fnd:7ED28E301E9BD1C88783E22304D9D927E078E4E7A56AA061A8E101702F6E7AE4",
+        "label": "723EF5F23CA962782F1C1A4EEDFB35FCDC01F7856A1BEA786457C44BA1A24A31"
+      }
+    ]
+  },
+  "generator": "MetalFramework",
+  "libraries": [
+    {
+      "label": "92C28E2C9E81D1BDC980D6E173D5EAEDA4135C67C8B06B4EF1EEB4C624BA3FF2",
+      "path": "@PHOSPHOR_METALLIB@"
+    }
+  ],
+  "pipeline_descriptors": {
+    "compute_pipeline_descriptors": [],
+    "mesh_render_pipeline_descriptors": [],
+    "render_pipeline_descriptors": [],
+    "tile_render_pipeline_descriptors": [
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "R32Uint"
+          }
+        ],
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ],
+        "threadgroup_size_matches_tile_size": true,
+        "tile_function_descriptor": "fnd:110D1BE301EFA9A0753A07DD340A5B56225C974B3959793752B9E42E7F7D2884"
+      },
+      {
+        "color_attachments": [
+          {
+            "pixel_format": "R32Uint"
+          }
+        ],
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ],
+        "threadgroup_size_matches_tile_size": true,
+        "tile_function_descriptor": "fnd:723EF5F23CA962782F1C1A4EEDFB35FCDC01F7856A1BEA786457C44BA1A24A31"
+      }
+    ]
+  },
+  "version": {
+    "major": 0,
+    "minor": 1,
+    "sub_minor": 0
+  }
+}

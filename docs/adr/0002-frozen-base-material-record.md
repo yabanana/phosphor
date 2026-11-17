@@ -1,0 +1,46 @@
+# Material features live outside the frozen 80-byte base material record
+
+`GPUMaterial` stays 80 bytes because it equals the payload of `GPUDeltaRecord`,
+the only path materials take to the GPU, and because RT, GI, light sampling and
+culling read it on every scene. F15 material features (clearcoat, sheen,
+anisotropy, iridescence, specular/ior, transmission/volume, subsurface) store
+their parameters in a separate buffer of 80-byte extension records updated by
+the same `SceneStore` delta mechanism; the base record only gains feature bits
+in `flags` (bit 8 + `MaterialFeature`) and the index of its first extension
+record in its padding (`extensionIndex`, `MATERIAL_EXTENSION_INVALID` = none).
+Scenes without features (Sponza) keep identical buffers, pipelines and images.
+
+Implemented in F15.1 (ticket 05): an extended material owns a fixed group of
+`MATERIAL_EXT_RECORDS` = 4 consecutive records, allocated when it first becomes
+extended (a counted structure change) and kept for the life of the material, so
+toggling a feature rewrites records and never reallocates. The layouts of every
+feature are frozen in `gpu_types.h` (record 0 specular+ior, clearcoat, sheen;
+record 1 anisotropy, iridescence, transmission, volume; record 2 subsurface;
+record 3 layer stack), each 80 bytes with a `static_assert`.
+
+## Considered Options
+
+- Growing `GPUMaterial`: rejected, it grows every material/instance delta and
+  every secondary-hit read for all scenes.
+- A per-feature texture atlas of parameters: rejected, parameters must follow
+  per-entity edits through the existing delta path.
+
+## F15.4 (ticket 23): record 3 in use
+
+The layer stack (record 3) is rendered. Its frozen 80 bytes keep `maskTex`, `layerCount`, `layerMaterial[4]`,
+`packedMaskChannels` and `heightContrast[4]`; the nine padding words now hold `uvScale[4]` (per-layer texture
+tiling, 0 for a layer that does not exist), `heightTex[4]` (per-layer height texture, `INVALID_TEXTURE_INDEX` when the layer has none) and one
+padding word. Size and offsets of the existing fields are unchanged, so no existing scene, delta or archive entry
+changes; scenes without layers never read the record, and a material without a stack packs the same bytes into it as before F15.4 (the
+unused words are 0), so snapshots and reference caches of every other scene stay valid. The layer materials are ordinary entries of the material
+library (`GPUMaterial` records with their own extension groups); a layer contributes its base parameters, its emissive and its blendable
+feature blocks (specular/ior, clearcoat, sheen, anisotropy, iridescence, thin subsurface) to the parameter-space blend; the stack's own record
+is the finish a layer without a block inherits. The last padding word of record 3 is now `features`: bits 0..15 the stack's OWN feature mask, bits
+16..31 the union of its layers' blendable features (`layerFeatureUnion`), written by the scene store when it packs the record; the stack's
+`GPUMaterial::flags` carry both, so the feature class, the guide bits and the permutation of a scene include the layers' features. A stack that
+owns no block therefore differs from one that owns it only in that word. Secondary hits (reflection hits, GI probe and reservoir hits, the probe
+capture) resolve the stack's blended base parameters, normal and emission through the same shared helper (`shaders/layer_resolve.h`); the
+extension buffer reaches them through `GPUMaterialExtPtr materialExtensions` at the end of the three parameter structs (offset 168 of
+`GPUProbeGridParams`, the former padding; +8 bytes in `GPUReflectionParams` and `GPUProbeCaptureParams`). Feature blocks are not evaluated at
+secondary hits for any material (the declared reduction of this ADR). Transmission, volume and volumetric subsurface do not blend (a layer carrying
+them contributes the rest of its material).

@@ -13,7 +13,8 @@ struct GPUTemporalParams {
     u32 frameIndex;
     float mipBias;
     float manualExposure;
-    u32 debugFlags, pad[3];
+    u32 debugFlags, pad0;
+    GPUMaterialExtPtr materialExtensions; // F15.4 (ticket 23, texxform): the extension buffer for the alpha tests of layer stacks and per-slot transforms; 0 without one
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUTemporalParams) == 192, "temporal parameters layout");
 } // namespace phosphor

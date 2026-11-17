@@ -16,7 +16,7 @@ class MetalGraphExecutor;
 // tonemapping/upscaling/UI: radiance or dimensionless shadow visibility in R.
 // GPU float4 readback preserves values
 // from RGBA16Float or RGBA32Float; PFM writes only RGB, as linear float32.
-// Explicit scalar captures accept R16Float/R32Float or the R channel of
+// Explicit scalar captures accept R16Float/R32Float/R8Unorm (the MetalFX reactive mask) or the R channel of
 // RGBA16Float/RGBA32Float storage, and replicate R to RGB.
 // Scalar values retain their own units (e.g. dimensionless AO), never radiance.
 class LinearCapture {
@@ -26,6 +26,9 @@ class LinearCapture {
         std::string sequence;
         u64 frame = 0;
         u32 every = 1;
+        // F15.3 (ticket 13): > 0 averages the single capture over the N frames ENDING at `frame` (CPU float64 sum, one
+        // PFM of the mean at the end): the converged image of a static scene under a one-sample-per-pixel transport.
+        u32 accumulate = 0;
         bool scalar = false;
         // Optional source-control witness, evaluated only AFTER completion.
         std::function<std::string(u32)> completedMetadata;
@@ -68,5 +71,7 @@ class LinearCapture {
     u32 currentSlot_ = 0, currentWidth_ = 0, currentHeight_ = 0;
     MTL::GPUAddress extentAddress_ = 0;
     bool active_ = false, prepared_ = false, singleWritten_ = false;
+    std::vector<double> sum_;     // accumulate > 0: running sum of the frames captured so far
+    u64 accumulated_ = 0, lastAccumulated_ = 0;
 };
 } // namespace phosphor

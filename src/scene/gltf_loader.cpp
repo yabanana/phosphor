@@ -7,6 +7,9 @@
 #include <tiny_gltf.h>
 
 #include "scene/gltf_loader.h"
+#include "scene/gltf_contained_fs.h"
+#include "scene/gltf_material_extensions.h"
+#include "scene/gltf_lights.h"
 #include "scene/mesh_processing.h"
 #include "scene/texture_manager.h"
 #include "scene/ecs.h"
@@ -21,6 +24,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstring>
 
 namespace phosphor {
 
@@ -49,6 +53,42 @@ static std::vector<T> readAccessor(const tinygltf::Model& model, int accessorIdx
         std::memcpy(&result[i], base + i * stride, sizeof(T));
     }
     return result;
+}
+
+/// COLOR_0 as RGBA floats: VEC3 (alpha 1) or VEC4; float, or normalised unsigned byte / short (the only integer types the specification allows).
+/// Empty when the accessor is not a valid colour attribute (the caller warns and ignores it).
+static std::vector<glm::vec4> readColor0(const tinygltf::Model& model, int accessorIdx, std::string& problem) {
+    if (accessorIdx < 0 || accessorIdx >= static_cast<int>(model.accessors.size())) { problem = "accessor index out of range"; return {}; }
+    const auto& accessor = model.accessors[static_cast<size_t>(accessorIdx)];
+    const int components = accessor.type == TINYGLTF_TYPE_VEC3 ? 3 : accessor.type == TINYGLTF_TYPE_VEC4 ? 4 : 0;
+    if (components == 0) { problem = "COLOR_0 must be VEC3 or VEC4"; return {}; }
+    const int ct = accessor.componentType;
+    size_t size = 0;
+    if (ct == TINYGLTF_COMPONENT_TYPE_FLOAT) size = 4;
+    else if (ct == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) size = 1;
+    else if (ct == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) size = 2;
+    else { problem = "COLOR_0 component type must be float, unsigned byte or unsigned short"; return {}; }
+    if (accessor.bufferView < 0 || accessor.bufferView >= static_cast<int>(model.bufferViews.size())) { problem = "COLOR_0 has no buffer view"; return {}; }
+    const auto& view = model.bufferViews[static_cast<size_t>(accessor.bufferView)];
+    const auto& buffer = model.buffers[static_cast<size_t>(view.buffer)];
+    const size_t stride = view.byteStride ? view.byteStride : size * static_cast<size_t>(components);
+    const size_t first = view.byteOffset + accessor.byteOffset;
+    if (accessor.count == 0 || first + (accessor.count - 1) * stride + size * static_cast<size_t>(components) > buffer.data.size()) {
+        problem = "COLOR_0 reads outside its buffer";
+        return {};
+    }
+    std::vector<glm::vec4> out(accessor.count, glm::vec4(1.0f));
+    for (size_t i = 0; i < accessor.count; ++i) {
+        const u8* at = buffer.data.data() + first + i * stride;
+        for (int c = 0; c < components; ++c) {
+            float value;
+            if (ct == TINYGLTF_COMPONENT_TYPE_FLOAT) { std::memcpy(&value, at + 4 * c, 4); }
+            else if (ct == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) value = static_cast<float>(at[c]) / 255.0f;
+            else { u16 s; std::memcpy(&s, at + 2 * c, 2); value = static_cast<float>(s) / 65535.0f; }
+            out[i][c] = value;
+        }
+    }
+    return out;
 }
 
 /// Build a glm::mat4 from a glTF node's TRS or matrix fields.
@@ -101,9 +141,21 @@ GltfLoader::GltfLoader(GpuScene& gpuScene, TextureManager& textures, ECS& ecs)
 // ---------------------------------------------------------------------------
 
 bool GltfLoader::loadFromFile(const std::string& path) {
+    lastError_.clear();
     tinygltf::Model model;
     tinygltf::TinyGLTF loader;
     std::string err, warn;
+
+    // Every external image and buffer URI resolves inside the asset directory
+    // and is checked before anything is opened (review: the containment check
+    // used to run after tinygltf had already read the files).
+    ContainedFileSystem files(path);
+    std::string fsError;
+    if (!files.install(loader, fsError)) {
+        lastError_ = "cannot install file-system callbacks: " + fsError;
+        LOG_ERROR("glTF %s: %s", path.c_str(), lastError_.c_str());
+        return false;
+    }
 
     bool ok = false;
     if (path.size() >= 4 && path.substr(path.size() - 4) == ".glb") {
@@ -115,7 +167,13 @@ bool GltfLoader::loadFromFile(const std::string& path) {
     if (!warn.empty()) {
         LOG_WARN("glTF warning (%s): %s", path.c_str(), warn.c_str());
     }
+    if (!files.refusals().empty()) {
+        lastError_ = files.refusals().front();
+        LOG_ERROR("glTF %s: %s; refusing to load", path.c_str(), lastError_.c_str());
+        return false;
+    }
     if (!ok) {
+        lastError_ = err;
         LOG_ERROR("Failed to load glTF: %s (%s)", path.c_str(), err.c_str());
         return false;
     }
@@ -123,11 +181,39 @@ bool GltfLoader::loadFromFile(const std::string& path) {
     const size_t slash = path.find_last_of("/\\");
     baseDir_ = slash == std::string::npos ? std::string{} : path.substr(0, slash + 1);
 
+    // glTF 2.0 section 3.2: an asset requiring an extension we do not support
+    // SHOULD NOT be loaded.
+    if (const auto required = unsupportedRequiredExtensions(model); !required.empty()) {
+        std::string names;
+        for (const auto& n : required) names += (names.empty() ? "" : ", ") + n.name + " (" + n.reason + ")";
+        lastError_ = "requires extension(s) that cannot be honoured: " + names;
+        LOG_ERROR("glTF %s %s; refusing to load", path.c_str(), lastError_.c_str());
+        return false;
+    }
+    // Image URIs resolve only inside the asset directory.
+    for (const auto& image : model.images) {
+        std::string uriError;
+        if (!image.uri.empty() && !isImageUriContained(baseDir_, image.uri, uriError)) {
+            lastError_ = uriError;
+            LOG_ERROR("glTF %s: %s; refusing to load", path.c_str(), uriError.c_str());
+            return false;
+        }
+    }
+    const auto unknownOptional = unknownOptionalExtensions(model);
+    gpuScene_.addAssetUnknownExtensions(unknownOptional);
+
     // Clear per-file caches
     meshCache_.clear();
     createdEntities_.clear();
+    importedLights_ = 0;
     materialCache_.clear();
+    parsedMaterials_.clear();
+    materialParseCount_ = 0;
     textureCache_.clear();
+    // The documented texture defaults a material description falls back to when a
+    // slot has no texture (also what an override that removes a texture binds).
+    gpuScene_.setBaseTextureDefaults(textures_.getDefaultWhite(), textures_.getDefaultMR(),
+                                     textures_.getDefaultNormal());
 
     // Process the default scene (or scene 0)
     int sceneIdx = model.defaultScene >= 0 ? model.defaultScene : 0;
@@ -143,6 +229,10 @@ bool GltfLoader::loadFromFile(const std::string& path) {
 
     // Flush uploaded mesh data to the GPU
     gpuScene_.flushMeshData();
+
+    LOG_INFO("%s", formatSupportSummary(gpuScene_.materialSupport(), gpuScene_.assetUnknownExtensions()).c_str());
+    for (const auto& report : gpuScene_.materialSupport())
+        if (report.valid()) LOG_DEBUG("%s", formatSupportDetail(report).c_str());
 
     LOG_INFO("Loaded glTF: %s (%zu meshes, %zu materials, %zu textures)",
              path.c_str(), model.meshes.size(), model.materials.size(),
@@ -199,6 +289,32 @@ void GltfLoader::processNode(const tinygltf::Model& model,
             instance.setVisible(true);
             instance.setCastsShadows(true);
             ecs_.addComponent(entity, std::move(instance));
+        }
+    }
+
+    // KHR_lights_punctual: the light sits at the node origin and shines along its local -Z (extractLights).
+    if (importLights_ && node.light >= 0) {
+        if (node.light >= static_cast<int>(model.lights.size())) {
+            LOG_WARN("glTF node '%s' references light %d which does not exist", node.name.c_str(), node.light);
+        } else {
+            const auto converted = convertPunctualLight(model.lights[static_cast<size_t>(node.light)], photometricToEngine_);
+            for (const std::string& w : converted.warnings) LOG_WARN("glTF node '%s': %s", node.name.c_str(), w.c_str());
+            if (converted.valid) {
+                if (converted.light.type == LightType::Spot && !spotFalloffNoted_) {
+                    spotFalloffNoted_ = true;
+                    const FeatureSupportEntry& e = currentSupportTable().punctualLights;
+                    LOG_INFO("KHR_lights_punctual: %s (%s): spot cone falloff is smoothstep(cosOuter, cosInner), the informative formula of the extension is t^2",
+                             supportLevelName(e.level), e.approximation);
+                }
+                const EntityID entity = ecs_.createEntity();
+                createdEntities_.push_back(entity);
+                TransformComponent transform{};
+                transform.worldMatrix = worldTransform;
+                transform.position = glm::vec3(worldTransform[3]);
+                ecs_.addComponent(entity, std::move(transform));
+                ecs_.addComponent(entity, LightComponent(converted.light));
+                ++importedLights_;
+            }
         }
     }
 
@@ -260,6 +376,40 @@ MeshHandle GltfLoader::processPrimitive(const tinygltf::Model& model,
         hasUVs = geom.uvs.size() == vertexCount;
     }
     if (!hasUVs) geom.uvs.assign(vertexCount, glm::vec2{0.0f});
+    // COLOR_0 (F15 closure): base colour = factor x texture x COLOR_0.  Only COLOR_0 exists in the engine (COLOR_1... are ignored, like extra UV sets).
+    if (auto it = prim.attributes.find("COLOR_0"); it != prim.attributes.end()) {
+        std::string problem;
+        geom.colors = readColor0(model, it->second, problem);
+        if (geom.colors.size() != vertexCount) {
+            LOG_WARN("Mesh '%s': COLOR_0 ignored (%s)", mesh.name.c_str(), problem.empty() ? "vertex count differs from POSITION" : problem.c_str());
+            geom.colors.clear();
+        }
+    }
+
+    // KHR_texture_transform and texCoord (F15.1 ticket 22).  The engine has ONE UV stream per mesh (UV0), so the UV set that every
+    // texture of the primitive's material samples (glTF texCoord, usually 0) is copied into UV0 when it is another one; a material
+    // that mixes UV sets is reported unsupported and keeps UV0.  A transform shared by every texture of the material is baked into
+    // UV0 (affine maps commute with interpolation: exact); anything else (slots that differ, transformed and plain slots mixed) is
+    // evaluated per slot on the GPU from the material's transform block and leaves the UVs untouched.
+    if (prim.material >= 0 && prim.material < static_cast<int>(model.materials.size())) {
+        const auto analysis = analyzeTextureTransforms(parsedMaterial(model, prim.material).description);
+        if (analysis.status != TextureTransformStatus::Unsupported && analysis.uvSet != 0) {
+            const std::string name = "TEXCOORD_" + std::to_string(analysis.uvSet);
+            if (auto it = prim.attributes.find(name); it != prim.attributes.end()) {
+                auto set = readAccessor<glm::vec2>(model, it->second);
+                if (set.size() == vertexCount) {
+                    geom.uvs = std::move(set);
+                    hasUVs   = true;
+                }
+            }
+        }
+        if (hasUVs && analysis.status == TextureTransformStatus::Uniform) {
+            bakeUvTransform(analysis.transform, geom.uvs);
+            // Supplied tangents describe the ORIGINAL uvs: turn them into the axes of the baked ones, as the per-slot GPU path turns the
+            // frame of a transformed normal slot (generated tangents come from the baked uvs and need nothing).
+            if (hasNormals && hasTangents) bakeTangentFrame(analysis.transform, geom.normals, geom.tangents);
+        }
+    }
 
     // Indices (generate sequential ones for non-indexed primitives)
     if (prim.indices >= 0) {
@@ -304,12 +454,21 @@ MeshHandle GltfLoader::processPrimitive(const tinygltf::Model& model,
                  geom.positions.size());
     }
 
+    // KHR_materials_anisotropy needs a tangent frame at every vertex: supplied tangents that are degenerate (zero,
+    // parallel to the normal, non-finite) and MikkTSpace results on degenerate UVs would shade it as strength 0.
+    if (!geom.positions.empty() && prim.material >= 0 && prim.material < static_cast<int>(model.materials.size()) &&
+        parsedMaterial(model, prim.material).description.anisotropy) {
+        if (const u32 repaired = repairTangentFrames(geom); repaired > 0)
+            LOG_WARN("Mesh '%s': %u vertices had no usable tangent frame, a perpendicular of the normal was substituted "
+                     "(KHR_materials_anisotropy)", mesh.name.c_str(), repaired);
+    }
+
     if (geom.positions.empty()) {
         meshCache_[key] = INVALID_MESH_HANDLE;
         return INVALID_MESH_HANDLE;
     }
 
-    MeshHandle handle = gpuScene_.uploadMesh(geom.positions, geom.normals, geom.tangents, geom.uvs, geom.indices);
+    MeshHandle handle = gpuScene_.uploadMesh(geom.positions, geom.normals, geom.tangents, geom.uvs, geom.indices, geom.colors);
     meshCache_[key] = handle;
     return handle;
 }
@@ -317,6 +476,19 @@ MeshHandle GltfLoader::processPrimitive(const tinygltf::Model& model,
 // ---------------------------------------------------------------------------
 // Material processing
 // ---------------------------------------------------------------------------
+
+const GltfMaterialParse& GltfLoader::parsedMaterial(const tinygltf::Model& model, int index) {
+    const auto found = parsedMaterials_.find(index);
+    if (found != parsedMaterials_.end()) return found->second;
+    ++materialParseCount_;
+    // Texture slots resolve through the same cache as everything else: core
+    // slots first, then the extension slots.
+    GltfMaterialParse parsed = parseGltfMaterial(model.materials.at(static_cast<size_t>(index)),
+                                                 [&](int textureIndex, bool sRGB) {
+                                                     return processTexture(model, textureIndex, sRGB);
+                                                 });
+    return parsedMaterials_.emplace(index, std::move(parsed)).first->second;
+}
 
 u32 GltfLoader::processMaterial(const tinygltf::Model& model,
                                  const tinygltf::Material& material) {
@@ -326,71 +498,40 @@ u32 GltfLoader::processMaterial(const tinygltf::Model& model,
         return it->second;
     }
 
+    // F15: the description of the material (core slots, extensions, texture
+    // slots) is parsed once per material; KHR_materials_emissive_strength is
+    // folded into the emissive factor.
+    const GltfMaterialParse& parsed = parsedMaterial(model, matIdx);
+    const BaseMaterial& base = parsed.description.base;
+    for (const std::string& w : parsed.info.warnings)
+        LOG_WARN("glTF material '%s': %s", material.name.c_str(), w.c_str());
+
+    // A slot without a (resolvable) texture binds the documented default.
+    auto textureOr = [](const MaterialTextureRef& ref, u32 fallback) {
+        return ref.index != INVALID_TEXTURE_INDEX ? ref.index : fallback;
+    };
+
     MaterialComponent mc{};
+    mc.baseColorFactor = glm::vec4{base.baseColor[0], base.baseColor[1], base.baseColor[2], base.baseColor[3]};
+    mc.metallicFactor  = base.metallic;
+    mc.roughnessFactor = base.roughness;
+    mc.baseColorTexIndex         = textureOr(base.baseColorTexture, textures_.getDefaultWhite());
+    mc.metallicRoughnessTexIndex = textureOr(base.metallicRoughnessTexture, textures_.getDefaultMR());
+    mc.normalTexIndex            = textureOr(base.normalTexture, textures_.getDefaultNormal());
+    mc.normalScale               = base.normalScale;
+    mc.occlusionTexIndex         = textureOr(base.occlusionTexture, textures_.getDefaultWhite());
+    mc.occlusionStrength         = base.occlusionStrength;
+    // glTF: emissive = factor * texture, with a missing texture meaning 1.
+    mc.emissiveTexIndex          = textureOr(base.emissiveTexture, textures_.getDefaultWhite());
+    // The description keeps an authored negative emissive strength; the GPU never gets a negative emission.
+    mc.emissiveFactor = glm::max(glm::vec3{base.emissive[0], base.emissive[1], base.emissive[2]}, glm::vec3{0.0f});
 
-    // PBR metallic-roughness
-    const auto& pbr = material.pbrMetallicRoughness;
-
-    mc.baseColorFactor = glm::vec4{
-        static_cast<float>(pbr.baseColorFactor[0]),
-        static_cast<float>(pbr.baseColorFactor[1]),
-        static_cast<float>(pbr.baseColorFactor[2]),
-        static_cast<float>(pbr.baseColorFactor[3])
-    };
-    mc.metallicFactor  = static_cast<float>(pbr.metallicFactor);
-    mc.roughnessFactor = static_cast<float>(pbr.roughnessFactor);
-
-    // Base color texture (sRGB)
-    if (pbr.baseColorTexture.index >= 0) {
-        mc.baseColorTexIndex = processTexture(model, pbr.baseColorTexture.index, true);
-    } else {
-        mc.baseColorTexIndex = textures_.getDefaultWhite();
-    }
-
-    // Metallic-roughness texture (linear)
-    if (pbr.metallicRoughnessTexture.index >= 0) {
-        mc.metallicRoughnessTexIndex = processTexture(model, pbr.metallicRoughnessTexture.index, false);
-    } else {
-        mc.metallicRoughnessTexIndex = textures_.getDefaultMR();
-    }
-
-    // Normal map (linear)
-    if (material.normalTexture.index >= 0) {
-        mc.normalTexIndex = processTexture(model, material.normalTexture.index, false);
-        mc.normalScale = static_cast<float>(material.normalTexture.scale);
-    } else {
-        mc.normalTexIndex = textures_.getDefaultNormal();
-        mc.normalScale = 1.0f;
-    }
-
-    // Occlusion (linear)
-    if (material.occlusionTexture.index >= 0) {
-        mc.occlusionTexIndex = processTexture(model, material.occlusionTexture.index, false);
-        mc.occlusionStrength = static_cast<float>(material.occlusionTexture.strength);
-    } else {
-        mc.occlusionTexIndex = textures_.getDefaultWhite();
-        mc.occlusionStrength = 1.0f;
-    }
-
-    // Emissive (sRGB)
-    if (material.emissiveTexture.index >= 0) {
-        mc.emissiveTexIndex = processTexture(model, material.emissiveTexture.index, true);
-    } else {
-        // glTF: emissive = factor * texture, with a missing texture meaning 1.
-        mc.emissiveTexIndex = textures_.getDefaultWhite();
-    }
-    mc.emissiveFactor = glm::vec3{
-        static_cast<float>(material.emissiveFactor[0]),
-        static_cast<float>(material.emissiveFactor[1]),
-        static_cast<float>(material.emissiveFactor[2])
-    };
-
-    // Alpha cutoff
-    mc.alphaCutoff = material.alphaMode == "MASK" ? static_cast<float>(material.alphaCutoff) : 0.0f;
+    // Alpha cutoff (the description already applies it to MASK only)
+    mc.alphaCutoff = base.alphaCutoff;
     if (material.alphaMode == "BLEND") {
         LOG_WARN("glTF BLEND material rendered opaque until F16 transparency is implemented");
     }
-    mc.doubleSided = material.doubleSided;
+    mc.doubleSided = base.doubleSided;
 
     // Build GPUMaterial from component and upload
     GPUMaterial gpu{};
@@ -411,9 +552,10 @@ u32 GltfLoader::processMaterial(const tinygltf::Model& model,
     gpu.emissive[1]  = mc.emissiveFactor.g;
     gpu.emissive[2]  = mc.emissiveFactor.b;
     gpu.alphaCutoff  = mc.alphaCutoff;
-    gpu.flags        = mc.doubleSided ? MATERIAL_FLAG_DOUBLE_SIDED : 0u;
+    gpu.flags        = (mc.doubleSided ? MATERIAL_FLAG_DOUBLE_SIDED : 0u) | (base.unlit ? MATERIAL_FLAG_UNLIT : 0u);
 
-    const u32 materialIndex = gpuScene_.addMaterial(gpu);
+    MaterialSupportReport support = buildSupportReport(parsed.description, parsed.info);
+    const u32 materialIndex = gpuScene_.addMaterial(gpu, parsed.description, material.name, std::move(support));
     materialCache_[matIdx] = materialIndex;
 
     return materialIndex;
@@ -425,8 +567,9 @@ u32 GltfLoader::processMaterial(const tinygltf::Model& model,
 
 u32 GltfLoader::processTexture(const tinygltf::Model& model, int textureIndex,
                                 bool sRGB) {
+    // Unresolvable textures (index out of range, no source image) are "no texture".
     if (textureIndex < 0 || textureIndex >= static_cast<int>(model.textures.size())) {
-        return textures_.getDefaultWhite();
+        return INVALID_TEXTURE_INDEX;
     }
 
     const u64 key = (static_cast<u64>(textureIndex) << 1) | (sRGB ? 1u : 0u);
@@ -437,7 +580,7 @@ u32 GltfLoader::processTexture(const tinygltf::Model& model, int textureIndex,
 
     const auto& tex = model.textures[static_cast<size_t>(textureIndex)];
     if (tex.source < 0 || tex.source >= static_cast<int>(model.images.size())) {
-        return textures_.getDefaultWhite();
+        return INVALID_TEXTURE_INDEX;
     }
 
     const auto& image = model.images[static_cast<size_t>(tex.source)];

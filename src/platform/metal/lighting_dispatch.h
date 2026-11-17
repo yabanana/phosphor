@@ -7,9 +7,11 @@
 #include <cstring>
 #include <stdexcept>
 namespace phosphor::lighting {
-inline pipe::PipelineDesc kernel(const char* name, bool rt = false) {
+// `rtLite` (F15 ticket 24): the kernel traces with the 16-byte RtPayloadLite (rt_common.h) and links the matching alpha entry
+// rt_alpha_lite.  Without it: the ticket-14 entry rt_alpha_generic (RtPayload), descriptor unchanged.
+inline pipe::PipelineDesc kernel(const char* name, bool rt = false, bool rtLite = false) {
     pipe::PipelineDesc d; d.kind = pipe::PipelineKind::Compute; d.label = name; d.functions = {name,"",""};
-    if (rt) d.linkedFunctions = {"rt_alpha_generic"};
+    if (rt) d.linkedFunctions = {rtLite ? "rt_alpha_lite" : "rt_alpha_generic"};
     return d;
 }
 inline MTL4::ArgumentTable* table(MetalContext& c, u32 buffers=24, u32 textures=16) {

@@ -3,6 +3,7 @@
 #include "core/launch_options.h"
 #include "core/types.h"
 #include "pipeline/pipeline_registry.h"
+#include "platform/metal/feature_pipelines.h"
 #include "platform/metal/gpu_scene_buffers.h"
 #include "platform/metal/metal_context.h"
 #include "renderer/gpu_types.h"
@@ -119,7 +120,10 @@ public:
     /// constant 1, every bucket drawn).  The mesh path passes its overflow
     /// word, so the ICB stays empty unless the meshlet candidates overflowed.
     void setTemporalInputs(MTL::GPUAddress previousInstances, MTL::GPUAddress temporalParams);
-    void setLightingInputs(MTL::GPUAddress params, MTL::Texture* sun, MTL::Texture* local, MTL::Texture* gi);
+    /// F15.1 (ticket 06): the lobe guide buffer and the frame's GPUDIParams, read by the indexed overflow
+    /// receivers of scenes with material features (forward_di_receiver_guide_fs).
+    void setLobeGuideInputs(MTL::GPUAddress guide, MTL::GPUAddress diParams);
+    void setLightingInputs(MTL::GPUAddress params, MTL::Texture* sun, MTL::Texture* local, MTL::Texture* gi, MTL::Texture* giBack);
     [[nodiscard]] MTL::Buffer* indexBuffer() const { return indexBuffer_; }
     void setDrawGate(MTL::GPUAddress gate) { drawGate_ = gate; }
     /// The indexed fallback of one cull class inside the mesh path's render
@@ -130,9 +134,26 @@ public:
     [[nodiscard]] MTL::GPUAddress frameConstantsAddress() const { return frameConstants_; }
     [[nodiscard]] MTL::GPUAddress lightsAddress() const { return lightsAddress_; }
     [[nodiscard]] MTL::GPUAddress textureTableAddress() const { return textureTable_; }
+    /// F15: the DFG table as a buffer (FrameConstants::dfgTable).
+    [[nodiscard]] MTL::GPUAddress dfgTableAddress() const { return dfgTable_->gpuAddress(); }
+    /// F15.1 (ticket 10): the sheen albedo table as a buffer (FrameConstants::sheenTable).
+    [[nodiscard]] MTL::GPUAddress sheenTableAddress() const { return sheenTable_->gpuAddress(); }
+    /// F15.1: the material extension buffer (FrameConstants::materialExtensions); 0 without extended materials.
+    [[nodiscard]] MTL::GPUAddress materialExtensionsAddress() const {
+        return buffers_.extensions() ? buffers_.extensions()->gpuAddress() : 0;
+    }
     [[nodiscard]] MTL::Buffer* vertexBuffer() const { return vertexBuffer_; }
+    /// F15 closure (COLOR_0): the per-vertex colour stream (float4 per vertex, parallel to vertexBuffer()); null without COLOR_0.
+    [[nodiscard]] MTL::Buffer* vertexColorBuffer() const { return vertexColorBuffer_; }
+    [[nodiscard]] MTL::GPUAddress vertexColorsAddress() const { return vertexColorBuffer_ ? vertexColorBuffer_->gpuAddress() : 0; }
+    [[nodiscard]] bool vertexColorInUse() const { return (pipelineUnion_ & FEATURE_UNION_VERTEX_COLOR) != 0u; }
     [[nodiscard]] MTL::Buffer* meshBuffer() const { return meshBuffer_; }
     [[nodiscard]] u32 forwardVariantIndex() const { return variantIndex_; }
+    /// F15.1: feature union of the frame's scene (SceneStore::featureUnion), for the other renderers.
+    [[nodiscard]] u32 featureUnion() const { return featureUnion_; }
+    /// F15.1 (ticket 22): featureUnion() with FEATURE_UNION_TEXTURE_TRANSFORM when a live material has per-slot transforms.
+    [[nodiscard]] u32 pipelineFeatureUnion() const { return pipelineUnion_; }
+    [[nodiscard]] bool textureTransformInUse() const { return (pipelineUnion_ & FEATURE_UNION_TEXTURE_TRANSFORM) != 0u; }
     [[nodiscard]] MTL::DepthStencilState* depthState() const { return depthState_; }
     void countCommands(u32 n) const { count(0, n); }
 
@@ -167,6 +188,8 @@ private:
     std::optional<u32>        forceVariant_;
     pipe::PipelineHandle      generic_ = pipe::INVALID_PIPELINE;
     std::vector<pipe::PipelineHandle> variants_;
+    FeaturePipelines          featurePipelines_;
+    u32                       featureUnion_ = 0, pipelineUnion_ = 0;
     MTL::RenderPipelineState* pipeline_ = nullptr;
     bool                      usingFallback_ = false;
     MTL::DepthStencilState*   depthState_ = nullptr;
@@ -186,6 +209,7 @@ private:
     MTL4::ArgumentTable* drawTable_      = nullptr;
 
     MTL::Buffer* vertexBuffer_ = nullptr;
+    MTL::Buffer* vertexColorBuffer_ = nullptr; // F15 closure (COLOR_0): only when the scene has a colour stream
     MTL::Buffer* indexBuffer_  = nullptr;
     MTL::Buffer* meshBuffer_   = nullptr; // GPUMeshInfo[]
     u64          geometryVersion_ = ~u64{0};
@@ -198,6 +222,8 @@ private:
     GpuDrivenMode   graphMode_ = GpuDrivenMode::Off;
     // F6: draw gate (setDrawGate), constant-1 default.
     MTL::Buffer*    drawGateOpen_ = nullptr;
+    MTL::Buffer*    dfgTable_ = nullptr; // F15: shared, written once at creation
+    MTL::Buffer*    sheenTable_ = nullptr; // F15.1 (ticket 10): shared, written once at creation
     MTL::GPUAddress drawGate_     = 0;
     MTL::GPUAddress frameConstants_ = 0;
     MTL::GPUAddress lightsAddress_  = 0;
@@ -213,9 +239,9 @@ private:
     u32               hierSteps_   = 0; // hierarchy queue steps encoded (0 .. SCENE_MAX_LEVELS)
     u32               commandCount_ = 0;
     MTL::GPUAddress   clearParams_   = 0;
-    MTL::GPUAddress   scatterParams_ = 0; // 4 x GPUScatterParams
-    std::array<MTL::GPUAddress, 4> scatterRecords_{};
-    std::array<u32, 4>             scatterCounts_{};
+    MTL::GPUAddress   scatterParams_ = 0; // kScatters x GPUScatterParams
+    std::array<MTL::GPUAddress, GpuSceneBuffers::kScatters> scatterRecords_{};
+    std::array<u32, GpuSceneBuffers::kScatters>             scatterCounts_{};
     MTL::GPUAddress   motionFrame_   = 0;
     MTL::GPUAddress   hierParams_    = 0; // SCENE_MAX_LEVELS x GPUHierParams
     MTL::GPUAddress   queue0_        = 0;

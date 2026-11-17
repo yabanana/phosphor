@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "renderer/gpu_scene.h"
+#include "renderer/material_extension_pack.h"
 #include "renderer/scene_extract.h"
 #include "renderer/scene_store.h"
 #include "scene/components.h"
@@ -1232,4 +1233,252 @@ TEST_CASE("scene store invalidates previous poses when an entity ID is reused in
     w.ecs.endFrame();
     CHECK(w.store.instances()[w.store.slotOf(b)].generation != previous);
     CHECK(w.store.instances()[w.store.slotOf(b)].generation == w.ecs.incarnation(b));
+}
+
+// ---------------------------------------------------------------------------
+// F15.1 (ticket 05): material extension records, groups, feature union.
+// ---------------------------------------------------------------------------
+namespace {
+
+MaterialDescriptionPtr specularExt(float ior, float factor, std::array<float, 3> color = {1.0f, 1.0f, 1.0f}) {
+    auto d = std::make_shared<MaterialDescription>();
+    d->specular.emplace();
+    d->specular->ior            = ior;
+    d->specular->specularFactor = factor;
+    d->specular->specularColor  = color;
+    return d;
+}
+
+// Replays extension deltas / full copies like the GPU scatter does.
+struct ExtSim {
+    std::vector<GPUMaterialExtRecord> ext;
+    bool apply(const SceneStore& s) {
+        const SceneSyncStats& st = s.stats();
+        if (st.fullExtensions) {
+            ext.assign(s.extensions().begin(), s.extensions().end());
+        } else {
+            if (ext.size() != s.extensions().size()) return false;
+            for (const GPUDeltaRecord& r : s.extensionDeltas()) {
+                if (r.slot >= ext.size()) return false;
+                std::memcpy(&ext[r.slot], r.payload, sizeof(GPUMaterialExtRecord));
+            }
+        }
+        return ext.size() == s.extensions().size() &&
+               (ext.empty() || std::memcmp(ext.data(), s.extensions().data(), ext.size() * sizeof(GPUMaterialExtRecord)) == 0);
+    }
+};
+
+} // namespace
+
+TEST_CASE("scene store: a scene without features has no extension buffer and union 0") {
+    World w;
+    w.padMaterials(20);
+    w.frame();
+    w.frame();
+    CHECK(w.store.featureUnion() == 0);
+    CHECK(w.store.extensions().empty());
+    CHECK(w.store.extensionGroups() == 0);
+    CHECK(w.store.stats().extensionRecords == 0);
+    CHECK_FALSE(w.store.stats().fullExtensions);
+    for (const GPUMaterial& m : w.store.materials()) CHECK((m.flags >> MATERIAL_FEATURE_SHIFT) == 0);
+    CHECK(w.store.materials()[0].extensionIndex == MATERIAL_EXTENSION_INVALID);
+}
+
+// F15.1 (ticket 17): the scene asks for the diffuse-irradiance target and the diffusion pass only for a VOLUMETRIC subsurface material with a
+// weight (or a weight texture); the thin mode and a zero weight never do.
+TEST_CASE("scene store: volumetricSubsurface follows the mode and the weight of the subsurface records") {
+    World w;
+    w.padMaterials(8);
+    const EntityID a = w.add(0, glm::vec3(0), glm::vec3(1.0f), 0, true);
+    w.frame();
+    CHECK_FALSE(w.store.volumetricSubsurface());
+    const auto subsurface = [](SubsurfaceMode mode, float weight) {
+        auto d = std::make_shared<MaterialDescription>();
+        d->subsurface.emplace();
+        d->subsurface->mode = mode;
+        d->subsurface->weight = weight;
+        if (mode == SubsurfaceMode::Volumetric) {
+            d->volume.emplace();
+            d->volume->thickness = 0.8f;
+        }
+        return d;
+    };
+    w.ecs.getComponent<MaterialComponent>(a).extension = subsurface(SubsurfaceMode::Thin, 1.0f);
+    w.sync();
+    CHECK((w.store.featureUnion() & MATERIAL_FEATURE_SUBSURFACE) != 0u);
+    CHECK_FALSE(w.store.volumetricSubsurface());
+    w.ecs.endFrame();
+    w.ecs.getComponent<MaterialComponent>(a).extension = subsurface(SubsurfaceMode::Volumetric, 0.0f);
+    w.sync();
+    CHECK_FALSE(w.store.volumetricSubsurface());
+    w.ecs.endFrame();
+    w.ecs.getComponent<MaterialComponent>(a).extension = subsurface(SubsurfaceMode::Volumetric, 0.5f);
+    w.sync();
+    CHECK(w.store.volumetricSubsurface());
+    w.ecs.endFrame();
+    w.ecs.getComponent<MaterialComponent>(a).extension = nullptr;
+    w.sync();
+    CHECK_FALSE(w.store.volumetricSubsurface());
+}
+
+TEST_CASE("scene store: an extended entity material owns a group, flags and records follow the description") {
+    World w;
+    w.padMaterials(40);
+    const EntityID a = w.add(0, glm::vec3(0), glm::vec3(1.0f), 0, true);
+    w.frame();
+    ExtSim sim;
+    CHECK(sim.apply(w.store));
+    CHECK(w.store.featureUnion() == 0);
+
+    // The first extension: a counted structure change allocating one group (never per frame).
+    w.ecs.getComponent<MaterialComponent>(a).extension = specularExt(1.33f, 0.5f, {2.0f, 1.0f, 0.5f});
+    w.sync();
+    CHECK(w.store.stats().structure);
+    CHECK(w.store.extensionGroups() == 1);
+    CHECK(w.store.featureUnion() == MATERIAL_FEATURE_SPECULAR_IOR);
+    const u32 ia = w.store.materialIndexOf(a);
+    const GPUMaterial& m = w.store.materials()[ia];
+    CHECK((m.flags >> MATERIAL_FEATURE_SHIFT) == MATERIAL_FEATURE_SPECULAR_IOR);
+    REQUIRE(m.extensionIndex != MATERIAL_EXTENSION_INVALID);
+    CHECK(m.extensionIndex % MATERIAL_EXT_RECORDS == 0);
+    const GPUMaterialExt0 r0 = unpackExtRecord<GPUMaterialExt0>(w.store.extensions()[m.extensionIndex]);
+    CHECK(r0.ior == 1.33f);
+    CHECK(r0.specularFactor == 0.5f);
+    CHECK(r0.specularColor[0] == 2.0f);
+    CHECK(w.store.materialsChanged());
+    CHECK(sim.apply(w.store));
+    CHECK(w.verify().empty());
+    w.ecs.endFrame();
+    const u32 group = m.extensionIndex;
+
+    // Parameter edit: only record 0 travels as a delta, the same group, no structure change.
+    // (give the buffer enough records for deltas: more extended materials)
+    std::vector<EntityID> more;
+    for (u32 i = 0; i < 40; ++i) {
+        more.push_back(w.add(0, glm::vec3(2000.0f + float(i), 0, 0), glm::vec3(1.0f), 0, true));
+        w.ecs.getComponent<MaterialComponent>(more.back()).extension = specularExt(1.5f, 0.25f);
+    }
+    w.frame();
+    CHECK(sim.apply(w.store));
+    const u32 groupAfter = w.store.materials()[w.store.materialIndexOf(a)].extensionIndex;
+    w.ecs.getComponent<MaterialComponent>(a).extension = specularExt(1.33f, 0.75f, {2.0f, 1.0f, 0.5f});
+    w.sync();
+    CHECK_FALSE(w.store.stats().structure);
+    CHECK_FALSE(w.store.stats().fullExtensions);
+    CHECK(w.store.stats().extensionRecords == 1);
+    CHECK(w.store.stats().materialRecords == 0); // the base record did not change
+    REQUIRE(w.store.extensionDeltas().size() == 1);
+    CHECK(w.store.extensionDeltas()[0].slot == groupAfter);
+    CHECK(w.store.materialsChanged());
+    CHECK(sim.apply(w.store));
+    CHECK(w.verify().empty());
+    w.ecs.endFrame();
+    (void)group;
+
+    // Toggle off (neutral values): the bit clears, the group stays (same index, no structure change).
+    const u32 capBefore = w.store.extensionGroupCapacity();
+    const u64 structBefore = w.store.structureVersion();
+    w.ecs.getComponent<MaterialComponent>(a).extension = specularExt(1.5f, 1.0f);
+    w.sync();
+    CHECK((w.store.materials()[w.store.materialIndexOf(a)].flags >> MATERIAL_FEATURE_SHIFT) == 0);
+    CHECK(w.store.materials()[w.store.materialIndexOf(a)].extensionIndex == groupAfter);
+    CHECK(w.store.extensionGroupCapacity() == capBefore);
+    CHECK(w.store.structureVersion() == structBefore);
+    CHECK(w.store.featureUnion() == MATERIAL_FEATURE_SPECULAR_IOR); // the other 40 still use it
+    CHECK(sim.apply(w.store));
+    CHECK(w.verify().empty());
+    w.ecs.endFrame();
+    // ... and back on: still the same group.
+    w.ecs.getComponent<MaterialComponent>(a).extension = specularExt(2.4f, 1.0f);
+    w.frame();
+    CHECK(w.store.materials()[w.store.materialIndexOf(a)].extensionIndex == groupAfter);
+    CHECK((w.store.materials()[w.store.materialIndexOf(a)].flags >> MATERIAL_FEATURE_SHIFT) == MATERIAL_FEATURE_SPECULAR_IOR);
+    CHECK(w.store.structureVersion() == structBefore);
+    CHECK(sim.apply(w.store));
+
+    // Removing every extension empties the union; groups stay owned (materials keep their record capacity).
+    for (EntityID e : more) w.ecs.getComponent<MaterialComponent>(e).extension.reset();
+    w.ecs.getComponent<MaterialComponent>(a).extension.reset();
+    w.frame();
+    CHECK(w.store.featureUnion() == 0);
+    CHECK(sim.apply(w.store));
+}
+
+TEST_CASE("scene store: removing an extended material frees its group (zeroed) for the next one") {
+    World w;
+    const EntityID a = w.add(0, glm::vec3(0), glm::vec3(1.0f), 0, true);
+    w.ecs.getComponent<MaterialComponent>(a).extension = specularExt(1.33f, 0.5f);
+    w.frame();
+    const u32 group = w.store.materials()[w.store.materialIndexOf(a)].extensionIndex;
+    REQUIRE(group != MATERIAL_EXTENSION_INVALID);
+    ExtSim sim;
+    CHECK(sim.apply(w.store));
+
+    w.ecs.getArray<MaterialComponent>().remove(a);
+    w.frame();
+    CHECK(w.store.featureUnion() == 0);
+    for (u32 k = 0; k < MATERIAL_EXT_RECORDS; ++k) {
+        const GPUMaterialExtRecord zero{};
+        CHECK(std::memcmp(&w.store.extensions()[group + k], &zero, sizeof(zero)) == 0);
+    }
+    CHECK(sim.apply(w.store));
+
+    const EntityID b = w.add(0, glm::vec3(3, 0, 0), glm::vec3(1.0f), 0, true);
+    w.ecs.getComponent<MaterialComponent>(b).extension = specularExt(2.4f, 1.0f);
+    w.frame();
+    CHECK(w.store.extensionGroups() == 1); // the freed group, not a new one
+    CHECK(w.store.materials()[w.store.materialIndexOf(b)].extensionIndex == group);
+    CHECK(sim.apply(w.store));
+}
+
+TEST_CASE("scene store: library material edits after the first sync reach the GPU as deltas") {
+    World w;
+    w.padMaterials(40);
+    w.add(0, glm::vec3(0), glm::vec3(1.0f), 1);
+    w.frame();
+    CHECK(w.store.featureUnion() == 0);
+    ExtSim sim;
+    CHECK(sim.apply(w.store));
+
+    MaterialDescription d = w.scene.materialDescriptions()[1];
+    d.base.roughness   = 0.33f;
+    d.base.doubleSided = true; // library material 1 is double-sided: keep its cull class
+    d.specular.emplace();
+    d.specular->ior = 0.0f; // the special mode counts as active
+    REQUIRE(w.scene.setMaterialDescription(1, d));
+    w.frame();
+    CHECK(w.store.featureUnion() == MATERIAL_FEATURE_SPECULAR_IOR);
+    CHECK(w.store.materials()[1].roughness == doctest::Approx(0.33f));
+    CHECK((w.store.materials()[1].flags >> MATERIAL_FEATURE_SHIFT) == MATERIAL_FEATURE_SPECULAR_IOR);
+    CHECK(w.store.materials()[1].extensionIndex != MATERIAL_EXTENSION_INVALID);
+    CHECK(w.store.materialsChanged());
+    CHECK(sim.apply(w.store));
+    CHECK(w.store.materials()[0].extensionIndex == MATERIAL_EXTENSION_INVALID);
+}
+
+TEST_CASE("scene store: negative control, verifyAgainstEcs reports a missed extension change") {
+    World w;
+    const EntityID a = w.add(0, glm::vec3(0), glm::vec3(1.0f), 0, true);
+    w.ecs.getComponent<MaterialComponent>(a).extension = specularExt(1.33f, 0.5f);
+    w.frame();
+    CHECK(w.verify().empty());
+    // An unmarked swap of the extension pointer: the store does not see it.
+    const_cast<MaterialComponent&>(std::as_const(w.ecs).getComponent<MaterialComponent>(a)).extension =
+        specularExt(1.33f, 0.9f);
+    CHECK_FALSE(w.verify().empty());
+}
+
+TEST_CASE("scene store: steady frames with extended materials make no extension traffic") {
+    World w;
+    w.padMaterials(30);
+    for (u32 i = 0; i < 10; ++i) {
+        const EntityID e = w.add(0, glm::vec3(float(i), 0, 0), glm::vec3(1.0f), 0, true);
+        w.ecs.getComponent<MaterialComponent>(e).extension = specularExt(1.33f, 0.5f);
+    }
+    w.frame();
+    w.frame();
+    for (u32 i = 0; i < 5; ++i) w.frame();
+    CHECK(w.store.stats().extensionRecords == 0);
+    CHECK_FALSE(w.store.stats().fullExtensions);
+    CHECK_FALSE(w.store.materialsChanged());
 }

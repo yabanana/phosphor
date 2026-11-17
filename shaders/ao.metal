@@ -23,7 +23,7 @@ kernel void ao_rtao(constant GPUAOParams& p [[buffer(0)]],const device GPUDISurf
             const float3 d=t*(r*cos(phi))+b*(r*sin(phi))+n*sqrt(max(0.0f,1-u));GPURtRay ray{};
             ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=d.x;ray.dy=d.y;ray.dz=d.z;
             ray.tmax=p.radius;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_SHADOW;ray.coneWidth=0;
-            RtPayload payload{};const auto hit=rtTrace(ray,as,ift,instances,p.slotCount,payload);sum+=hit.hit||hit.t==-2.0f?0:1;}
+            RtPayloadLite payload{};const auto hit=rtTrace(ray,as,ift,instances,p.slotCount,payload);sum+=hit.hit||hit.t==-2.0f?0:1;}
         visibility=sum/float(samples);
     }output.write(float4(visibility,visibility,visibility,1),uint2(tid%p.width,tid/p.width));
 }

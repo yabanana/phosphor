@@ -102,7 +102,7 @@ std::string canonicalString(const PipelineDesc& desc) {
         } else {
             s += formatToken(o.format);
             s += '/';
-            s += o.blend == ColorOutput::Blend::AlphaOver ? "over" : "none";
+            s += o.blend == ColorOutput::Blend::AlphaOver ? "over" : o.blend == ColorOutput::Blend::TransmittanceMap ? "tmap" : "none";
             s += '/';
             std::snprintf(buf, sizeof(buf), "%X", static_cast<unsigned>(o.writeMask & 0xF));
             s += buf;

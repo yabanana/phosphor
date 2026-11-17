@@ -1,11 +1,16 @@
 #pragma once
+#include "platform/metal/feature_pipelines.h"
 #include "platform/metal/metal_context.h"
 #include "pipeline/pipeline_registry.h"
 #include "renderer/visibility_layout.h"
+#include "renderer/material_class_table.h"
 #include "renderer/temporal_layout.h"
 #include "renderer/exposure.h"
 #include "rendergraph/render_graph.h"
+#include <algorithm>
 #include <array>
+#include <memory>
+#include <unordered_map>
 
 namespace phosphor {
 class PipelineCache;
@@ -13,6 +18,9 @@ class SceneRenderer;
 class MeshRenderer;
 class SceneStore;
 class GpuScene;
+class AccelerationStructures;
+class RtConsumer;
+class MetalGraphExecutor;
 namespace rg {
 class PassContext;
 }
@@ -35,6 +43,15 @@ class VisibilityRenderer {
     [[nodiscard]] bool needsPoseReset(u32 view, u64 bytes) const {
         return view >= previousInstances_.size() || !previousInstances_[view] || bytes > poseCapacity_;
     }
+    /// F15.2 (ticket 21): --resolve-features all (the resolve of a scene with features uses the all-lobes pipeline, no feature bins:
+    /// the exact-equivalence reference) and --debug-class-drop-lobes (every class bin pipeline compiled without those lobes).
+    /// `classBudget` (--debug-class-budget) shrinks the class table so that the overflow bin is exercised on small fixtures.
+    void setFeatureDebug(bool forceAllLobes, u32 dropLobes, u32 classBudget = VISIBILITY_FEATURE_CLASSES) {
+        forceAllLobes_ = forceAllLobes; dropLobes_ = dropLobes; classBudget_ = classBudget;
+    }
+    /// Frames resolved through per-class feature bins, and the table of the latest of them.
+    [[nodiscard]] u64 featureBinnedFrames() const { return featureBinnedFrames_; }
+    [[nodiscard]] const MaterialClassTable& classTable() const { return classTable_; }
     [[nodiscard]] u64 binnedFrames() const { return binnedFrames_; }
     [[nodiscard]] u64 genericFrames() const { return genericFrames_; }
     [[nodiscard]] u32 checkCount() const { return checksCount_; }
@@ -49,7 +66,33 @@ class VisibilityRenderer {
     // path (flag 16) for ambient fallbacks. Background: pixels without geometry.
     void prepareLighting(u32 flags, u32 sunIndex, std::array<float, 3> environment = {}, float sunAngularRadius = 0);
     void setBackground(std::array<float, 3> radiance) { background_ = radiance; }
-    void setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi);
+    /// F15.1 (ticket 17): called before prepareFrame.  allowed = the resolve owns the diffuse term (no external diffuse composite); the camera
+    /// is the unjittered reverse-Z infinite projection (tan of the half field of view per axis).  The screen-space diffusion of volumetric
+    /// subsurface is active when allowed, the scene has a volumetric material and the compute resolve runs (not the on-tile experiment).
+    void setSubsurface(bool allowed, float nearPlane, float tanHalfFovX, float tanHalfFovY) {
+        subsurfaceAllowed_ = allowed; sssNear_ = nearPlane; sssTanX_ = tanHalfFovX; sssTanY_ = tanHalfFovY;
+    }
+    [[nodiscard]] bool subsurfaceActive() const { return subsurface_; }
+    /// F15.1 (ticket 17/18): the OPTIONAL RT tier of the volumetric subsurface (--subsurface-mode rt-walk).  `rt` = the acceleration structures
+    /// (null = the tier is not available: the screen-space diffusion serves, the reason is the caller's to log); `samples` walks per pixel and frame,
+    /// `maxSteps` the hard bound of one walk; `flags` = SSS_WALK_* (gpu_types.h).  Call once after construction (it requests the kernel).
+    void setSubsurfaceWalk(AccelerationStructures* rt, u32 samples, u32 maxSteps, u32 flags);
+    /// After AccelerationStructures::prepareFrame: binds the walk's intersection function table for this frame slot.
+    void prepareSubsurfaceWalk(u32 slot);
+    [[nodiscard]] bool subsurfaceWalkActive() const { return walk_; }
+    /// Temporal accumulation + spatial prefilter of the walk signal (default on): `window` = prefilter radius, `maxCount` = history length bound (<= 255).
+    void setSubsurfaceAccumulation(bool enabled, u32 window, u32 maxCount, bool noReject = false, u32 seed = 0) { accumulate_ = enabled; accumWindow_ = window; accumMaxCount_ = std::min(maxCount, 255u); accumNoReject_ = noReject; walkSeed_ = seed; }
+    /// A signature of everything the accumulated walk depends on besides the camera (the lights): a change starts a new history.
+    void setSubsurfaceLightsSignature(u64 signature) { if (signature != lightsSignature_) { lightsSignature_ = signature; histResetRequested_ = true; ++lightsResets_; } }
+    [[nodiscard]] u32 subsurfaceHistoryResets() const { return lightsResets_; }
+    /// Binds the ping-pong history textures of the accumulation (after the graph is built).
+    void bindFrame(MetalGraphExecutor &executor);
+    /// The walk's gain target (rgb = weight x exiting radiance per unit uniform dome radiance, a = weight): the reflection composite multiplies its
+    /// ambient / GI diffuse term by it for walk pixels.  Valid after addResolve in a graph with the walk pass.
+    [[nodiscard]] rg::TextureRef subsurfaceGain() const { return walk_ ? sssGain_ : rg::TextureRef{}; }
+    /// Graph-key value of the subsurface path: 0 none, 1 screen-space diffusion, 2 RT walk.
+    [[nodiscard]] u32 subsurfaceKey() const { return subsurface_ ? (walk_ ? 2u : 1u) : 0u; }
+    void setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi, rg::TextureRef giBack = {});
     rg::BufferRef importPoseHistory(rg::RenderGraph& graph);
     [[nodiscard]] MTL::GPUAddress paramsAddress() const { return paramsAddress_; }
     [[nodiscard]] MTL::GPUAddress temporalAddress() const { return temporalAddress_; }
@@ -68,16 +111,34 @@ class VisibilityRenderer {
     [[nodiscard]] rg::TextureRef motion() const { return outputs_[4]; }
 
   private:
-    void bind(rg::PassContext &ctx, MTL4::ArgumentTable *table);
+    void bind(rg::PassContext &ctx, MTL4::ArgumentTable *table, bool withSss = false);
+    [[nodiscard]] pipe::PipelineDesc fallbackDesc(u32 sss = 0) const;
     MetalContext &context_;
     PipelineCache &pipelines_;
     SceneRenderer &scene_;
     MeshRenderer &mesh_;
+    // F15.1: the pipelines the frame encodes with (the scene's feature union applied by prepareFrame).
+    FeaturePipelines features_;
+    bool vertexColor_ = false;      // F15 closure (COLOR_0): the scene has a vertex colour stream (resolve kernels read it)
+    bool textureTransform_ = false; // F15.1 (ticket 22): the scene has per-slot texture transforms (bin pipelines compile them)
+    std::array<pipe::PipelineHandle, VISIBILITY_CLASSES> servedResolve_{};
+    pipe::PipelineHandle servedGeneric_ = pipe::INVALID_PIPELINE, servedTile_ = pipe::INVALID_PIPELINE,
+                         servedFallback_ = pipe::INVALID_PIPELINE;
     bool binning_;
+    // F15.2: per-class feature bins of a scene with material features (binning == 2 in the params).
+    pipe::PipelineHandle binPipeline(u32 mask, bool overflow);
+    bool forceAllLobes_ = false, featureBins_ = false;
+    u32 dropLobes_ = 0, classBudget_ = VISIBILITY_FEATURE_CLASSES;
+    MaterialClassTable classTable_;
+    std::array<pipe::PipelineHandle, VISIBILITY_FEATURE_CLASSES> servedBins_{};
+    pipe::PipelineHandle servedOverflow_ = pipe::INVALID_PIPELINE;
+    std::unordered_map<u64, pipe::PipelineHandle> binHandles_;
+    u64 featureBinnedFrames_ = 0;
+    u32 loggedOverflowClasses_ = 0;
     bool lighting_ = false;
     MTL::DepthStencilState* lightingFallbackDepth_ = nullptr;
     MTL::GPUAddress lightingAddress_ = 0;
-    rg::TextureRef sun_, direct_, indirect_;
+    rg::TextureRef sun_, direct_, indirect_, indirectBack_;
     bool tileResolve_ = false;
     bool adaptive_ = false;
     std::array<MTL::Buffer *, 4> shadingHistory_{};
@@ -118,7 +179,35 @@ class VisibilityRenderer {
     };
     std::array<Buffers, METAL_FRAMES_IN_FLIGHT> frames_{};
     // Separate tables: mutation after encoding must not change earlier work.
-    std::array<MTL4::ArgumentTable *, 5> tables_{};
+    std::array<MTL4::ArgumentTable *, 8> tables_{}; // 7: the walk accumulation pass
+    // F15.1 (ticket 17): diffuse-irradiance target, clear and diffusion passes (tables_ 5 and 6).
+    bool subsurfaceAllowed_ = false, subsurface_ = false;
+    float sssNear_ = 0.1f, sssTanX_ = 1.0f, sssTanY_ = 1.0f;
+    pipe::PipelineHandle sssClear_, sssDiffuse_, fallbackSss_;
+    rg::TextureRef sss_, sssResult_, sssGain_;
+    // Ticket 17/18 (RT tier): the walk's raw outputs and the accumulation history (ping-pong: previous / current imports bound each frame).
+    rg::TextureRef walkRaw_, walkTerm_, walkGain_, histTermPrev_, histTermCur_, histGainPrev_, histGainCur_;
+    pipe::PipelineHandle sssAccumulate_ = pipe::INVALID_PIPELINE;
+    bool accumulate_ = true, accumNoReject_ = false;
+    u32 walkSeed_ = 0;
+    u32 accumWindow_ = 4, accumMaxCount_ = 64;
+    std::array<MTL::Texture *, 2> histTerm_{}, histGain_{};
+    u32 histWidth_ = 0, histHeight_ = 0, histCur_ = 0;
+    bool histFresh_ = true, histResetRequested_ = false;
+    u64 lightsSignature_ = 0;
+    u32 lightsResets_ = 0;
+    MTL::GPUAddress accumParamsAddress_ = 0;
+    // Ticket 17/18: the RT walk tier (SSS_OUTPUT == 2): the kernel replaces the diffusion pass.
+    AccelerationStructures* walkRt_ = nullptr;
+    std::unique_ptr<RtConsumer> walkConsumer_;
+    // F15.1 (ticket 14, round 3): sssWalk_ is the SERVED walk kernel: sssWalkLite_ (RtPayloadLite) or, while the scene feature union has
+    // transmission, sssWalkGlass_ (full RtPayload, transmittance-aware exit shadow rays).
+    pipe::PipelineHandle sssWalk_ = pipe::INVALID_PIPELINE, sssWalkLite_ = pipe::INVALID_PIPELINE, sssWalkGlass_ = pipe::INVALID_PIPELINE;
+    bool walkWanted_ = false, walk_ = false;
+    u32 walkSamples_ = 4, walkSteps_ = 512, walkFlags_ = 0;
+    MTL::GPUAddress walkParamsAddress_ = 0, walkTableAddress_ = 0;
+    [[nodiscard]] u32 sssOutput() const { return subsurface_ ? (walk_ ? 2u : 1u) : 0u; }
+    MTL::GPUAddress sssParamsAddress_ = 0;
     pipe::PipelineHandle clear_, classify_, generic_, present_, fallback_, tile_;
     pipe::PipelineHandle adaptivePipeline_, saveHistory_;
     std::array<pipe::PipelineHandle, VISIBILITY_CLASSES> resolve_{};

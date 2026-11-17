@@ -53,6 +53,9 @@ bool ShaderReloader::buildLibrary(const std::vector<std::string>& sources, const
             std::vector<std::string>{std::string(PHOSPHOR_METAL_TOOLCHAIN_DIR)+"/usr/bin/metal"};
         const std::vector<std::string> flags = compilerFlags();
         argv.insert(argv.end(), flags.begin(), flags.end());
+        // F15.2 (ticket 21): the exact-maths copy of the resolve kernels is its own module (cmake/App.cmake).
+        if (fs::path(source).filename() == "material_passes_exact.metal")
+            argv.insert(argv.end(), {"-fmetal-math-mode=safe", "-DPHOSPHOR_EXACT_MODULE=1", "-Wno-modules-import-nested-redundant"});
         argv.insert(argv.end(), {"-c", source, "-o", air});
         const ProcessResult r = runProcess(argv);
         if (r.exitCode != 0) {

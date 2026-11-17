@@ -22,6 +22,7 @@ class SceneStore;
 //              mirror; motion and hierarchy slots: the GPU's product, exact
 //              because both sides compute without contraction, spike S6)
 //   materials  == mirror byte for byte
+//   extensions (F15.1) the extension records == mirror byte for byte
 //   visible    (gpu-driven on) the GPU's per-slot visibility (from the
 //              prefix) == cullReference() on the read-back instances, except
 //              slots whose margin to a decision boundary is inside the
@@ -38,6 +39,7 @@ class SceneStore;
 struct SceneReadback {
     std::span<const GPUInstance> instances; // slot capacity
     std::span<const GPUMaterial> materials;
+    std::span<const GPUMaterialExtRecord> extensions; // F15.1: store.extensions().size() records (empty without)
     std::span<const u32> prefix;            // on: slots + 1
     std::span<const u32> visible;           // on: slots
     std::span<const u32> drawArgs;          // on: 2 per command
@@ -51,6 +53,7 @@ struct SceneCheckResult {
     u32         instanceErrors  = 0;
     u32         matrixErrors    = 0;
     u32         materialErrors  = 0;
+    u32         extensionErrors = 0; // F15.1 extension records differing from the mirror
     u32         visibleErrors   = 0; // outside the band
     u32         bandDifferences = 0; // inside the band (allowed)
     u32         listErrors      = 0;

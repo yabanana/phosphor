@@ -32,6 +32,7 @@ inline bool giReusable(GPUGiReservoir r,constant GPUProbeGridParams& p,const dev
         r.materialRevision==p.materialRevision && r.viewRevision==p.viewRevision;
     if(!proposal)return false;
     if(!(r.flags&GI_SAMPLE_VALID))return r.W==0.0f; // No selected secondary to validate/dereference.
+    if(r.slot==GI_SLOT_ESCAPED)return true; // an escaped (environment) sample references no geometry; its endpoint stays a direction at maxDistance
     return r.slot<p.slotCount && instances[r.slot].generation==r.instanceGeneration &&
         (instances[r.slot].flags&INSTANCE_FLAG_VALID);
 }
@@ -104,7 +105,7 @@ kernel void gi_candidates(instance_acceleration_structure as [[buffer(0)]],
     ray.ox=origin.x;ray.oy=origin.y;ray.oz=origin.z;ray.dx=wi.x;ray.dy=wi.y;ray.dz=wi.z;
     ray.tmax=p.maxDistance;ray.mask=RT_MASK_INDIRECT;ray.type=RT_PROBE_DIFFUSE;RtPayload payload{};
     GPURtHit hit=rtTraceSurface(ray,as,ift,instances,p.slotCount,payload,meshes,vertices,indices,p.meshCount);
-    float3 y=point.xyz+wi*p.maxDistance,ny=-wi,L(0.0f); // direct environment excluded
+    float3 y=point.xyz+wi*p.maxDistance,ny=-wi,L=hit.hit?float3(0.0f):giEscapeRadiance(p); // an escaped ray returns the declared environment (ownership rule: gi_common.h)
     GiMaterial material;
     bool valid=true;
     if(hit.hit) {
@@ -118,7 +119,7 @@ kernel void gi_candidates(instance_acceleration_structure as [[buffer(0)]],
         } else L=0.0f;
     }
     r.M=1u; // even zero contribution/backface/miss counts as a sampled path
-    r.slot=hit.hit?hit.slot:~0u;r.instanceGeneration=hit.generation;
+    r.slot=hit.hit?hit.slot:GI_SLOT_ESCAPED;r.instanceGeneration=hit.generation;
     for(uint k=0;k<3u;++k) {r.position[k]=y[k];r.normal[k]=ny[k];r.radiance[k]=L[k];r.sourcePosition[k]=point[k];r.sourceNormal[k]=n[k];}
     r.flags=valid?(GI_SAMPLE_VALID|GI_PROPOSAL_VALID):0u;
 

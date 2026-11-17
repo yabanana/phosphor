@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/types.h"
+#include "testbench/corpus_rig.h"
 #include <glm/glm.hpp>
 #include <memory>
 #include <string>
@@ -86,7 +87,13 @@ public:
 /// the other benches ignore them.  Zero / negative = the bench's default.
 struct TestBenchParams {
     std::string scenePath;
-    std::string lightingScenario,reflectionScenario;
+    std::string terrainTexturesPath;   // F15.4 ticket 23: unpacked CC0 terrain sets (empty = the procedural stand-ins)
+    std::string materialOverridesPath; // F15.1: applied by the scene viewer over the loaded glTF (empty = none)
+    CorpusRigRequest corpusRig;        // F15.3 ticket 22: declared rig and bounds framing of the Khronos corpus run
+    std::string lightingScenario,reflectionScenario,materialScenario;
+    bool materialMotion = false;     // F15.1 (ticket 17/18): --material-motion (camera orbit on a material scenario)
+    bool transmissionMotion = false; // F15.1 ticket 13: --transmission-motion (camera orbit + moving emissive panel on a transmission fixture)
+    u32 materialToggleEvery = 0; // F15.1: specular grids edit/toggle the extension every N frames (0 = never)
     u32 localLightCount = 1024;
     bool areaLights = false, stationaryLights = false;
     u32   instances         = 0;     // --instances

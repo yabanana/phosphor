@@ -84,7 +84,7 @@ TEST_CASE("launch options: F3 pipeline switches") {
     CHECK_FALSE(o.compileQosInteractive);
     CHECK(o.pipelineSalt == 0);
     REQUIRE(parse({"--pipeline-archive", "a.metallib", "--no-pipeline-archive", "--harvest-pipelines", "p.mtl4-json",
-                   "--pipeline-sync", "--debug-compile-storm", "--debug-pipeline-fallback", "--debug-flexible-pipelines", "--debug-mode", "2", "--force-variant", "41", "--compile-qos", "interactive", "--pipeline-salt", "42", "--frame-trace", "t.csv",
+                   "--pipeline-sync", "--debug-compile-storm", "--debug-pipeline-fallback", "--debug-pipeline-xpc-fail", "2", "--debug-flexible-pipelines", "--debug-mode", "2", "--force-variant", "41", "--compile-qos", "interactive", "--pipeline-salt", "42", "--frame-trace", "t.csv",
                    "--shader-dir", "shaders", "--debug-hot-reload", "probe.metallib"},
                   o, err));
     CHECK(o.pipelineArchivePath == "a.metallib");
@@ -93,6 +93,7 @@ TEST_CASE("launch options: F3 pipeline switches") {
     CHECK(o.pipelineSync);
     CHECK(o.debugCompileStorm);
     CHECK(o.debugPipelineFallback);
+    CHECK(o.debugPipelineXpcFail == 2u);
     CHECK(o.debugFlexiblePipelines);
     CHECK(o.debugMode == 2);
     CHECK(o.forceVariant == 41u);
@@ -447,7 +448,8 @@ TEST_CASE("launch options: F5 scene switches") {
     for (const auto& [text, kind] : {std::pair<const char*, SceneCorruption>{"delta", SceneCorruption::Delta},
                                      {"plane", SceneCorruption::Plane},
                                      {"command", SceneCorruption::Command},
-                                     {"touch", SceneCorruption::Touch}}) {
+                                     {"touch", SceneCorruption::Touch},
+                                     {"extension", SceneCorruption::Extension}}) {
         REQUIRE(parse({"--debug-gpu-scene-corrupt", text}, o, err));
         CHECK(o.debugGpuSceneCorrupt == kind);
     }
@@ -1097,6 +1099,22 @@ TEST_CASE("F10-F12 launch contract refuses unavailable receiver paths and tiers"
     CHECK(o.debugLightingCorrupt==2);
 }
 
+TEST_CASE("F15.3 --capture-linear-accumulate averages the frames ending at the capture frame") {
+    LaunchOptions o;std::string e;
+    const std::vector<const char*> base{"--render-path","visibility","--frames","64","--warmup","0","--capture-linear","x.pfm","--capture-linear-frame","63"};
+    auto with=[&](std::initializer_list<const char*> extra){std::vector<const char*> a=base;a.insert(a.end(),extra.begin(),extra.end());return a;};
+    CHECK(o.captureLinearAccumulate==0);
+    REQUIRE(parse(with({"--capture-linear-accumulate","32"}),o,e));
+    CHECK(o.captureLinearAccumulate==32);
+    LaunchOptions whole;REQUIRE(parse(with({"--capture-linear-accumulate","64"}),whole,e));CHECK(whole.captureLinearAccumulate==64);
+    LaunchOptions bad;
+    CHECK_FALSE(parse(with({"--capture-linear-accumulate","0"}),bad,e));          // positive count
+    CHECK_FALSE(parse(with({"--capture-linear-accumulate","65"}),bad,e));         // the window would start before frame 0
+    CHECK_FALSE(parse(with({"--capture-linear-accumulate","x"}),bad,e));
+    CHECK_FALSE(parse({"--render-path","visibility","--frames","64","--capture-linear-sequence","seq","--capture-linear-accumulate","4"},bad,e));
+    CHECK_FALSE(parse({"--render-path","visibility","--frames","64","--capture-linear-accumulate","4"},bad,e)); // no single capture
+}
+
 TEST_CASE("F12 linear capture and exact-frame export validate their signal") {
     LaunchOptions o;std::string e;
     CHECK_FALSE(parse({"--capture-linear","x.pfm","--frames","1"},o,e));
@@ -1269,6 +1287,10 @@ TEST_CASE("F13/F14 budget defaults are the measured ones") {
     CHECK_FALSE(parse({"--reflection-boost-samples","9"},nb,error));CHECK_FALSE(parse({"--reflection-boost-roughness","2"},nb,error));LaunchOptions mh;REQUIRE(parse({"--specular-max-history","32"},mh,error));CHECK(mh.specularMaxHistory==32);
     CHECK_FALSE(parse({"--specular-max-history","300"},mh,error));
     LaunchOptions ao3;REQUIRE(parse({"--ao-atrous-iterations","3"},ao3,error));CHECK(ao3.aoAtrousIterations==3);
+    // F13.4 experiment: --lighting-denoise-energy defaults off, needs the custom denoiser.
+    {LaunchOptions e0;REQUIRE(parse({},e0,error));CHECK_FALSE(e0.lightingDenoiseEnergy);
+     LaunchOptions e1;REQUIRE(parse({"--render-path","visibility","--reflections","ssr","--lighting-denoise","custom","--lighting-denoise-energy","on"},e1,error));CHECK(e1.lightingDenoiseEnergy);
+     LaunchOptions e2;CHECK_FALSE(parse({"--lighting-denoise-energy","on"},e2,error));LaunchOptions e3;CHECK_FALSE(parse({"--lighting-denoise-energy","maybe"},e3,error));}
     LaunchOptions badAo;CHECK_FALSE(parse({"--ao-atrous-iterations","0"},badAo,error));CHECK_FALSE(parse({"--ao-atrous-iterations","6"},badAo,error));
     LaunchOptions w;REQUIRE(parse({"--ssr-rough-steps","64","--ao-rays","4","--specular-atrous-iterations","3"},w,error));
     CHECK(w.ssrRoughSteps==64);CHECK(w.aoRays==4);CHECK(w.specularAtrousIterations==3);
@@ -1346,4 +1368,303 @@ TEST_CASE("F14.2 --report-frames names the per-frame GPU pass timeline file") {
     CHECK(o.reportFramesPath == "frames.csv");
     LaunchOptions missing;
     CHECK_FALSE(parse({"--report-frames"}, missing, error));
+}
+
+TEST_CASE("F15.3 material scenarios select bench 2 with the declared environment composite path") {
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--bench","2","--material-scenario","furnace-base","--render-path","visibility","--reflections","ssr","--post","--upscaler","native"},o,error));
+    CHECK(o.materialScene=="furnace-base");
+    CHECK_FALSE(parse({"--bench","6","--material-scenario","furnace-base","--render-path","visibility","--reflections","ssr"},o,error));
+    CHECK_FALSE(parse({"--bench","2","--material-scenario","nope","--render-path","visibility","--reflections","ssr"},o,error));
+    CHECK(error.find("unknown")!=std::string::npos);
+    CHECK_FALSE(parse({"--bench","2","--material-scenario","furnace-base","--render-path","visibility"},o,error)); // reflections off needs the lit resolve
+    // Deterministic environment terms: reflections off with the lit resolve.
+    CHECK(parse({"--bench","2","--material-scenario","furnace-resolve","--render-path","visibility","--reflections","off","--lighting-denoise","custom"},o,error));
+    // F15.1 (ticket 08): the RT and probe transports are valid fixtures of the ior/specular grid.
+    CHECK(parse({"--bench","2","--material-scenario","specular-grid-env","--render-path","visibility","--reflections","rt","--rt","on"},o,error));
+    CHECK(parse({"--bench","2","--material-scenario","specular-grid-env","--render-path","visibility","--reflections","probes"},o,error));
+}
+
+TEST_CASE("F15.3 the runner's exact capture command line is accepted") {
+    // Mirrors tools/f15_check.py capture_command (same flags, paths shortened).
+    LaunchOptions o;std::string error;
+    REQUIRE(parse({"--scene","procedural","--bench","2","--material-scenario","base-grid-sun","--render-path","visibility",
+                   "--geometry-path","mesh","--rt","off","--shadows","off","--lighting","legacy","--gi","off","--reflections","ssr",
+                   "--ao","off","--lighting-denoise","custom","--reflection-samples","8","--lighting-seed","1","--post","--upscaler",
+                   "native","--resolution","1280x720","--frames","128","--warmup","0","--fixed-timestep","--no-ui","--no-vsync",
+                   "--no-gpu-timing","--debug-lighting","1","--capture-linear","engine.pfm","--capture-linear-frame","127",
+                   "--capture-linear-signal","hdr","--export-reference","snapshot","--export-reference-frame","127","--report","r.json"},o,error));
+    CHECK(error.empty());CHECK(o.materialScene=="base-grid-sun");CHECK(o.captureLinearFrame==127);CHECK(o.exportReference=="snapshot");
+}
+
+TEST_CASE("F15.3 the deterministic resolve scenarios accept the runner's capture command lines") {
+    // base-grid-env-resolve runs with --reflections off (the resolve evaluates the declared environment);
+    // roughness-extremes-sun mirrors base-grid-sun.  Mirrors tools/f15_check.py capture_command.
+    for (const auto& [scenario, reflections] : {std::pair<const char*, const char*>{"base-grid-env-resolve", "off"},
+                                                {"roughness-extremes-sun", "ssr"}}) {
+        LaunchOptions o;std::string error;
+        REQUIRE_MESSAGE(parse({"--scene","procedural","--bench","2","--material-scenario",scenario,"--render-path","visibility",
+                       "--geometry-path","mesh","--rt","off","--shadows","off","--lighting","legacy","--gi","off","--reflections",reflections,
+                       "--ao","off","--lighting-denoise","custom","--reflection-samples","8","--lighting-seed","1","--post","--upscaler",
+                       "native","--resolution","1280x720","--frames","128","--warmup","0","--fixed-timestep","--no-ui","--no-vsync",
+                       "--no-gpu-timing","--debug-lighting","1","--capture-linear","engine.pfm","--capture-linear-frame","127",
+                       "--capture-linear-signal","hdr","--export-reference","snapshot","--export-reference-frame","127","--report","r.json"},o,error),error);
+        CHECK(o.materialScene==scenario);
+    }
+    LaunchOptions bad;std::string error;
+    // reflections off without the custom denoiser is refused (the resolve needs the lit path).
+    CHECK_FALSE(parse({"--bench","2","--material-scenario","base-grid-env-resolve","--render-path","visibility","--reflections","off"},bad,error));
+}
+
+TEST_CASE("F15 launch option --material-overrides needs the scene viewer and a glTF scene") {
+    LaunchOptions o;
+    std::string error;
+    REQUIRE(parse({"--bench", "4", "--scene", "assets/a b/scene.gltf", "--material-overrides", "path with spaces/overrides.json"}, o, error));
+    CHECK(o.materialOverridesPath == "path with spaces/overrides.json");
+    // Without the scene viewer or a named glTF scene the overrides would be ignored: refused.
+    LaunchOptions bad;
+    CHECK_FALSE(parse({"--material-overrides", "o.json"}, bad, error));
+    CHECK(error.find("--material-overrides") != std::string::npos);
+    CHECK_FALSE(parse({"--bench", "2", "--scene", "s.gltf", "--material-overrides", "o.json"}, bad, error));
+    CHECK_FALSE(parse({"--bench", "4", "--material-overrides", "o.json"}, bad, error));
+    CHECK_FALSE(parse({"--bench", "4", "--scene", "procedural", "--material-overrides", "o.json"}, bad, error));
+    // Malformed uses keep their own errors.
+    CHECK_FALSE(parse({"--material-overrides"}, bad, error));
+    CHECK_FALSE(parse({"--material-overrides", ""}, bad, error));
+    CHECK_FALSE(parse({"--material-overrides", "--frames"}, bad, error));
+}
+
+TEST_CASE("launch options: F15.1 --material-toggle-every needs a specular grid scenario") {
+    LaunchOptions o;
+    std::string error;
+    const std::vector<const char*> base{"--scene", "procedural", "--bench", "2", "--material-scenario", "specular-grid-sun",
+                                        "--render-path", "visibility", "--reflections", "ssr", "--post", "--upscaler", "native"};
+    auto with = [&](std::vector<const char*> extra, const char* scenario) {
+        std::vector<const char*> args = base;
+        args[5] = scenario;
+        args.insert(args.end(), extra.begin(), extra.end());
+        return parse(args, o, error);
+    };
+    CHECK(with({"--material-toggle-every", "30"}, "specular-grid-sun"));
+    CHECK(o.materialToggleEvery == 30);
+    CHECK_FALSE(with({"--material-toggle-every", "30"}, "base-grid-sun"));
+    CHECK(error.find("specular grid") != std::string::npos);
+    LaunchOptions fresh;
+    CHECK(fresh.materialToggleEvery == 0);
+}
+
+TEST_CASE("launch options: F15.1 --transmission-motion needs a transmission scenario; --capture-linear-signal reactive") {
+    LaunchOptions o;
+    std::string error;
+    const std::vector<const char*> base{"--scene", "procedural", "--bench", "2", "--material-scenario", "transmission-roughness-ior",
+                                        "--render-path", "visibility", "--reflections", "ssr", "--post", "--upscaler", "native"};
+    auto with = [&](std::vector<const char*> extra, const char* scenario) {
+        std::vector<const char*> args = base;
+        args[5] = scenario;
+        args.insert(args.end(), extra.begin(), extra.end());
+        return parse(args, o, error);
+    };
+    CHECK(with({"--transmission-motion"}, "transmission-roughness-ior"));
+    CHECK(o.transmissionMotion);
+    CHECK_FALSE(with({"--transmission-motion"}, "base-grid-sun"));
+    CHECK(error.find("transmission") != std::string::npos);
+    CHECK(with({}, "transmission-roughness-ior"));
+    CHECK_FALSE(o.transmissionMotion);
+    CHECK(with({"--capture-linear", "x.pfm", "--frames", "4", "--capture-linear-signal", "reactive"}, "transmission-roughness-ior"));
+    CHECK(o.captureLinearSignal == 12);
+    LaunchOptions fresh;
+    CHECK_FALSE(fresh.transmissionMotion);
+}
+
+TEST_CASE("launch options: F15.1 --debug-transmission-both-branches is verification only") {
+    LaunchOptions o;
+    std::string error;
+    const std::vector<const char*> base{"--scene", "procedural", "--bench", "2", "--material-scenario", "transmission-thin-volume", "--render-path", "visibility",
+                                        "--rt", "on", "--reflections", "rt", "--post", "--upscaler", "native"};
+    auto with = [&](std::vector<const char*> extra, const char* scenario = "transmission-thin-volume") {
+        std::vector<const char*> args = base;
+        args[5] = scenario;
+        args.insert(args.end(), extra.begin(), extra.end());
+        return parse(args, o, error);
+    };
+    CHECK_FALSE(with({"--debug-transmission-both-branches"}));              // refused without --debug-lighting
+    CHECK(error.find("--debug-lighting") != std::string::npos);
+    CHECK(with({"--debug-transmission-both-branches", "--debug-lighting", "1"}));
+    CHECK(o.debugTransmissionBothBranches);
+    CHECK_FALSE(with({"--debug-transmission-both-branches", "--debug-lighting", "1"}, "base-grid-sun")); // transmission scenarios only
+    CHECK(with({"--debug-lighting", "1"}));
+    CHECK_FALSE(o.debugTransmissionBothBranches);
+}
+
+TEST_CASE("launch options: --debug-lobe-guide (F15.1)") {
+    LaunchOptions o;
+    std::string e;
+    const std::vector<const char*> base = {"--render-path", "visibility", "--geometry-path", "mesh", "--reflections", "ssr"};
+    auto with = [&](std::vector<const char*> extra) {
+        std::vector<const char*> args = base;
+        args.insert(args.end(), extra.begin(), extra.end());
+        o = LaunchOptions{};
+        return parse(args, o, e);
+    };
+    CHECK(with({}));
+    CHECK(o.debugLobeGuide == 0);
+    REQUIRE(with({"--debug-lobe-guide", "4", "--debug-lobe-guide-corrupt", "--debug-lobe-guide-dump", "guide.bin"}));
+    CHECK(o.debugLobeGuide == 4);
+    CHECK(o.debugLobeGuideCorrupt);
+    CHECK(o.debugLobeGuideDump == "guide.bin");
+    // The control and the dump need the check.
+    CHECK_FALSE(with({"--debug-lobe-guide-corrupt"}));
+    CHECK_FALSE(with({"--debug-lobe-guide-dump", "guide.bin"}));
+    CHECK_FALSE(with({"--debug-lobe-guide-dump"}));
+    CHECK_FALSE(with({"--debug-lobe-guide", "-1"}));
+    // F15 closure (ticket 06): the raster-order-group control and the skewed-cost delay need the check too.
+    REQUIRE(with({"--debug-lobe-guide", "1", "--debug-lobe-guide-no-rog", "--debug-lobe-guide-delay"}));
+    CHECK(o.debugLobeGuideNoRog);
+    CHECK(o.debugLobeGuideDelay);
+    REQUIRE(with({"--debug-lobe-guide", "1"}));
+    CHECK_FALSE(o.debugLobeGuideNoRog);
+    CHECK_FALSE(o.debugLobeGuideDelay);
+    CHECK_FALSE(with({"--debug-lobe-guide-no-rog"}));
+    CHECK_FALSE(with({"--debug-lobe-guide-delay"}));
+    // The producers exist only on the visibility + mesh path with direct-lighting passes.
+    LaunchOptions plain;
+    CHECK_FALSE(parse({"--debug-lobe-guide", "1"}, plain, e));
+    CHECK(e.find("--debug-lobe-guide") != std::string::npos);
+    CHECK_FALSE(parse({"--render-path", "visibility", "--geometry-path", "mesh", "--shadows", "csm", "--debug-lobe-guide", "1"},
+                      plain, e));
+}
+
+TEST_CASE("F15.1 ticket 14 transmittance duplicate filter controls need RT and are off by default") {
+    LaunchOptions options; std::string error;
+    CHECK(options.debugTransmittanceDedup); CHECK_FALSE(options.debugTransmittanceInject);
+    REQUIRE(parse({"--rt","on","--debug-transmittance-dedup","off"},options,error));
+    CHECK_FALSE(options.debugTransmittanceDedup);
+    options = LaunchOptions{};
+    REQUIRE(parse({"--rt","on","--debug-transmittance-inject","--debug-transmittance-dedup","on"},options,error));
+    CHECK(options.debugTransmittanceDedup); CHECK(options.debugTransmittanceInject);
+    options = LaunchOptions{};
+    CHECK_FALSE(parse({"--debug-transmittance-dedup","off"},options,error));
+    CHECK_FALSE(parse({"--debug-transmittance-inject"},options,error));
+    CHECK_FALSE(parse({"--rt","on","--debug-transmittance-dedup","maybe"},options,error));
+}
+
+TEST_CASE("F15.1 ticket 15 --debug-transmittance-map is on by default and needs --shadows csm") {
+    LaunchOptions options; std::string error;
+    CHECK(options.debugTransmittanceMap);
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm","--debug-transmittance-map","off"},options,error));
+    CHECK_FALSE(options.debugTransmittanceMap);
+    options = LaunchOptions{};
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm","--debug-transmittance-map","on"},options,error));
+    CHECK(options.debugTransmittanceMap);
+    options = LaunchOptions{};
+    CHECK_FALSE(parse({"--debug-transmittance-map","off"},options,error));
+    CHECK_FALSE(parse({"--render-path","visibility","--shadows","csm","--debug-transmittance-map","maybe"},options,error));
+}
+
+TEST_CASE("F15 closure ticket 13 --debug-glass-tint is entry by default and accepts entry or camera") {
+    LaunchOptions options; std::string error;
+    CHECK_FALSE(options.debugGlassTintCameraOnly);
+    REQUIRE(parse({"--debug-glass-tint","camera"},options,error));
+    CHECK(options.debugGlassTintCameraOnly);
+    options = LaunchOptions{};
+    REQUIRE(parse({"--debug-glass-tint","entry"},options,error));
+    CHECK_FALSE(options.debugGlassTintCameraOnly);
+    CHECK_FALSE(parse({"--debug-glass-tint","maybe"},options,error));
+}
+
+TEST_CASE("F15 closure ticket 15 --debug-receiver-own is on by default and needs --shadows csm") {
+    LaunchOptions options; std::string error;
+    CHECK(options.debugReceiverOwn);
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm","--debug-receiver-own","off"},options,error));
+    CHECK_FALSE(options.debugReceiverOwn);
+    options = LaunchOptions{};
+    REQUIRE(parse({"--render-path","visibility","--shadows","csm","--debug-receiver-own","on"},options,error));
+    CHECK(options.debugReceiverOwn);
+    options = LaunchOptions{};
+    CHECK_FALSE(parse({"--debug-receiver-own","off"},options,error));
+    CHECK_FALSE(parse({"--render-path","visibility","--shadows","csm","--debug-receiver-own","maybe"},options,error));
+}
+
+TEST_CASE("F15.1 ticket 15 --shadow-transmittance-divisor accepts 1, 2 and 4 (default 2)") {
+    LaunchOptions options; std::string error;
+    CHECK(options.shadowTransmittanceDivisor == 2);
+    for (u32 n : {1u, 2u, 4u}) {
+        options = LaunchOptions{};
+        REQUIRE(parse({"--shadow-transmittance-divisor", n == 1 ? "1" : n == 2 ? "2" : "4"}, options, error));
+        CHECK(options.shadowTransmittanceDivisor == n);
+    }
+    options = LaunchOptions{};
+    CHECK_FALSE(parse({"--shadow-transmittance-divisor", "3"}, options, error));
+    CHECK_FALSE(parse({"--shadow-transmittance-divisor", "0"}, options, error));
+}
+
+TEST_CASE("F15 launch option --corpus-rig parses YAW,PITCH and needs the scene viewer with a glTF scene") {
+    LaunchOptions o;
+    std::string error;
+    REQUIRE(parse({"--bench", "4", "--scene", "m.gltf", "--corpus-rig", "-35.5,12"}, o, error));
+    CHECK(o.corpusRig);
+    CHECK(o.corpusYaw == doctest::Approx(-35.5f));
+    CHECK(o.corpusPitch == doctest::Approx(12.0f));
+    LaunchOptions bad;
+    CHECK_FALSE(parse({"--corpus-rig", "0,0"}, bad, error));
+    CHECK(error.find("--corpus-rig") != std::string::npos);
+    CHECK_FALSE(parse({"--bench", "4", "--scene", "procedural", "--corpus-rig", "0,0"}, bad, error));
+    CHECK_FALSE(parse({"--bench", "4", "--scene", "m.gltf", "--corpus-rig", "10"}, bad, error));
+    CHECK_FALSE(parse({"--bench", "4", "--scene", "m.gltf", "--corpus-rig", "10,90"}, bad, error));
+    CHECK_FALSE(parse({"--bench", "4", "--scene", "m.gltf", "--corpus-rig", "x,y"}, bad, error));
+    CHECK_FALSE(parse({"--bench", "4", "--scene", "m.gltf", "--corpus-rig", "0,0,1"}, bad, error));
+}
+
+TEST_CASE("F15.1 (ticket 22) --reflection-bounces bounds the mirror chain at 0..3 (default 3)") {
+    LaunchOptions o;
+    std::string error;
+    REQUIRE(parse({"--bench", "4"}, o, error));
+    CHECK(o.reflectionBounces == 3u);
+    for (u32 n = 0; n <= 3; ++n) {
+        const std::string value = std::to_string(n);
+        o = LaunchOptions{};
+        REQUIRE(parse({"--bench", "4", "--reflection-bounces", value.c_str()}, o, error));
+        CHECK(o.reflectionBounces == n);
+    }
+    LaunchOptions bad;
+    CHECK_FALSE(parse({"--bench", "4", "--reflection-bounces", "4"}, bad, error));
+    CHECK_FALSE(parse({"--bench", "4", "--reflection-bounces", "-1"}, bad, error));
+    CHECK_FALSE(parse({"--bench", "4", "--reflection-bounces"}, bad, error));
+}
+
+TEST_CASE("F15 closure launch option --specular-ms defaults on (ADR-0007) and parses on|off") {
+    LaunchOptions o;
+    std::string error;
+    REQUIRE(parse({}, o, error));
+    CHECK(o.specularMs); // owner decision 2026-11-15: on by default; off = the Appendix B model, bit-identical to before
+    REQUIRE(parse({"--specular-ms", "off"}, o, error));
+    CHECK_FALSE(o.specularMs);
+    REQUIRE(parse({"--specular-ms", "on"}, o, error));
+    CHECK(o.specularMs);
+    LaunchOptions bad;
+    CHECK_FALSE(parse({"--specular-ms", "maybe"}, bad, error));
+    CHECK(error.find("--specular-ms") != std::string::npos);
+    CHECK_FALSE(parse({"--specular-ms"}, bad, error));
+}
+
+TEST_CASE("launch options: --debug-material-module (F15.4 attribution)") {
+    LaunchOptions o;
+    std::string err;
+    REQUIRE(parse({}, o, err));
+    CHECK_FALSE(o.debugMaterialModuleFast);
+    REQUIRE(parse({"--debug-material-module", "fast"}, o, err));
+    CHECK(o.debugMaterialModuleFast);
+    REQUIRE(parse({"--debug-material-module", "exact"}, o, err));
+    CHECK_FALSE(o.debugMaterialModuleFast);
+    CHECK_FALSE(parse({"--debug-material-module", "other"}, o, err));
+    // F15 closure round 4 (owner decision 2026-11-17): exact-all forces the exact module on featureless scenes too; the default stays off.
+    CHECK_FALSE(o.debugMaterialModuleAll);
+    REQUIRE(parse({"--debug-material-module", "exact-all"}, o, err));
+    CHECK(o.debugMaterialModuleAll);
+    CHECK_FALSE(o.debugMaterialModuleFast);
+    REQUIRE(parse({"--debug-material-module", "fast"}, o, err));
+    CHECK_FALSE(o.debugMaterialModuleAll);
+    CHECK(o.debugMaterialModuleFast);
+    REQUIRE(parse({"--debug-material-module", "exact"}, o, err));
+    CHECK_FALSE(o.debugMaterialModuleAll);
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/types.h"
+#include "renderer/material_description.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -69,6 +70,12 @@ struct MaterialComponent {
     glm::vec3 emissiveFactor{0.0f};
     float alphaCutoff = 0.0f;              // opaque by default; MASK materials opt in
     bool  doubleSided             = false; // glTF doubleSided: no back-face culling, two-sided lighting
+    // F15.1: extension data (every F15 feature block) as a
+    // reference to a material description; only its feature blocks are read, the
+    // fields above stay the base model.  Null = no features.  An edit swaps the
+    // pointer through ECS modify access and reaches the GPU through SceneStore
+    // extension deltas.
+    MaterialDescriptionPtr extension;
 };
 
 enum class LightType : u32 {

@@ -15,7 +15,11 @@ inline ReflectionReduction reflectionReduceBegin(){ReflectionReduction r;r.out=G
 inline void reflectionReduceAdd(thread ReflectionReduction& r,GPUSpecularSample s,uint count){const float3 L(s.radiance[0],s.radiance[1],s.radiance[2]);
     const bool bad=(s.flags&SPECULAR_SAMPLE_ERROR)||!all(isfinite(L))||any(L<0)||!isfinite(s.hitDistance)||s.hitDistance<0;
     r.error|=bad;if(!bad)r.sum+=L/float(count);
-    if(s.flags&SPECULAR_SAMPLE_VALID){if(!r.selected){r.out=s;r.selected=true;}else r.mixed|=r.out.path!=s.path||r.out.secondarySlot!=s.secondarySlot||r.out.secondaryGeneration!=s.secondaryGeneration;
+    // F15.1 (ticket 13): a pixel that refracted in ANY of its samples keeps the refract key (id and axis) of that sample: the mean of
+    // reflected and refracted samples is dominated by the refracted image, and a stable key keeps the denoiser history across frames.
+    if((s.flags&SPECULAR_SAMPLE_VALID)&&r.selected&&(s.flags&SPECULAR_SAMPLE_AXIS_REFRACT)&&!(r.out.flags&SPECULAR_SAMPLE_AXIS_REFRACT))
+        r.out.flags=(r.out.flags&~SPECULAR_SAMPLE_LOBE_KEY_MASK)|(s.flags&SPECULAR_SAMPLE_LOBE_KEY_MASK);
+    if(s.flags&SPECULAR_SAMPLE_VALID){if(!r.selected){r.out=s;r.selected=true;}else r.mixed|=r.out.path!=s.path||r.out.secondarySlot!=s.secondarySlot||r.out.secondaryGeneration!=s.secondaryGeneration||((r.out.flags^s.flags)&SPECULAR_SAMPLE_LOBE_KEY_MASK)!=0u;
         r.hitDistance+=s.hitDistance/float(count);}}
 // counts[1] = raw numerical errors (independent check word).
 inline GPUSpecularSample reflectionReduceEnd(thread ReflectionReduction& r,device atomic_uint* counts){GPUSpecularSample out=r.out;float3 sum=r.sum;

@@ -11,12 +11,22 @@ add_executable(phosphor_tests
     test_barrier_plan.cpp
     test_bench_report.cpp
     test_compile_queue.cpp
+    test_corpus_rig.cpp
+    test_chess_fixture.cpp
     test_cull_math.cpp
     test_ecs_changes.cpp
     test_file_watcher.cpp
     test_forward_variants.cpp
     test_frame_trace.cpp
     test_gltf_loader.cpp
+    test_gltf_unlit_lights.cpp
+    test_gltf_vertex_colors.cpp
+    test_material_classes.cpp
+    test_material_description.cpp
+    test_gltf_materials.cpp
+    test_material_description_io.cpp
+    test_material_extension_pack.cpp
+    test_texture_transform.cpp
     test_async_probe_reference.cpp
     test_graph_debug_reference.cpp
     test_graph_dump.cpp
@@ -50,8 +60,14 @@ add_executable(phosphor_tests
     test_emissive_domain.cpp
     test_gi.cpp
     test_gi_lighting_epoch.cpp
+    test_specular_ms.cpp
+    test_aniso_table.cpp
     test_lighting_validation.cpp
     test_reflection_validation.cpp
+    test_material_validation.cpp
+    test_transmission_validation.cpp
+    test_transmissive_shadow_validation.cpp
+    test_glass_receiver_validation.cpp
     test_reflections.cpp
     test_denoise.cpp
     test_surface_signal_controls.cpp
@@ -74,12 +90,23 @@ add_executable(phosphor_tests
     test_transform_math.cpp
     test_temporal.cpp
     test_emission_pack.cpp
+    test_lobe_guide_pack.cpp
+    test_layer_blend.cpp
+    test_terrain_fixture.cpp
+    test_lobe_guide_reference.cpp
+    test_lobe_select.cpp
+    test_transmission_math.cpp
+    test_subsurface_walk_math.cpp
     test_visibility_math.cpp
     test_worker_pool.cpp
 )
 target_link_libraries(phosphor_tests PRIVATE phosphor_core doctest::doctest)
 # test_pipeline_script.cpp reads the committed shaders/pipelines.mtl4-json.
 target_compile_definitions(phosphor_tests PRIVATE PHOSPHOR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+# F15.2: test_material_classes.cpp runs the generator and compares with the build's generated table.
+target_compile_definitions(phosphor_tests PRIVATE PHOSPHOR_VARIANT_GEN_BIN="$<TARGET_FILE:variant_gen>" PHOSPHOR_BINARY_DIR="${CMAKE_BINARY_DIR}")
+add_dependencies(phosphor_tests variant_gen)
+target_link_libraries(phosphor_tests PRIVATE tinygltf)
 target_include_directories(phosphor_tests PRIVATE ${CMAKE_SOURCE_DIR}/tools)
 target_compile_options(phosphor_tests PRIVATE ${PHOSPHOR_WARNINGS})
 add_test(NAME phosphor_tests COMMAND phosphor_tests)
@@ -100,4 +127,79 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME f14_volume_snapshot_check COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_volume_snapshot_check.py)
     add_test(NAME f13_probe_pfm_author COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_probe_pfm_author.py)
     add_test(NAME f13_physical_ao_temporal_control COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_f13_ao_temporal_check.py)
+    add_test(NAME f15_clip_reactive COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_f15_clip_reactive.py)
+    # F15.2 (ticket 21): the targeted archive update (synthetic corpora) and the committed archive against the generated plan.
+    add_test(NAME f15_material_class_archive COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_material_class_archive.py)
+    add_test(NAME f15_permutations_runner COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_f15_permutations.py)
+    set_tests_properties(f15_material_class_archive PROPERTIES
+        ENVIRONMENT "PHOSPHOR_CLASS_PLAN=${CMAKE_BINARY_DIR}/generated/pipeline/material_class_plan.json")
+endif()
+
+# F15.3: the Appendix B reference and its runner need numpy and Mitsuba, which
+# only exist in the local uv cache (offline).  The tests are registered only when
+# a configure-time probe can import both with exactly the command the tests use;
+# otherwise a skip message says so (a missing cache is not a test failure).
+find_program(UV_EXECUTABLE uv)
+set(F15_PYTHON_PROBE_RESULT 1)
+if(UV_EXECUTABLE)
+    execute_process(
+        COMMAND ${UV_EXECUTABLE} run --offline --no-project --python 3.13 --with mitsuba==3.9.1 --with numpy python -I -c "import mitsuba, numpy"
+        RESULT_VARIABLE F15_PYTHON_PROBE_RESULT
+        OUTPUT_QUIET ERROR_QUIET
+        TIMEOUT 180)
+endif()
+if(UV_EXECUTABLE AND F15_PYTHON_PROBE_RESULT EQUAL 0)
+    foreach(f15_test f15_reference f15_check aniso_table f15_transmission_reference f15_shadow_reference filter_pipeline_harvest sheen_table ms_table f15_ms f15_subsurface_profile f15_subsurface_lut f15_walk_clip_check f15_chess_check f15_emissive_bound_check f15_glass_receiver_check f15_layers)
+        add_test(NAME ${f15_test}_python
+            COMMAND ${UV_EXECUTABLE} run --offline --no-project --python 3.13 --with mitsuba==3.9.1 --with numpy
+                    python -I ${CMAKE_SOURCE_DIR}/tools/test_${f15_test}.py)
+    endforeach()
+else()
+    message(STATUS "F15 Python tests (f15_reference_python, f15_check_python) skipped: "
+                   "uv with an offline mitsuba==3.9.1 + numpy cache is not available (probe exit: ${F15_PYTHON_PROBE_RESULT})")
+endif()
+
+# F15.3 (ticket 22): offline --verify mode of the Khronos corpus fetcher (stdlib only, fake corpus, no network).
+find_program(PYTHON3_EXECUTABLE python3)
+if(PYTHON3_EXECUTABLE)
+    add_test(NAME fetch_khronos_corpus_python
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_fetch_khronos_corpus.py)
+    add_test(NAME f15_corpus_python
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_corpus.py)
+    add_test(NAME f15_shadowed_hit_check_python
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_shadowed_hit_check.py)
+    add_test(NAME f13_reference_mirror_python
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f13_reference_mirror.py)
+    add_test(NAME f15_reflection_bounce_check_python
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_reflection_bounce_check.py)
+    add_test(NAME f15_transport_check_python
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_transport_check.py)
+    add_test(NAME f15_residue_check_python
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_residue_check.py)
+    # F15.1 (ticket 22): the reference maths and the fixture generation of the per-slot texture transform check (CPU only).
+    add_test(NAME f15_texture_transform_python
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/f15_texture_transform_check.py --selftest)
+    add_test(NAME f15_texture_transform_secondary_python
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/f15_texture_transform_secondary.py --selftest)
+    add_test(NAME f15_texture_transform_layers_python
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/f15_texture_transform_layers.py --selftest)
+    # F15.1 (ticket 13): control-noise-corrected clip metrics (numpy; the tests skip themselves without it).
+    add_test(NAME f15_clip_bias_python
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_clip_bias.py)
+    # F15.4 (ticket 23): the owner-approved CC0 terrain sets (never committed); the verify test reads TERRAIN_MATERIALS_DIR (or
+    # build/terrain-materials) at run time and skips (exit 77) when no copy exists.
+    add_test(NAME terrain_materials_verify
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_terrain_materials_verify.py)
+    set_tests_properties(terrain_materials_verify PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME f15_gi_environment_check_python
+        COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/test_f15_gi_environment_check.py)
+    # The corpus itself is third-party data fetched on demand (never committed): when a fetched copy exists, verify it against the manifest;
+    # otherwise the check is skipped with a message (an absent corpus is not a test failure).
+    set(KHRONOS_CORPUS_DIR "${CMAKE_SOURCE_DIR}/build/khronos-corpus" CACHE PATH "fetched Khronos corpus (tools/fetch_khronos_corpus.py)")
+    if(EXISTS "${KHRONOS_CORPUS_DIR}/CORPUS.json")
+        add_test(NAME khronos_corpus_verify
+            COMMAND ${PYTHON3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/fetch_khronos_corpus.py --verify ${KHRONOS_CORPUS_DIR})
+    else()
+        message(STATUS "khronos_corpus_verify skipped: no fetched corpus at ${KHRONOS_CORPUS_DIR}")
+    endif()
 endif()

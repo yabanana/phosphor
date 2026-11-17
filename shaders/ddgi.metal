@@ -33,7 +33,7 @@ kernel void ddgi_trace(instance_acceleration_structure as [[buffer(0)]],
     GPURtHit hit=rtTraceSurface(ray,as,ift,instances,p.slotCount,payload,meshes,vertices,indices,p.meshCount);
     GPUProbeRay output{};output.direction[0]=direction.x;output.direction[1]=direction.y;output.direction[2]=direction.z;
     output.distance=p.maxDistance;
-    float3 L(0.0f); // no direct environment in the INDIRECT atlas
+    float3 L=hit.hit?float3(0.0f):giEscapeRadiance(p); // an escaped ray returns the declared environment (ownership rule: gi_common.h)
     GPUGiReservoir candidate{};
     float3 point,normal;GiMaterial material;
     if(hit.hit && rtSurface(hit,instances,meshes,vertices,indices,p.slotCount,p.meshCount,point,normal) &&
@@ -155,4 +155,40 @@ kernel void ddgi_resolve(constant GPUProbeGridParams& p [[buffer(0)]],
     float4 point=positions.read(pixel),normal=normals.read(pixel);
     float3 E=(point.w>0.0f && normal.w>0.0f)?giIrradiance(point.xyz,normal.xyz,p,states,irradiance,moments,true):float3(0.0f);
     indirectIrradiance.write(float4(E,1.0f),pixel);
+}
+
+// F15.1 (ticket 19): the second probe-grid irradiance of the thin-walled subsurface lobe, E(-N).  Same lookup as ddgi_resolve with the
+// geometric normal negated, written only for the pixels whose lobe guide carries a thin subsurface lobe (the volumetric mode does not
+// transmit); every other texel is 0 and never read.  Not a new signal: the probe atlas is the denoised quantity, the lookup is smooth.
+kernel void ddgi_resolve_back(constant GPUProbeGridParams& p [[buffer(0)]],
+                              const device GPUProbeState* states [[buffer(1)]],
+                              const device GPULobeGuide* guides [[buffer(2)]],
+                              texture2d<float,access::read> positions [[texture(0)]],
+                              texture2d<float,access::read> normals [[texture(1)]],
+                              texture2d<float> irradiance [[texture(2)]],texture2d<float> moments [[texture(3)]],
+                              texture2d<half,access::write> backIrradiance [[texture(4)]],uint2 pixel [[thread_position_in_grid]]) {
+    if(pixel.x>=p.width || pixel.y>=p.height) return;
+    const uint features=guides[pixel.y*p.width+pixel.x].features;
+    float3 E=0.0f;
+    if((features&MATERIAL_FEATURE_SUBSURFACE)!=0u && (features&LOBE_GUIDE_FLAG_SUBSURFACE_VOLUMETRIC)==0u) {
+        const float4 point=positions.read(pixel),normal=normals.read(pixel);
+        if(point.w>0.0f && normal.w>0.0f) E=giIrradiance(point.xyz,-normal.xyz,p,states,irradiance,moments,true);
+    }
+    backIrradiance.write(half4(half3(min(E,float3(65000.0f))),1.0h),pixel);
+}
+
+// F15 closure (ticket 19): the same lookup for EVERY valid receiver (no lobe guide): the legacy resolve shades thin-walled subsurface
+// pixels before any guide exists, and the Cache / ReSTIR GI modes read the probe atlas they maintain exactly like DDGI (gi_shade's own
+// fallback is this lookup).  Only scenes with a subsurface material request it.
+kernel void ddgi_resolve_back_all(constant GPUProbeGridParams& p [[buffer(0)]],
+                                  const device GPUProbeState* states [[buffer(1)]],
+                                  texture2d<float,access::read> positions [[texture(0)]],
+                                  texture2d<float,access::read> normals [[texture(1)]],
+                                  texture2d<float> irradiance [[texture(2)]],texture2d<float> moments [[texture(3)]],
+                                  texture2d<half,access::write> backIrradiance [[texture(4)]],uint2 pixel [[thread_position_in_grid]]) {
+    if(pixel.x>=p.width || pixel.y>=p.height) return;
+    float3 E=0.0f;
+    const float4 point=positions.read(pixel),normal=normals.read(pixel);
+    if(point.w>0.0f && normal.w>0.0f) E=giIrradiance(point.xyz,-normal.xyz,p,states,irradiance,moments,true);
+    backIrradiance.write(half4(half3(min(E,float3(65000.0f))),1.0h),pixel);
 }

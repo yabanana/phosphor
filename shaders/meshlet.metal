@@ -17,6 +17,7 @@
 #include "renderer/temporal_layout.h"
 #include "renderer/meshlet_cull_math.h"
 #include "renderer/meshlet_layout.h"
+#include "renderer/layer_blend.h" // F15.4 (ticket 23): the stack coverage of the alpha tests
 // The fragment stage is forward_fs: the variant constants are declared here
 // too so a specialised function descriptor applies to every stage alike.
 #include "pipeline/forward_variants.generated.metal.h"
@@ -24,6 +25,9 @@
 using namespace metal;
 using namespace phosphor;
 #include "surface_geometry.h"
+#include "vertex_color.h"
+#include "texture_transform.h" // F15.1 (ticket 22): the *_tt_fs alpha tests
+#include "layer_resolve.h"
 
 static_assert(MB_PARAMS == 0 && MB_INSTANCES == 1 && MB_MESHES == 2 && MB_MATERIALS == 3 && MB_SCENE_FLAGS == 4 &&
                   MB_GROUP_SUMS == 5 && MB_RANGES == 6 && MB_ARGS == 7 && MB_COUNTERS == 8 && MB_GATE == 9 &&
@@ -470,6 +474,20 @@ static float4x4 loadMatrix(constant float* m) {
 
 using MeshletMesh = metal::mesh<VertexOut, void, MESHLET_MESH_GROUP, MESHLET_MESH_GROUP, topology::triangle>;
 
+// F15 closure (COLOR_0): the vertex-colour twin of the forward interpolants (the fragment stage is forward_fs_vc of shaders/forward_plain.inc); the three
+// forward mesh stages below get _vc twins that emit it.
+struct VertexOutVC {
+    float4 position [[position, invariant]];
+    float3 worldPos;
+    float3 normal;
+    float4 tangent;
+    float2 uv;
+    uint   materialIndex [[flat]];
+    uint   mirrored [[flat]];
+    float4 color;
+};
+using MeshletMeshVC = metal::mesh<VertexOutVC, void, MESHLET_MESH_GROUP, MESHLET_MESH_GROUP, topology::triangle>;
+
 // One meshlet per mesh threadgroup: thread t emits vertex t (< vertexCount)
 // and triangle t (< triangleCount); exactly the meshlet's primitives are
 // declared (no padding primitives; culled meshlets were already omitted by
@@ -640,6 +658,163 @@ using MeshletMesh = metal::mesh<VertexOut, void, MESHLET_MESH_GROUP, MESHLET_MES
     }
 }
 
+// F15 closure (COLOR_0): vertex-colour twins of the forward mesh stages.
+[[mesh]] void meshlet_mesh_vc(MeshletMeshVC out, const object_data MeshletPayload& payload [[payload]],
+                           uint tid [[thread_index_in_threadgroup]], uint gid [[threadgroup_position_in_grid]],
+                           constant FrameConstants& frame [[buffer(0)]], const device GPUVertex* vertices [[buffer(1)]],
+                           const device GPUInstance* instances [[buffer(2)]],
+                           const device GPUMeshlet* meshlets [[buffer(6)]],
+                           const device uint* meshletVertices [[buffer(7)]],
+                           const device uchar* meshletTriangles [[buffer(8)]]) {
+    const GPUMeshlet m           = meshlets[payload.meshlet[gid]];
+    const device GPUInstance& gi = instances[payload.slot[gid]];
+    if (tid == 0u) out.set_primitive_count(m.triangleCount);
+    if (tid < m.vertexCount) {
+        const device GPUVertex& v = vertices[meshletVertices[m.vertexOffset + tid]];
+        const float4x4 model       = loadMatrix(gi.modelMatrix);
+        const float3x3 normalMatrix = float3x3(model[0].xyz, model[1].xyz, model[2].xyz);
+        const float4 world         = model * float4(v.px, v.py, v.pz, 1.0);
+        VertexOutVC o;
+        o.position      = loadMatrix(frame.viewProjection) * world;
+        o.worldPos      = world.xyz;
+        o.normal = surfaceNormal(model, float3(v.nx, v.ny, v.nz));
+        o.tangent = float4(normalMatrix * float3(v.tx, v.ty, v.tz),
+                           v.tw * ((gi.flags & INSTANCE_FLAG_MIRRORED) ? -1.0f : 1.0f));
+        o.uv            = float2(v.u, v.v);
+        o.materialIndex = gi.materialIndex;
+        o.mirrored      = (gi.flags & INSTANCE_FLAG_MIRRORED) != 0 ? 1u : 0u;
+        o.color = frame.vertexColors[meshletVertices[m.vertexOffset + tid]]; // F15 closure (COLOR_0)
+        out.set_vertex(tid, o);
+    }
+    if (tid < m.triangleCount) {
+        const uint base = m.triangleOffset + tid * 3u;
+        out.set_index(tid * 3u + 0u, meshletTriangles[base + 0u]);
+        out.set_index(tid * 3u + 1u, meshletTriangles[base + 1u]);
+        out.set_index(tid * 3u + 2u, meshletTriangles[base + 2u]);
+    }
+}
+
+[[mesh]] void meshlet_mesh_tricull_vc(MeshletMeshVC out, const object_data MeshletPayload& payload [[payload]],
+                           uint tid [[thread_index_in_threadgroup]], uint gid [[threadgroup_position_in_grid]],
+                           uint sg [[simdgroup_index_in_threadgroup]], uint lane [[thread_index_in_simdgroup]],
+                           constant FrameConstants& frame [[buffer(0)]], const device GPUVertex* vertices [[buffer(1)]],
+                           const device GPUInstance* instances [[buffer(2)]],
+                           const device GPUMaterial* materials [[buffer(3)]],
+                           const device GPUMeshlet* meshlets [[buffer(6)]],
+                           const device uint* meshletVertices [[buffer(7)]],
+                           const device uchar* meshletTriangles [[buffer(8)]],
+                           constant GPUMeshletCullParams& p [[buffer(10)]],
+                           device atomic_uint* counters [[buffer(14)]]) {
+    threadgroup float3 clip[MESHLET_MESH_GROUP]; // x, y, w of each vertex
+    threadgroup uint partial[MESHLET_MESH_GROUP / 32u];
+    const GPUMeshlet m           = meshlets[payload.meshlet[gid]];
+    const device GPUInstance& gi = instances[payload.slot[gid]];
+    if (tid < m.vertexCount) {
+        const device GPUVertex& v = vertices[meshletVertices[m.vertexOffset + tid]];
+        const float4x4 model       = loadMatrix(gi.modelMatrix);
+        const float3x3 normalMatrix = float3x3(model[0].xyz, model[1].xyz, model[2].xyz);
+        const float4 world         = model * float4(v.px, v.py, v.pz, 1.0);
+        VertexOutVC o;
+        o.position      = loadMatrix(frame.viewProjection) * world;
+        o.worldPos      = world.xyz;
+        o.normal = surfaceNormal(model, float3(v.nx, v.ny, v.nz));
+        o.tangent = float4(normalMatrix * float3(v.tx, v.ty, v.tz),
+                           v.tw * ((gi.flags & INSTANCE_FLAG_MIRRORED) ? -1.0f : 1.0f));
+        o.uv            = float2(v.u, v.v);
+        o.materialIndex = gi.materialIndex;
+        o.mirrored      = (gi.flags & INSTANCE_FLAG_MIRRORED) != 0 ? 1u : 0u;
+        o.color = frame.vertexColors[meshletVertices[m.vertexOffset + tid]]; // F15 closure (COLOR_0)
+        out.set_vertex(tid, o);
+        clip[tid] = float3(o.position.x, o.position.y, o.position.w);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    // Facing cull of triangle `tid` (class from the instance, as SceneStore).
+    const bool doubleSided = (materials[gi.materialIndex].flags & MATERIAL_FLAG_DOUBLE_SIDED) != 0u;
+    const float facing     = (gi.flags & INSTANCE_FLAG_MIRRORED) != 0u ? -1.0f : 1.0f; // +: back faces culled
+    uchar i0 = 0, i1 = 0, i2 = 0;
+    bool keep = false;
+    if (tid < m.triangleCount) {
+        const uint base = m.triangleOffset + tid * 3u;
+        i0   = meshletTriangles[base + 0u];
+        i1   = meshletTriangles[base + 1u];
+        i2   = meshletTriangles[base + 2u];
+        keep = true;
+        const float3 a = clip[i0], b = clip[i1], c = clip[i2];
+        if (!doubleSided && a.z > 0.0f && b.z > 0.0f && c.z > 0.0f) {
+            // Pixel coordinates (y up, the NDC orientation of the CCW front faces).
+            const float2 h  = float2(p.viewport[0], p.viewport[1]) * 0.5f;
+            const float2 pa = a.xy / a.z * h, pb = b.xy / b.z * h, pc = c.xy / c.z * h;
+            const float area2 = (pb.x - pa.x) * (pc.y - pa.y) - (pc.x - pa.x) * (pb.y - pa.y); // > 0: front facing
+            const float perim = length(pb - pa) + length(pc - pb) + length(pa - pc);
+            if (isfinite(area2) && isfinite(perim) && facing * area2 < -0.02f * perim) keep = false;
+        }
+    }
+    // Stable compaction of the kept triangles.
+    const uint k    = keep ? 1u : 0u;
+    const uint excl = simd_prefix_exclusive_sum(k);
+    if (lane == 31u) partial[sg] = excl + k;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    uint before = 0u, total = 0u;
+    for (uint s = 0; s < MESHLET_MESH_GROUP / 32u; ++s) {
+        if (s < sg) before += partial[s];
+        total += partial[s];
+    }
+    if (keep) {
+        const uint t = before + excl;
+        out.set_index(t * 3u + 0u, i0);
+        out.set_index(t * 3u + 1u, i1);
+        out.set_index(t * 3u + 2u, i2);
+    }
+    if (tid == 0u) {
+        out.set_primitive_count(total);
+        if (total) atomic_fetch_add_explicit(&counters[MESHLET_COUNTER_EMITTED], total, memory_order_relaxed);
+    }
+}
+
+[[mesh]] void meshlet_mesh_direct_vc(MeshletMeshVC out, uint tid [[thread_index_in_threadgroup]],
+                                  uint2 tg [[threadgroup_position_in_grid]], uint2 grid [[threadgroups_per_grid]],
+                                  constant FrameConstants& frame [[buffer(0)]],
+                                  const device GPUVertex* vertices [[buffer(1)]],
+                                  const device GPUInstance* instances [[buffer(2)]],
+                                  const device GPUMeshlet* meshlets [[buffer(6)]],
+                                  const device uint* meshletVertices [[buffer(7)]],
+                                  const device uchar* meshletTriangles [[buffer(8)]],
+                                  const device GPUMeshletDrawRange& range [[buffer(11)]],
+                                  const device GPUMeshletCandidate* list [[buffer(12)]]) {
+    const uint gid = tg.y * grid.x + tg.x;
+    if (gid >= range.count) {
+        if (tid == 0u) out.set_primitive_count(0u);
+        return;
+    }
+    const GPUMeshletCandidate c  = list[range.first + gid];
+    const GPUMeshlet m           = meshlets[c.meshlet];
+    const device GPUInstance& gi = instances[c.slot];
+    if (tid == 0u) out.set_primitive_count(m.triangleCount);
+    if (tid < m.vertexCount) {
+        const device GPUVertex& v = vertices[meshletVertices[m.vertexOffset + tid]];
+        const float4x4 model       = loadMatrix(gi.modelMatrix);
+        const float3x3 normalMatrix = float3x3(model[0].xyz, model[1].xyz, model[2].xyz);
+        const float4 world         = model * float4(v.px, v.py, v.pz, 1.0);
+        VertexOutVC o;
+        o.position      = loadMatrix(frame.viewProjection) * world;
+        o.worldPos      = world.xyz;
+        o.normal = surfaceNormal(model, float3(v.nx, v.ny, v.nz));
+        o.tangent = float4(normalMatrix * float3(v.tx, v.ty, v.tz),
+                           v.tw * ((gi.flags & INSTANCE_FLAG_MIRRORED) ? -1.0f : 1.0f));
+        o.uv            = float2(v.u, v.v);
+        o.materialIndex = gi.materialIndex;
+        o.mirrored      = (gi.flags & INSTANCE_FLAG_MIRRORED) != 0 ? 1u : 0u;
+        o.color = frame.vertexColors[meshletVertices[m.vertexOffset + tid]]; // F15 closure (COLOR_0)
+        out.set_vertex(tid, o);
+    }
+    if (tid < m.triangleCount) {
+        const uint base = m.triangleOffset + tid * 3u;
+        out.set_index(tid * 3u + 0u, meshletTriangles[base + 0u]);
+        out.set_index(tid * 3u + 1u, meshletTriangles[base + 1u]);
+        out.set_index(tid * 3u + 2u, meshletTriangles[base + 2u]);
+    }
+}
+
 // ---- debug views (F6.7) ---------------------------------------------------------------
 
 struct DebugVertexOut {
@@ -755,6 +930,13 @@ fragment uint visibility_opaque_fs(VisibilityFragment in [[stage_in]]) {
 struct VisibilityTextureHandle {
     texture2d<float> tex;
 };
+// F15.4 (ticket 23): coverage of a layer stack = its own record alpha x the blended layer alpha (the STACK's cutoff); 1 for any other material.
+static float visibilityStackAlpha(const device GPUMaterial *materials, uint materialIndex, const device VisibilityTextureHandle *textures,
+                                  constant GPUTemporalParams &temporal, float2 uv) {
+    const float scale = exp2(temporal.mipBias);
+    return layerCoverage<VisibilityTextureHandle, LayerAlphaGrad>(materials[materialIndex], materials, textures, uv, dfdx(uv) * scale,
+                                                                  dfdy(uv) * scale, temporal.materialExtensions);
+}
 fragment uint visibility_alpha_fs(VisibilityFragment in [[stage_in]], const device GPUMaterial *materials [[buffer(3)]],
                                   const device VisibilityTextureHandle *textures [[buffer(5)]],
                                   constant GPUTemporalParams &temporal [[buffer(16)]]) {
@@ -762,11 +944,12 @@ fragment uint visibility_alpha_fs(VisibilityFragment in [[stage_in]], const devi
     // use the separate explicit-footprint entry point below.
     const GPUMaterial material = materials[in.vert.materialIndex];
     constexpr sampler sampling(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
-    const float alpha =
+    float alpha =
         material.baseColor[3] *
         (material.baseColorTex == INVALID_TEXTURE_INDEX
              ? 1.0f
              : float(half(textures[material.baseColorTex].tex.sample(sampling, in.vert.uv, bias(temporal.mipBias)).a)));
+    alpha *= visibilityStackAlpha(materials, in.vert.materialIndex, textures, temporal, in.vert.uv); // F15.4 (ticket 23)
     if (alpha < material.alphaCutoff)
         discard_fragment();
     return in.primitive.id;
@@ -782,12 +965,182 @@ fragment uint visibility_alpha_lit_fs(VisibilityFragment in [[stage_in]], const 
     const float footprintScale = exp2(temporal.mipBias);
     const float2 uvDx = dfdx(in.vert.uv) * footprintScale;
     const float2 uvDy = dfdy(in.vert.uv) * footprintScale;
-    const float alpha =
+    float alpha =
         material.baseColor[3] *
         (material.baseColorTex == INVALID_TEXTURE_INDEX
              ? 1.0f
              : float(half(textures[material.baseColorTex].tex.sample(sampling, in.vert.uv, gradient2d(uvDx, uvDy)).a)));
+    alpha *= visibilityStackAlpha(materials, in.vert.materialIndex, textures, temporal, in.vert.uv); // F15.4 (ticket 23)
     if (alpha < material.alphaCutoff)
+        discard_fragment();
+    return in.primitive.id;
+}
+
+// F15.1 (ticket 22): the alpha tests of a scene with per-slot KHR_texture_transform (SceneStore::textureTransformInUse) sample the base
+// colour slot through its transform.  Separate entry points (no function constant: metal-tt cannot lower an unspecialised descriptor
+// whose function references one); the plain entry points above are unchanged.  The frame constants are bound at MR_FRAME (0) in the
+// draw table of the mesh path.
+fragment uint visibility_alpha_tt_fs(VisibilityFragment in [[stage_in]], const device GPUMaterial *materials [[buffer(3)]],
+                                     const device VisibilityTextureHandle *textures [[buffer(5)]],
+                                     constant GPUTemporalParams &temporal [[buffer(16)]],
+                                     constant FrameConstants &frame [[buffer(0)]]) {
+    const GPUMaterial material = materials[in.vert.materialIndex];
+    constexpr sampler sampling(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
+    float2 uv = in.vert.uv, noDx = float2(0.0f), noDy = float2(0.0f); // implicit derivatives follow the transformed uv
+    texXfUvOn(texXfForOn(frame.materialExtensions, material.flags, material.textureTransformIndex), TT_SLOT_BASE_COLOR, uv, noDx, noDy);
+    float alpha =
+        material.baseColor[3] *
+        (material.baseColorTex == INVALID_TEXTURE_INDEX
+             ? 1.0f
+             : float(half(textures[material.baseColorTex].tex.sample(sampling, uv, bias(temporal.mipBias)).a)));
+    alpha *= visibilityStackAlpha(materials, in.vert.materialIndex, textures, temporal, in.vert.uv); // F15.4 (ticket 23)
+    if (alpha < material.alphaCutoff)
+        discard_fragment();
+    return in.primitive.id;
+}
+fragment uint visibility_alpha_lit_tt_fs(VisibilityFragment in [[stage_in]], const device GPUMaterial *materials [[buffer(3)]],
+                                         const device VisibilityTextureHandle *textures [[buffer(5)]],
+                                         constant GPUTemporalParams &temporal [[buffer(16)]],
+                                         constant FrameConstants &frame [[buffer(0)]]) {
+    const GPUMaterial material = materials[in.vert.materialIndex];
+    constexpr sampler sampling(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
+    const float footprintScale = exp2(temporal.mipBias);
+    float2 uv = in.vert.uv, uvDx = dfdx(in.vert.uv) * footprintScale, uvDy = dfdy(in.vert.uv) * footprintScale;
+    texXfUvOn(texXfForOn(frame.materialExtensions, material.flags, material.textureTransformIndex), TT_SLOT_BASE_COLOR, uv, uvDx, uvDy);
+    float alpha =
+        material.baseColor[3] *
+        (material.baseColorTex == INVALID_TEXTURE_INDEX
+             ? 1.0f
+             : float(half(textures[material.baseColorTex].tex.sample(sampling, uv, gradient2d(uvDx, uvDy)).a)));
+    alpha *= visibilityStackAlpha(materials, in.vert.materialIndex, textures, temporal, in.vert.uv); // F15.4 (ticket 23)
+    if (alpha < material.alphaCutoff)
+        discard_fragment();
+    return in.primitive.id;
+}
+
+// F15 closure (COLOR_0): the vertex-colour twins of the visibility mesh stage and of the four alpha tests (separate entry points: the stage interface
+// carries the colour only here, so the plain entry points above stay byte-stable).  The alpha of a cut-out is factor x texture x COLOR_0.a.
+struct VisibilityVertexVC {
+    float4 position [[position, invariant]];
+    float2 uv;
+    uint materialIndex [[flat]];
+    float4 color;
+};
+struct VisibilityFragmentVC {
+    VisibilityVertexVC vert;
+    VisibilityPrimitive primitive;
+};
+using VisibilityMeshVC =
+    metal::mesh<VisibilityVertexVC, VisibilityPrimitive, MESHLET_MESH_GROUP, MESHLET_MESH_GROUP, topology::triangle>;
+
+[[mesh]] void
+visibility_mesh_vc(VisibilityMeshVC out, const object_data MeshletPayload &payload [[payload]],
+                uint tid [[thread_index_in_threadgroup]], uint gid [[threadgroup_position_in_grid]],
+                constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],
+                const device GPUInstance *instances [[buffer(2)]], const device GPUMeshlet *meshlets [[buffer(6)]],
+                const device uint *meshletVertices [[buffer(7)]], const device uchar *triangles [[buffer(8)]]) {
+    const GPUMeshlet m = meshlets[payload.meshlet[gid]];
+    const GPUInstance gi = instances[payload.slot[gid]];
+    if (tid == 0)
+        out.set_primitive_count(m.triangleCount);
+    if (tid < m.vertexCount) {
+        const GPUVertex v = vertices[meshletVertices[m.vertexOffset + tid]];
+        VisibilityVertexVC o;
+        const float4x4 model =
+            float4x4(float4(gi.modelMatrix[0], gi.modelMatrix[1], gi.modelMatrix[2], gi.modelMatrix[3]),
+                     float4(gi.modelMatrix[4], gi.modelMatrix[5], gi.modelMatrix[6], gi.modelMatrix[7]),
+                     float4(gi.modelMatrix[8], gi.modelMatrix[9], gi.modelMatrix[10], gi.modelMatrix[11]),
+                     float4(gi.modelMatrix[12], gi.modelMatrix[13], gi.modelMatrix[14], gi.modelMatrix[15]));
+        o.position = loadMatrix(frame.viewProjection) * model * float4(v.px, v.py, v.pz, 1);
+        o.uv = float2(v.u, v.v);
+        o.materialIndex = gi.materialIndex;
+        o.color = frame.vertexColors[meshletVertices[m.vertexOffset + tid]]; // F15 closure (COLOR_0)
+        out.set_vertex(tid, o);
+    }
+    if (tid < m.triangleCount) {
+        for (uint k = 0; k < 3; ++k)
+            out.set_index(tid * 3 + k, triangles[m.triangleOffset + tid * 3 + k]);
+        out.set_primitive(tid, VisibilityPrimitive{visibilityPack(payload.decision[gid], tid)});
+    }
+}
+
+fragment uint visibility_alpha_vc_fs(VisibilityFragmentVC in [[stage_in]], const device GPUMaterial *materials [[buffer(3)]],
+                                  const device VisibilityTextureHandle *textures [[buffer(5)]],
+                                  constant GPUTemporalParams &temporal [[buffer(16)]]) {
+    // Preserve the F7/F8 forward-reference contract. F10 lighting receivers
+    // use the separate explicit-footprint entry point below.
+    const GPUMaterial material = materials[in.vert.materialIndex];
+    constexpr sampler sampling(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
+    float alpha =
+        material.baseColor[3] *
+        (material.baseColorTex == INVALID_TEXTURE_INDEX
+             ? 1.0f
+             : float(half(textures[material.baseColorTex].tex.sample(sampling, in.vert.uv, bias(temporal.mipBias)).a)));
+    alpha *= visibilityStackAlpha(materials, in.vert.materialIndex, textures, temporal, in.vert.uv); // F15.4 (ticket 23)
+    if (alpha * in.vert.color.a < material.alphaCutoff)
+        discard_fragment();
+    return in.primitive.id;
+}
+fragment uint visibility_alpha_lit_vc_fs(VisibilityFragmentVC in [[stage_in]], const device GPUMaterial *materials [[buffer(3)]],
+                                  const device VisibilityTextureHandle *textures [[buffer(5)]],
+                                  constant GPUTemporalParams &temporal [[buffer(16)]]) {
+    const GPUMaterial material = materials[in.vert.materialIndex];
+    constexpr sampler sampling(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
+    // Match every indexed receiver/material path: scale the derivative
+    // footprint itself. An implicit LOD bias does not express that same
+    // footprint to anisotropic sampling, so alpha coverage can diverge in DRS.
+    const float footprintScale = exp2(temporal.mipBias);
+    const float2 uvDx = dfdx(in.vert.uv) * footprintScale;
+    const float2 uvDy = dfdy(in.vert.uv) * footprintScale;
+    float alpha =
+        material.baseColor[3] *
+        (material.baseColorTex == INVALID_TEXTURE_INDEX
+             ? 1.0f
+             : float(half(textures[material.baseColorTex].tex.sample(sampling, in.vert.uv, gradient2d(uvDx, uvDy)).a)));
+    alpha *= visibilityStackAlpha(materials, in.vert.materialIndex, textures, temporal, in.vert.uv); // F15.4 (ticket 23)
+    if (alpha * in.vert.color.a < material.alphaCutoff)
+        discard_fragment();
+    return in.primitive.id;
+}
+
+// F15.1 (ticket 22): the alpha tests of a scene with per-slot KHR_texture_transform (SceneStore::textureTransformInUse) sample the base
+// colour slot through its transform.  Separate entry points (no function constant: metal-tt cannot lower an unspecialised descriptor
+// whose function references one); the plain entry points above are unchanged.  The frame constants are bound at MR_FRAME (0) in the
+// draw table of the mesh path.
+fragment uint visibility_alpha_tt_vc_fs(VisibilityFragmentVC in [[stage_in]], const device GPUMaterial *materials [[buffer(3)]],
+                                     const device VisibilityTextureHandle *textures [[buffer(5)]],
+                                     constant GPUTemporalParams &temporal [[buffer(16)]],
+                                     constant FrameConstants &frame [[buffer(0)]]) {
+    const GPUMaterial material = materials[in.vert.materialIndex];
+    constexpr sampler sampling(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
+    float2 uv = in.vert.uv, noDx = float2(0.0f), noDy = float2(0.0f); // implicit derivatives follow the transformed uv
+    texXfUvOn(texXfForOn(frame.materialExtensions, material.flags, material.textureTransformIndex), TT_SLOT_BASE_COLOR, uv, noDx, noDy);
+    float alpha =
+        material.baseColor[3] *
+        (material.baseColorTex == INVALID_TEXTURE_INDEX
+             ? 1.0f
+             : float(half(textures[material.baseColorTex].tex.sample(sampling, uv, bias(temporal.mipBias)).a)));
+    alpha *= visibilityStackAlpha(materials, in.vert.materialIndex, textures, temporal, in.vert.uv); // F15.4 (ticket 23)
+    if (alpha * in.vert.color.a < material.alphaCutoff)
+        discard_fragment();
+    return in.primitive.id;
+}
+fragment uint visibility_alpha_lit_tt_vc_fs(VisibilityFragmentVC in [[stage_in]], const device GPUMaterial *materials [[buffer(3)]],
+                                         const device VisibilityTextureHandle *textures [[buffer(5)]],
+                                         constant GPUTemporalParams &temporal [[buffer(16)]],
+                                         constant FrameConstants &frame [[buffer(0)]]) {
+    const GPUMaterial material = materials[in.vert.materialIndex];
+    constexpr sampler sampling(filter::linear, mip_filter::linear, address::repeat, max_anisotropy(8));
+    const float footprintScale = exp2(temporal.mipBias);
+    float2 uv = in.vert.uv, uvDx = dfdx(in.vert.uv) * footprintScale, uvDy = dfdy(in.vert.uv) * footprintScale;
+    texXfUvOn(texXfForOn(frame.materialExtensions, material.flags, material.textureTransformIndex), TT_SLOT_BASE_COLOR, uv, uvDx, uvDy);
+    float alpha =
+        material.baseColor[3] *
+        (material.baseColorTex == INVALID_TEXTURE_INDEX
+             ? 1.0f
+             : float(half(textures[material.baseColorTex].tex.sample(sampling, uv, gradient2d(uvDx, uvDy)).a)));
+    alpha *= visibilityStackAlpha(materials, in.vert.materialIndex, textures, temporal, in.vert.uv); // F15.4 (ticket 23)
+    if (alpha * in.vert.color.a < material.alphaCutoff)
         discard_fragment();
     return in.primitive.id;
 }

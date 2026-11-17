@@ -2226,3 +2226,383 @@ Final quiet measurement, interleaved (`docs/perf-log.md`, 2026-11-11):
 HEAD 42adefd GPU p95 14.91–15.39 ms, frame p95 15.74–16.36 ms in five clean
 runs, against 22.4–23.1 ms for 2b285df. The 16.67 ms gate is met on this
 M5 Max.
+
+## 2026-11-14 — F15 ticket 14 spike: intersection-function multiplicity for non-opaque triangles
+
+Hypothesis: Metal may invoke the intersection function of a non-opaque triangle more than once for the same primitive; the transmittance product
+(one factor per crossed surface) would then be applied twice (the harness' `double-counted` control: 0.32-0.62 worst-caster mean error).
+
+Method (commit 055c5dd, M5 Max, macOS 27.2, Release): transmissive instances are non-opaque in the TLAS; the function
+(`rt_alpha_generic`, `rtAccumulateTransmittance`) rejects every transmissive triangle after multiplying its factor into a log-space payload, and keeps a
+bounded per-ray list (8 `(slot, primitive)` pairs) of the triangles already accounted.  Per frame the sun kernel sums, over every sun ray
+(1280x720, one ray per pixel), the invocations on transmissive triangles and the distinct pairs among them (`SHADOW-TRANSMITTANCE` line of
+`--debug-lighting 1`); `--debug-transmittance-dedup off` removes the filter, `--debug-transmittance-inject` makes the function accumulate every
+triangle twice (the control that produces the duplicate the hardware does not).
+
+Results (12 frames per run; counts of the last frame, identical in every frame):
+- pane-sun 16 439 rays crossed glass, 21 832 invocations, 21 832 distinct; water-sun 11 330 / 20 429 / 20 429; volume-pane (six surfaces per ray at most)
+  18 961 / 34 754 / 34 754; curved spheres 12 418 / 19 672 / 19 672.  Multiplicity exactly 1.000: hardware invoked the function once per triangle on
+  about 100 000 invocations per scenario (0 list overflows; the longest crossing is 6 surfaces).  The same counts with the filter off.
+- Control (pane-sun, accumulate-8 HDR capture): with the injected duplicate and the filter ON the image is bit-identical to the normal one (0 pixels
+  differ); with the injected duplicate and the filter OFF 17 084 pixels differ, the shadows are darker (mean ratio 0.86 / 0.92 / 0.86 RGB on the
+  differing pixels): the double count is real and the filter removes it.
+- Cost (in-process `Solar RT visibility`, volume-pane, 200 frames after 60 warm-up, `--gpu-timing-serial`, alternating, 3 repetitions each; NOT a quiet
+  machine: load average 6.5, another agent's Mitsuba at ~330 % CPU, GPU clocks bimodal 0.19 / 0.32 / 0.44 ms): p50 per run baseline binary (opaque
+  shadows, no function call) 0.325 / 0.179 / 0.322 ms; this tree 0.444 / 0.445 / 0.446 ms; filter off 0.314 / 0.314 / 0.446 ms.  The glass costs about
+  +0.12 ms on this pass at 1280x720 (four glass shadows of 4 k pixels each); the filter is not measurable against the clock noise (<= 8 compares per
+  invocation).  The orchestrator's quiet measurement (glass fixture, Sponza D2) supersedes these numbers.
+
+Decision: keep the per-primitive filter (bounded list, idempotent per `(slot, primitive)`; overflow beyond 8 distinct surfaces is counted and unfiltered).
+Hardware does not duplicate on the M5 Max, but the Metal specification does not promise it and no other device is available (Apple9 is
+EXTERNAL_VALIDATION_PENDING); the filter costs nothing measurable and its absence would be a silent 8-14 % darkening of the pane shadows (measured with the injected duplicate).  Counters stay in the engine.
+
+## 2026-11-14 — F15 ticket 13 spikes: per-branch denoiser history and the both-branch clip control
+
+**Hypothesis (denoiser):** on a transmissive pixel the Fresnel reflect/refract branch of the one-sample estimator (ADR-0004) is the temporal noise; a history per branch
+(updated only on the frames that draw it, output = their sum, the transport handing over the unweighted branch contribution) converges to the same expectation without
+rejecting history across branches, and should bring the smooth-glass clip under the F13.6 gates.
+
+**Method:** `tools/f15_clip_check.py` transmission clip (`transmission-roughness-ior` with `--transmission-motion`, 640x360, 160 frames, 1 spp, custom denoiser), judged against
+a converged control (mean of N independent 8-spp both-branch runs, `--debug-transmission-both-branches`; self-test half vs half at 1/3 of the gates passed at 128 seeds for the three
+smooth ROIs). A/B on the same control and captures: the stable-key denoiser without and with the per-branch history.
+
+**Measures (smooth ior 1.33 / 1.5 / 2.0):** flicker 0.025 / 0.024 / 0.027 -> 0.021 / 0.020 / 0.021; p95 0.175 / 0.169 / 0.145 -> 0.174 / 0.169 / 0.148; max unchanged (0.16 to 0.20). Cost: 16 B per
+pixel per history buffer, two buffers per view (7.4 MiB at 640x360, 66 MiB at 1920x1080); time not measured. Also: endpoint-strict history for smooth refract samples gave p95 0.175 -> 0.107
+(ior 1.33) and 0.170 -> 0.117 (1.5) but flicker 0.031 -> 0.058 on ior 2.0 (stochastic endpoints through internal Fresnel branching).
+
+**Decision:** neither is adopted (orchestrator: adopt only a measured benefit). The dominant error is the refracted-image lag at checker edges (88 % of the error energy, custom worse than raw):
+the surface motion vectors do not move the refracted image; the remedy is virtual-image reprojection (EDGE/F16). The both-branch estimator is kept as a verification switch (never the product path):
+it equals the product estimator on the glass mask to 0.35 / 0.53 % (accumulated 112 frames) and made the smooth ROIs measurable (128 seeds); roughness 0.1 / 0.3 need about 460 / 1,800 seeds.
+
+## 2026-11-14 — F15.2 (ticket 21): per-class tile binning vs the union pipeline (PROVISIONAL, correctness only)
+
+**Hypothesis:** a scene whose materials carry different feature sets resolves faster when each tile list is resolved by a pipeline specialised with
+only the lobes of that class (`MATERIAL_FEATURES = class mask`) than by the one union pipeline, because the dead lobes of each class vanish from the code
+(occupancy, register pressure) at the price of one dispatch per class (up to 16 bins plus an all-lobes overflow bin) and a classification pass.
+
+**Method (this ticket):** the class table of the generator (`shaders/material_classes.def`, 29 archived permutations, 27 class masks) drives the existing F7.4
+material-binning path (`--material-binning on`; the classify kernel writes one tile list per class, binning 2 in `GPUVisibilityParams`). Correctness only:
+`tools/f15_permutations.py equivalence` over 116 fixture cases (81 scenes, both resolve kernels), each class bin pipeline against the all-lobes resolve.
+**No performance figure was taken:** the A/B/A comparison against the union pipeline (3 replicas, quiet machine) on the chess fixture belongs to the
+orchestrator (ticket 24; the fixture is ticket 20) and the final decision waits for the terrain of ticket 23.
+
+**Measures (correctness):** 77 of 116 cases are bit-identical to the all-lobes resolve; the others differ by at most 3.1e-6 relative (37 ULP, iridescence code;
+the codegen of a specialised pipeline schedules the shorter code differently) and by 8-bit pixels in 2 of 116 cases (1 pixel each, 1 LSB); the all-lobes arm repeats
+bit for bit (7 of 7); with the lobes removed from the class pipelines 55 cases leave the envelope, up to 7e7 ULP (the negative control; every
+feature bit 0..7 is discriminated by at least 4 scenes); the overflow bin (class table limited to 2) stays inside the envelope on the 4 scenes with 4 or more classes.
+
+**Decision (provisional):** binning stays opt-in (`--material-binning on`) and the default resolve stays the generic/union one; the class table makes the bins
+possible, whether they are worth their dispatches is open until the A/B/A on the chess fixture (ticket 24) and the terrain (ticket 23).
+
+## 2026-11-14 — F15.4 (ticket 23): layer stack resolve and the binning decision on the terrain (timing taken 2026-11-15, see the update at the end of this entry)
+
+**What changed in the resolve:** a material whose description carries a layer stack (feature bit 8, `MATERIAL_FEATURE_LAYERS`) is resolved by `resolveLayerStack`
+(`shaders/material_shading.h`, rules in `src/renderer/layer_blend.h`): mask sample, optional height-contrast reweighting, per-layer base-parameter samples only
+for layers with a non-zero weight (the cost grows with the number of ACTIVE layers, up to 4 x {base colour, metallic-roughness, occlusion, normal} samples plus the
+height texture), parameter-space blend, surface-gradient normal, then the ONE base BSDF evaluation. Scenes without the bit compile none of it (function constant).
+
+**Not measured here (belongs to the orchestrator, ticket 24, quiet machine):** the resolve GPU time at 1080p per active-layer count against the single material, and
+`--material-binning on` vs the union pipeline on chess + terrain (the >= 5 % rule). The measurement is prepared: `python3 -I tools/f15_layers_timing.py plan|run [--binning]`
+(arms single, layers-1..4, full; A/B/A, 3 replicas, 320 frames with warmup 64, saturated clocks `--no-vsync --gpu-timing-serial`, refuses to start while another GPU
+process runs; results land in `results.json` / `summary.md` for perf-log.md). Until it runs, binning stays opt-in and the default resolve stays the union one (the
+provisional decision of ticket 21 is unchanged). The terrain has two feature classes (layers; layers + coat), so its bins are 2 (the budget run shows `bins 2`).
+
+**Update 2026-11-15 (orchestrator, quiet machine, A/B/A x 3 replicas, 90 runs each, 1920x1080; `build/f15-layers-timing*`, perf-log entry
+"F15 ticket 24: quiet-machine cost of the F15 features"):** resolve mean GPU ms per frame (binning = resolve + classification).
+| arm | procedural union | procedural binning | CC0 union | CC0 binning |
+|---|---|---|---|---|
+| single material | 0.089 | 0.106 | 0.087 | 0.104 |
+| layers-1 | 0.136 | 0.143 | 0.136 | 0.144 |
+| layers-2 | 0.162 | 0.160 | 0.159 | 0.161 |
+| layers-3 | 0.183 | 0.182 | 0.183 | 0.184 |
+| layers-4 | 0.208 | 0.216 | 0.217 | 0.218 |
+| full (generated mask, height contrast, coat finish) | 0.204 | 0.206 | 0.201 | 0.208 |
+The CC0 run uses the four owner-approved ambientCG sets (`--terrain-textures build/terrain-materials`, added to the script by b7beed9, as decision 12
+requires); the first run used the procedural stand-ins.  Each active layer adds about 0.025-0.034 ms at 1080p on this view; the full mix costs
++130 % of the single material (0.20 vs 0.09 ms).  Binning never lowers the resolve by >= 5 % (CC0: full +3.5 %, layers-4 +0.5 %, layers-2 +1.3 %):
+the union pipeline stays the default, binning stays opt-in (with the chess result of ticket 24, entry below).
+
+## 2026-11-15 — F13.4 / F11.5: energy-preserving a-trous (`--lighting-denoise-energy on`), timeboxed experiment (verdict: rejected for cost, owner option B)
+
+**Hypothesis:** the 1-3 % darkening of a denoised, noisy signal (cause proven in 0bae6e5: the receiver-normalised luminance edge-stopping a-trous) disappears if the filter is
+sender-normalised with a symmetric weight.  **Design (one, no sweep):** w(p,q) = taps x normal x depth(max depth) x luminance weight with the MEAN of the two variances x (specular) roughness weight with the MINIMUM
+roughness, pair-rejection rules symmetric; pass 1 `denoise_atrous_norm` writes W(p) = sum_q w(p,q) (one RGBA32F transient texture per iteration), pass 2 `denoise_atrous_energy`
+gathers out(q) = sum_p w(q,p) x(p) / W(p).  Sum_q out(q) = sum_p x(p) exactly.  Two graph passes per iteration with exact accesses, hard-bounded 5x5 loops, PipelineCache, transient textures only.
+Routed signals: DI, GI, specular (base kernels; lobe-contract scenes keep the shipped filter).  AO stays on the shipped filter: it is bounded to [0,1] and the checker rejects values above 1; the energy-routed AO lost 0.8 % to the clamp
+(a shipped-filter AO bias is 1.0004 +- 0.0001, nothing to fix).  Default stays off.
+
+**Numbers** (filtered / pass-through of the same seed or window, mean +- sem; "raw" = atrous 0, temporal alpha 1):
+| signal / scene | shipped filter | energy filter |
+|---|---|---|
+| DI cap fixture `mask=1/emit=1` (75k emitters, 128 strata), 128x72, 8 seeds | 0.9933 +- 0.0009 | 0.9990 +- 0.0011 |
+| DI cap, Queen_Black emissive scene, 8 seeds | 0.9771 +- 0.0036 | 1.0062 +- 0.0087 |
+| DI cap fixture, 256x144 sequence, seed 1, frames 24-55 | 0.9895 | 1.0000 |
+| specular, bench-6 `roughness`, 320x180, 6 windows of 8 frames | 0.9941 +- 0.0007 | 1.0000 +- 0.0000 |
+| GI (DDGI denoised), same scene, spatial only (alpha 1) | 0.9992 +- 0.0001 | 1.0000 +- 0.0000 |
+| GI with temporal accumulation, frames 16-64 | 0.926 +- 0.016 | 0.927 +- 0.016 (same for both: not the spatial filter; isolated below) |
+| AO (`roughness`, `ao-cavity`), not routed | 1.0004 / 1.0006 | = shipped |
+CPU reference (tests/test_denoise.cpp, same weights): energy ratio 1.0000 (1e-4) where the shipped normalisation gives 0.985; control: the row-normalised variant fails the >= 0.9999 check.
+Fireflies (pixels with L > 4 x median 5x5 and L > 0.05, frames 24/40/56; defined before measuring): DI raw 65.7, shipped 61.0, energy 61.0; specular raw 169.0, shipped 144.3, energy 138.3; GI and AO equal.
+Corpus (`tools/f13_f14_check.py`, 89 cases, independent clips bound as final4, ROI d4-fallback, both runs on the same build): option off 13/13 functional, 12/12 independent clips, controls 30/30, 14/14 numerical, 17/17 pairs;
+option on: the same verdicts case by case, no check pass -> fail, negatives still fail.  Metric drift with the option on (all far inside the gates): error-change ghost fraction mirror primary 0.00148 -> 0.00180,
+mirror floor-front 0.00115 -> 0.00216, rough-emitter floors +11/+22 %, disocclusion 0 -> 0.00023 (gate 0.25), fog-disocclusion 3.2e-5 -> 4.2e-6; residual flicker +0.4..+3.7 % (moving-light 0.00541 -> 0.00561, gate 0.02);
+linear RMSE p95 mirror +1.8 %, moving-light -1.4 %, disocclusion -0.9 %.  ctest 909/909, API + shader validation clean on the fixture, 0 GPU allocations in the measured frames.
+No timing taken (machine not quiet): the Sponza D2 A/B is the orchestrator's.
+
+**Verdict: candidate for adoption** on (a) bias within noise on every routed signal and (b) no gate or verdict worse; the ghost and flicker numbers drift upward in the mirror, rough-emitter and disocclusion clips (listed above)
+and the choice weighs that against the removed 1-3 % darkening; (c), the budget A/B, is the orchestrator's.  The default is NOT flipped.
+
+**GI temporal ratio isolated (orchestrator, 2026-11-15):** same scene and capture, 256 frames, shipped filter, a scratch build with a never-committed
+environment override of the temporal alpha and the a-trous count (raw = atrous 0 + alpha 1): the raw DDGI signal itself rises from 0.868 (frames 16-32)
+to 1.000 of its final level (frames 240-256) while the probes converge; filtered/raw is 0.9264 +- 0.0157 over frames 16-64 (the number above, reproduced),
+0.9979 +- 0.0019 over frames 192-256, and the spatial-only filter (alpha 1) reads 0.9996 +- 0.0001 there.  The 0.926 is the transient lag of the temporal
+history behind a converging signal; at convergence the temporal path conserves the GI energy within noise.
+
+**Orchestrator budget A/B (2026-11-15, quiet machine, `build/d2-ab-energy`):** Sponza D2, 1080p, every feature, 128 + 256 frames, `--gpu-timing-serial --no-vsync`,
+option off vs on on the same 94da95c binary, 3 interleaved pairs, 0 GPU allocations in every run:
+| pair | off GPU p50 / p95 | on GPU p50 / p95 |
+|---|---|---|
+| 1 | 15.67 / 17.89 | 28.31 / 29.79 |
+| 2 | 15.32 / 16.64 | 28.38 / 30.02 |
+| 3 | 15.33 / 16.60 | 28.37 / 29.87 |
+Median p95 delta +13.27 ms against the 0.10 ms band.  Per pass (pair 3, p50): the D2 preset routes only the specular signal through the energy path,
+`F13 denoise 2 atrous weight sums 0/1` 3.42 / 3.38 ms and `atrous energy 0/1` 4.01 / 3.91 ms (14.73 ms) replace `atrous 0/1` 0.81 / 0.83 ms; every other pass
+is within 0.05 ms.  The sky sentinel read 0.81 ms in this window (clean 0.674-0.677), which cannot explain a 13 ms delta.  The naive 5x5 gather with the
+weight recomputed in both passes and the per-tap specular metadata loads is about 9x the shipped tiled filter.  **Verdict: rejected for cost; owner option B**
+(the shipped filter stays the default, the residue is declared with its bound in docs/implementation/F13-F14-CLOSURE-2026-11-12.md).  The flag, the kernels
+(not archived) and the CPU reference stay as an opt-in experiment; option A remains an open candidate that needs a cost-bounded implementation first.
+
+## 2026-11-15 — F15 ticket 24: Sponza D2 regression against 75924b2, attribution and fix (RT payload, RGB shadow history)
+
+**Problem (orchestrator, quiet machine, `build/d2-ab-f15-closure`):** D2 GPU p50 +0.64..+0.73 ms, p95 +0.83..+1.08 ms against the 0.10 ms band; per pass (p50) `F13 world-radius RTAO` +0.459
+(kernel unchanged since 75924b2), `Solar RT visibility` +0.066, `Solar temporal moments` +0.065, `F13 reflection sample 0` +0.064, froxel RT source +0.012, Material resolve +0.009.
+Sponza uses no F15 material feature.  Reproduced here on 1d64ba5 (same D2 command, `--gpu-timing-serial`, per-pass p50 from one run is stable to +-0.003 ms except the reflection pass, see below):
+RTAO 1.058 (75924b2) -> 1.49-1.53, Solar RT visibility 0.441 -> 0.50, Solar temporal moments 0.391 -> 0.455, froxel 0.118 -> 0.129.
+
+**Hypotheses, controls and results** (variant builds in one worktree, interleaved runs, 0 GPU allocations in every run):
+1. *RTAO: the 124-byte `RtPayload` of c59c5af (ticket 14), not the intersection-function code.*  Variant A: `ao_rtao` traces with a 16-byte `RtPayloadLite` and links `rt_alpha_lite` (same alpha test):
+   RTAO **1.054 / 1.048 / 1.047 / 1.058** (75924b2: 1.058, 1.053; 1.046).  Negative control B: the same lite kernel and the same lite alpha function with the payload struct padded back to
+   124 bytes (`uint spikePad[27]`): RTAO **1.494** (= the regressed 1.49-1.50), so the payload size alone is the cost, 0.43 ms for 2 M pixels x 64 samples.  Current code stayed at 1.50-1.51 in every window.
+2. *Solar RT visibility: the same payload.*  `shadow_sun_rt_lite` (RtPayloadLite, no spike counters): 0.428-0.444 (75924b2 0.435-0.442; regressed 0.502-0.504).  Froxel RT source (`fog_inject_rt`, a plain shadow ray: it never
+   needs a transmittance): 0.117-0.119 (75924b2 0.117-0.118; regressed 0.129-0.130).
+3. *Solar temporal moments: the 80-byte `GPUShadowHistory` (the RGB transmittance record of ticket 14: 64 -> 80 bytes per pixel, read once and written once, and no longer a divisor of the cache line).*
+   `shadow_temporal_scalar` with the 64-byte `GPUShadowHistoryScalar` prefix in the same buffers: **0.390 / 0.391 / 0.390 / 0.389** (75924b2 0.389-0.391; regressed 0.454-0.457).  The negative control is the shipped kernel
+   (80 bytes) in the same windows: 0.454-0.457.
+4. *`F13 reflection sample 0`: NOT attributed.*  Its p50 is noisy on this machine (75924b2 2.676-2.814 in nine runs, 1d64ba5 2.71-2.83, median +0.05) and its p95 is +0.14..+0.17 ms.  Variant: the base
+   `reflection_rt` traces and shades with `RtPayloadLite` (template `reflectionTraceVisible` / `reflectionSecondary` / `diEndpointTransmittance`, linked `rt_alpha_lite`): p50 median 2.762 vs 2.784 (shipped) vs 2.732 (75924b2),
+   p95 3.783 vs 3.865 (shipped) vs 3.640 (75924b2): within the run-to-run spread, not adopted (code reverted).  Variant on top of it: `kReflectionBackfaceSkips` 4 -> 0 (the 26fe229 back-face continuation loop): p50 2.669 / 2.717 against 2.705 / 2.877 for the same build with 4 and 2.758 / 2.808 for 75924b2 (a third window was contended by another job, all variants +1.8 ms, discarded);
+   the spread of one variant between two runs (0.17) is larger than any difference, so neither the payload nor the loop is shown to be the cause (code reverted).
+   Other candidates left untested: bf0799f environment term, BSDF module (tickets 01/03/08), ticket 13 transport.
+
+**Fix** (commit ec63efc): scenes without `MATERIAL_FEATURE_TRANSMISSION` in the feature union are served the cheap kernels (`ao_rtao` and `fog_inject_rt` always: no transmittance exists for their rays;
+`shadow_sun_rt_lite`, `shadow_temporal_scalar`); scenes with glass keep the ticket-14/15 kernels (unchanged names, descriptors and archive entries), requested on first use (`TransmissionPipelines`, fallback = the cheap kernel
+while the glass kernel is not available, counted as a fallback use, never in a scene without glass); a history layout change restarts the history.  The scalar kernel is exact for the grey masks of a scene without glass (same recurrence,
+bit for bit): F13 exactness captures on 94da95c, 5 cases, PNG 0 px and PFM bit-identical; `visual_check` (8 benches, API + shader validation) 0 px.
+
+**Verification:** per-pass p50 table below; ctest 31 passed + 1 skipped (`terrain_materials_verify`, no data) and 926 doctest cases (the ticket-24 layout test included); `metal_syntax_check` does not exist in this macOS build; the 8 transmissive-shadow keys (tickets 14 and 15, `--shadows rt` and `csm`, point ReSTIR, curved report) GREEN with every negative control failing;
+archive: +4 compute descriptors (916 compute / 143 mesh / 288 render / 35 tile), `archive_check` all scenarios pass, D2: 0 archive misses and 0 render-thread compiles; API + shader validation: exit 0 on pane-sun@rt, pane-sun@csm and a 24-frame Sponza D2,
+the only messages are the 24 "Redundant call to setViewport/setDepthStencilState" notices per 24 frames that 1d64ba5 prints identically.
+
+| pass (p50, ms) | 75924b2 (2 runs) | 1d64ba5 (2 runs) | fix (2 runs) |
+|---|---|---|---|
+| F13 world-radius RTAO | 1.048 / 1.046 | 1.504 / 1.507 | 1.047 / 1.048 |
+| Solar RT visibility | 0.435 / 0.432 | 0.502 / 0.504 | 0.429 / 0.433 |
+| Solar temporal moments | 0.390 / 0.389 | 0.457 / 0.454 | 0.391 / 0.390 |
+| Froxel source with independent RT visibility | 0.118 / 0.117 | 0.129 / 0.130 | 0.118 / 0.118 |
+| F13 reflection sample 0 | 2.701 / 2.676 | 2.721 / 2.825 | 2.747 / 2.739 |
+| Material resolve | 0.306 / 0.305 | 0.315 / 0.315 | 0.314 / 0.316 |
+| GPU p50 / p95 of the frame | 14.48 / 15.46, 14.39 / 15.49 | 15.11 / 16.51, 15.14 / 16.25 | 14.53 / 15.66, 14.50 / 15.69 |
+
+Sky sentinel (`Physical sky and aerial perspective` p95) read 0.81-0.82 in EVERY run of this session, the 75924b2 ones included (clean: 0.674-0.677): the machine was not quiet, so these are indicative; the band measurement is the orchestrator's.
+Remaining after the fix: frame p50 +0.04..+0.11 ms, p95 +0.17..+0.20 ms against 75924b2, per pass dominated by `F13 reflection sample 0` (p95 +0.15) and +0.04 each on three small passes whose p50 did not move.
+
+## 2026-11-15 — F15 ticket 24 follow-up: the p95 tail of `F13 reflection sample 0` against 2e1057a (attributed to the back-face continuation; NOT removable by specialisation)
+
+**Question (orchestrator, baseline 2e1057a = tickets 01-04):** after the payload/history fix the residual is `F13 reflection sample 0`, p50 +0.03..+0.08, p95 +0.18..+0.5 ms.
+**Method:** Sponza D2, `--gpu-timing-serial`, runs alternated per window (t03 = 2e1057a binary, head = ec63efc, variants), pass p50/p95 medians; the sky sentinel was constant in the windows used
+(0.81 in C/D/E, 0.67 in B), contended windows (a run at 1.8 ms slower frames) discarded.  Variants are built on ec63efc and copied to scratch binaries.
+
+| variant (pass p50 / p95 median, ms) | window B (sky 0.67, n=2 clean) | window D (sky 0.81, n=4) | window E (sky 0.81, n=3) |
+|---|---|---|---|
+| 2e1057a | 2.649 / 3.528 | 2.683 / 3.525 | 2.691 / 3.519 |
+| current (ec63efc) | 2.692 / 3.692 | 2.744 / 3.745 | 2.756 / 3.721 |
+| base `reflection_rt` with RtPayloadLite + rt_alpha_lite | 2.662 / 3.582 | - | - |
+| ... + `kReflectionBackfaceSkips` 4 -> 0 | 2.630 / 3.487 | 2.703 / 3.492 | - |
+| lite + `#pragma unroll(disable)` on the continuation loop | - | 2.757 / 3.820 | - |
+| lite + continuation moved out of the first-trace fast path (same arithmetic) | - | - | 2.711 / 3.954 |
+
+**Result:** the whole tail growth disappears only when the continuation is removed (skips 0: p95 3.49 / 3.49 against 3.53 / 3.53 for 2e1057a and 3.69-3.75 for the current code, four runs in D with a constant sentinel).
+The RtPayloadLite variant recovered about 0.1 ms of p95 in the clean window B but not in the 0.81 windows (the unroll and fast-path variants, which contain it, are not better than the current code there),
+so the payload is at most a minor, window-dependent contribution that is not proven.  The cause is work, not code shape: `--debug-lighting 4` on the D2 command counts ~3900 transport rays per frame that meet the back of a
+single-sided surface and continue (26fe229, F13.1 residue), ~200 per frame exhaust the bound of 4 (five traversals for the lane: the SIMD-group tail); restructuring the loop did not change that.
+The continuation is part of the corrected image: with the bound at 0 the D2 exactness capture differs from 94da95c in 934 of 921600 pixels (max delta 122; the other four cases 0 px), so
+**no specialisation can remove it with bit-identical images**: Sponza does contain single-sided surfaces whose back faces rays hit.  A scene-union function constant would not help (single-sidedness is not a feature bit),
+and lowering the bound or skipping the loop changes the image.  Not attempted, because it changes the images: a cheaper continuation (bound below 4, or tmax-limited re-trace) with its own gate.
+No code change from this follow-up (all variants reverted).
+
+## 2026-11-15 — F15 ticket 24 follow-up 2: hardware back-face culling instead of the continuation loop (`RT_PROBE_DIFFUSE_CULLED`), DISCARDED
+
+**Variant:** `reflectionTraceVisible` traces with a new ray type `RT_PROBE_DIFFUSE_CULLED` (rtTrace sets `triangle_cull_mode::back`, like RT_PROBE_PRIMARY; double-sided instances disable culling per instance), one traversal, no bound of 4;
+the old loop kept only as the fallback for a hit the rule still culls; the refraction walk untouched.
+**Image proof at ray level** (a compare build ran both the culled trace and the old loop for every `reflection_rt` ray of Sponza D2 and counted differences, `--debug-lighting 4`, ~3700 continuations per frame):
+- old loop returned a miss (bound exhausted) where the culled trace finds the surface: ~160-210 rays / frame (the expected, allowed change);
+- DIFFERENT first surface (hit/miss or slot/primitive) outside the exhausted rays: **24-35 rays / frame** (not allowed by the acceptance rule);
+- same surface but different t/u/v (the old loop re-traces from an offset origin, the culled ray from the true one): ~2700-2800 rays / frame.
+So the images would change at more than the bound-exhausted pixels (numerically at ~2800 rays, and surface choice at ~30 rays per frame): the semantics are not identical in ONE traversal.
+**Cost** (3 alternating runs, sentinel 0.81 throughout; reflection sample 0 p50 / p95 median, frame p95): 2e1057a 2.735 / 3.501, 15.46; current 2.767 / 3.719, 15.65; culled variant 2.756 / 3.645, 15.63.
+It recovers about a third of the p95 growth (0.07 of 0.22 ms), not "near 2e1057a" (0.14 above).  Both adoption conditions fail: variant discarded, nothing committed but this record.
+The F13 exact / visual_check / residue fixtures were not run (the ray-level result already fails the acceptance rule).  Remaining tail = the extra traversals of the continuation itself (see the previous entry).
+
+## 2026-11-15 — F15 ticket 24 / ticket 21: binning vs union on the chess fixture (A/B/A, 3 replicas, quiet machine): union stays the default
+
+**Question (decision 05/08, fixed before measuring):** per-class tile binning becomes the default for scenes with extended materials only if it lowers the extended resolve time on the chess
+and terrain fixtures by >= 5 % beyond noise.
+**Method:** `tools/f15_costs.py` items 6a-6c on the cfb9e11 Release binary, `--material-binning off` (A, union) vs `on` (B), A/B/A x 3 replicas, 256 frames after 64 warm-up,
+`--gpu-timing-serial --no-vsync`, 0 GPU allocations; resolve = `Material resolve` + `Material classification` (mean ms). Full table in `docs/perf-log.md` ("F15 ticket 24: quiet-machine cost").
+**Result (relative effect of binning on the resolve, median and min..max over replicas, A-A noise):** side-light 1080p -1.8 % (-4.9..-0.4, noise 2.6 %); shadow rig 1080p +6.7 % (+5.2..+7.6, 0.9 %);
+back-light 720p +9.8 % (+8.2..+11.7, 4.3 %). The terrain result of 2026-11-15 (ticket 23) was full +1 %, layers-4 +4 %, layers-2 -1 %.
+**Mechanism:** the class resolve is cheaper (`Material resolve` -0.031 / -0.011 / -0.006 ms p50) but `Material classification` costs 0.026 / 0.028 / 0.014 ms, the same order; no scene pays it back.
+**Decision:** the >= 5 % rule is not met on any chess rig or on the terrain: the union pipeline stays the default, binning stays opt-in (`--material-binning on`). Not a change of the engine.
+Chess classes are not bit-identical to the union (ticket 21: up to 37 ULP) which would anyway have kept binning opt-in. The side-light rig is the only one with a lower mean (-1.8 %), inside its own noise.
+
+## 2026-11-15 — F15 ticket 24 follow-up 3: the base `reflection_rt` traces with the 16-byte payload (ADOPTED)
+
+**Trigger:** the owner's option A (the cost of the 26fe229 back-face continuation is F13's; the F15 band is measured against the ticket-03 baseline plus
+26fe229 and stays at 0.10 ms).  Measured literally, with a backport of 26fe229 onto 2e1057a (`t03fe`, local branch `cl/f15-d2-t03-plus-26fe229`, never
+merged), the closure tree 29814ac still missed the band: decision-11 A/B/A +0.20 / +0.22 / +0.05 (median +0.198 ms), and a 6-replica interleaved
+rotation in one window +0.104 ms.  The continuation itself costs almost nothing on the pre-ticket-14 payload (2e1057a -> t03fe +0.009 ms A/B/A,
++0.065 ms in the rotation) but +0.086 / +0.139 ms on the closure tree: the reflection pass still traced with the 124-byte `RtPayload` of ticket 14
+(8fbda9c had moved only RTAO, fog and the sun visibility to `RtPayloadLite`), and the continuation multiplies the traversals that carry it.  The
+earlier "lite reflection_rt" variant of follow-up 1 recovered ~0.1 ms of pass p95 in the clean window only; it had been measured against 2e1057a
+alone, where the continuation's traversals were not separated from the payload.
+**Change (720ee63):** `reflectionTraceVisible`, `reflectionSecondary`, `rtTraceSurface` and `diEndpointTransmittance` are templates over the payload type
+(default `RtPayload`, so every other caller is unchanged); the base `reflection_rt` kernel (scenes without material features: no transmissive
+material, so the secondary-hit shadow rays have transmittance 1 and `rt_alpha_lite` is exact) traces with `RtPayloadLite` and links `rt_alpha_lite`;
+the lobe kernels and `reflection_capture_rt` keep `RtPayload`.  While a feature scene's lobe kernel compiles, the base kernel serves as the counted
+fallback, as before; glass then shadows opaquely in those transient frames (like `shadow_sun_rt_lite`).  Archive: targeted update, +1 compute
+descriptor (`reflection_rt` linking `rt_alpha_lite`; the earlier `rt_alpha_generic` entry stays, unrequested, like those of `ao_rtao` and `fog_inject_rt`).
+**Images:** F13 exactness captures (5 cases) 0 px and PFM bit-identical against 29814ac; `visual_check` 0 px on 8 benches; D2 continuation counters
+unchanged (316 / 7, 369 / 19 at 720p with `--debug-lighting 4`).
+**Cost** (Sponza D2, quiet machine, `build/d2-skips/rot6`, `build/litefix/aba-*`; sky sentinel 0.76-0.93 on every binary, so only comparisons count):
+- 6-replica rotation: closure tree -> lite fix GPU p95 -0.086 ms (6 of 6 replicas negative, -0.01..-0.16), `F13 reflection sample 0` p95 -0.127 ms;
+- decision-11 A/B/A, t03fe -> final: GPU p95 -0.04 / +0.04 / -0.10 ms (median -0.038 ms, within 0.10); p50 median -0.047 ms;
+- decision-11 A/B/A, 2e1057a -> final (no attribution at all): +0.02 / -0.02 / +0.08 ms (median +0.020 ms);
+- absolute GPU p95 15.33-15.43 ms, 0 GPU allocations, archive 137 hits / 0 misses, 0 render-thread compiles.
+**Decision:** adopted (measured benefit in every replica, identical images); the F15 band is met under option A and also against the plain ticket-03
+baseline.  Not done: the lobe kernels of feature scenes without glass still trace with the full payload (a candidate, no measured need).
+
+## 2026-11-15 — F15 closure (transport): cost of transmission in `Local clustered RT shading` (chess back-light), spike
+
+**Question (owner, "Ottimizzarlo in F15").** Transmission costs +10.67 ms frame p50 / +9.18 ms in `Local clustered RT shading` (`light_cluster_shade_rt`, up to 128 shadow rays per pixel,
+124-byte `RtPayload`, generic intersection function).  Project method: prove the bottleneck, simple baseline, one or two timeboxed experiments, adopt only a measured benefit.
+
+**(a) Bottleneck, proven.**
+- Arm A (`transmission=0`) has NO transmissive feature at all: `material_description.cpp` reports the Transmission feature only for `factor > 0`, so the pawn tops are ordinary
+  hardware-opaque instances (`rt_write_instances`: Opaque option); arm B makes them non-opaque.  Both arms trace with the SAME kernel (`light_cluster_shade_rt` links
+  `rt_alpha_generic` and the 124-byte payload in both: `lighting::kernel(name, rt != nullptr)`), so the payload size is NOT what separates A from B.
+- Counted in-kernel (throw-away instrumentation, not committed: per-pixel counters reduced by SIMD-group into the DI error buffer, `--debug-lighting 1`, 1280x720, per frame):
+  rays 35.13 M (B) vs 35.66 M (A); rays that invoked the intersection function 2.62 M = 7.5 % of the rays (A: 0); invocations 5.37 M (2.05 per crossing ray: entry and exit face of
+  a pawn top); invocations = distinct (multiplicity 1.000 again, now on 5.4 M samples); valid pixels 457 157 in both arms.  Every `alphaTests` increment is a glass invocation (opaque
+  instances never reach the function).
+- So +9.2 ms is paid by 2.6 M rays (about 3.5 ns of GPU time each against 0.74 ns for the average ray): a ray that used to end at the first hit on the opaque pawn top now
+  (1) leaves the fixed-function traversal twice for the shader core (the intersection function) and (2) continues to the emitter instead of ending.
+- Cost probe (`GPURtParams::transmittanceFlags` bit 2, throw-away: the function returns right after counting, T = 1): the body of the function (3 vertex fetches via the index buffer,
+  the metallic texture sample, Fresnel, logs, the duplicate scan) is roughly 4-6 of the 9-10 ms, the round trip and the longer ray the rest (indicative, see noise below).  Bit 3 (no duplicate
+  scan, no list write): -0.0..-1.3 ms, inside the noise: the 8-entry scan is cheap.
+- A first instrumented build that kept the counters inside the kernel made the pass 109 ms (against 39): the kernel is very sensitive to anything that keeps payload fields alive after
+  the trace.  The numbers above come from the counting build; the timing probes from a build WITHOUT the counters.
+
+**(b) Baseline.** The tip 3ef8f41 binary (`build/base`): A/B/A of `t0` (factor 0) and `t1` (factor 1) on the chess back-light rig, `tools/f15_costs.py` command line (256 frames after 64,
+`--gpu-timing-serial --no-vsync`), `Local clustered RT shading` p50: t0 30.26 / 30.39 / 30.51 ms, t1 39.69 / 40.52 / 41.54 / 42.84 ms.
+
+**(c) Experiments (timeboxed, one build each, same binary text except the constant).**
+1. Dedup list 8 -> 4 -> 1 entries (payload 136 -> 104 -> 80 bytes, open-sigma field included), the only way to shrink the payload by 64 of its bytes:
+   t0 cluster p50 (2 replicas, load 7-27): base 30.36 / 30.51, list 8 30.14-31.6, list 4 30.26 / 30.14, list 1 29.26 / 28.84.  t1: list 8 38.9 / 46.1, list 4 38.0 / 41.9, list 1 40.7 / 40.1,
+   base 41.5 / 42.8: the glass arm is bimodal by 4-7 ms between identical runs here (GPU clocks while other agents' jobs run), so NO ranking of the variants is possible on t1.  The only
+   consistent signal is the payload size on the glass-free arm (-1.0 to -1.5 ms, 3-5 %, for the 1-entry list).
+2. Per-material precomputed transmittance record and "skip rays": not built; the probe says the body is at most about half of the cost and its dominant part is the dependent
+   index -> vertex loads (the geometric normal), which no record can replace; skipping rays changes the images.
+
+**Decision.** NO optimisation adopted.  A 1-entry (or 4-entry) list would weaken the duplicate guarantee (Apple9 evidence is pending, HARDWARE_VALIDATION) for a gain that is not measurable on
+the glass arm in this window; the intrinsic price of glass here is the round trip of 5.4 M intersection-function invocations.  Kept: the 8-entry list.  Removed the dead `noDedup` payload word (4 bytes).
+The closure's payload growth (open sigma, +12 bytes) costs +0.6..1.2 ms on the glass-free arm in this window (t0 cluster x1 31.6 / 31.0 against 30.4 / 30.5) and the removal of `noDedup`
+recovers 4 of the 12 bytes; the orchestrator must confirm on a quiet window (commands below).  Open candidates if the glass cost must come down: a separate lean payload entry for the DI kernels
+(archive update for every kernel moved), `accept_any_intersection` + hardware culling of the exit faces with an analytic thickness (changes images), a per-light "may cross glass" bit.
+**Quiet-window A/B commands** (each variant needs the binary's `shaders/` beside it): `python3 -I tools/f15_costs.py run --binary <phosphor> --only t1-transmission-chess-backlight --out DIR`
+for base 3ef8f41 and the closure binary (A/B/A, 3 replicas, one pair per lock acquisition).
+
+## 2026-11-16 — F15 closure (transport): the +3.7 ms of `Local clustered RT shading` after the round-2 transport commits is the payload SIZE (spike, nothing adopted)
+
+**Question.** Tip 5405c57 costs +3.7 ms (cluster B p50 36.9 against 33.2 ms at 41be99b, frame +3.7..4.5) on the chess back-light rig, glass arm.  Which part of 049f570 (open-sigma, masked branch) pays it?
+**Static evidence.** For an opaque-alpha, non-masked glass triangle the function now also runs `transmissionShadowSurfaceOpen` (0 for a non-solid surface, three `sigma_t` logs/divisions for a solid one, CSE-able with the ones of `transmissionShadowSurfaceLn`) and three adds; the masked branch is not executed (`alphaCutoff <= 0`).  The post-trace `rtShadowTransmittance(payload, end)` is three selects.  The payload grew from 124 to 144 bytes (+12 `openSigma`, +4 pad, +4 alignment hole) and is zero-initialised (`Payload payload{}`) and carried through every one of the ~35 M shadow rays per frame.
+**Method.** Throw-away binaries (not committed) of the tip, B arm only (`--material-scenario chess-backlight/transmission=1`, the f15_costs command line), interleaved runs, `--gpu-timing-serial --no-vsync`, 1280x720, load 13-35 (other agents + my own builds): INDICATIVE only; every comparison below is paired with a tip run in the same window.
+**Probes** (`GPURtParams::transmittanceFlags` bits from an environment variable, runtime branches, 3 reps each, cluster p50 ms, tip-build reference 38.7 / 38.8 / 39.6): skip the open-sigma accumulation 39.9 / 39.5 / 39.3; skip the spike counters (`ifInvocations`, `ifDistinct`, `listOverflows`) 39.7 / 39.8 / 39.6; the function returning at once after counting 34.8 / 35.2 / 35.1.  Open-sigma ALU and counters: 0.0 ms (noise +-0.5).  The whole function body: about -4.4 ms, i.e. the same order as the regression but not separable from the round trip.
+**Experiments (one build each).**
+1. Partial payload initialisation in `diEndpointTransmittance` (all read fields zeroed, `listed[]` and `direction` left alone): cluster 42.9 / 43.2 / 40.1 against tip 39.4 / 39.1 / 39.6.  Not better (worse in 2 of 3): discarded.
+2. One inlined copy of `rtAccumulateTransmittance` in `rt_alpha_generic` (it was inlined three times: plain, duplicate-injection control, masked): 39.4 / 39.1 / 38.6 against tip 38.0 / 38.9 / 38.7.  No benefit: discarded.
+3. Attribution probe, payload 144 -> 128 bytes (open sigma and pad removed, i.e. 12 + 4 bytes; the transmittance of closed volumes is then wrong, a probe only): cluster 33.9 / 34.4 / 34.2 against tip 37.6 / 37.9 / 37.9 (-3.7 ms, 3 of 3 pairs), frame 48.5 / 49.1 / 49.0 against 52.8 / 53.0 / 52.9 (-3.9 ms), `F13 reflection samples` -0.3 ms.  This is the whole regression: it is paid by the payload size on every ray, not by the open-sigma logic, the counters, the masked branch or the initialisation.
+**Decision.** No change adopted (experiments 1 and 2 give no benefit).  The 16 bytes cannot be removed without changing the pinned layout (static_assert 144; 132 and 136 bytes make the Apple GPU compiler fail on `reflection_rt_lobe`; the 128-byte variant above translated in the archive build, runtime JIT of that pipeline NOT tested).  Candidates, all layout changes (owner decision on the pin): (a) 128 bytes with the open sigma kept by dropping `direction` (the intersection function has no world-space direction input: `[[world_space_direction]]` is rejected in a triangle function, tested) or two of the three spike counters (the multiplicity self-check would move to a debug payload); (b) a separate lean payload entry for the DI/shadow kernels that need neither the dedup list nor counters (`rt_alpha_generic` variant, archive update for every kernel moved); (c) a debug-only wide payload with the counters.  Any of them needs `metal-tt` plus a runtime JIT of `reflection_rt_lobe` and the F13 exactness / transport fixtures.
+**Quiet-window A/B** (each binary needs its `shaders/` beside it): `python3 -I tools/f15_costs.py run --binary <phosphor> --only t1-transmission-chess-backlight --out DIR`.
+
+**Follow-up (same day): adopted, the 128-byte payload (commit "RtPayload 144 -> 128 bytes").**  Orchestrator decision: keep `openSigma`, the dedup list and `direction`, remove the three spike counters and the pad word
+(`SHADOW-TRANSMITTANCE` print, sun-kernel counter slots 8-11 and the `GPUShadowCounters` fields, 48 -> 32 bytes); pin `static_assert(sizeof(RtPayload) == 128)`.  The multiplicity evidence (1.000 on 5.4 M samples, M5 Max) stays above and in ticket 14.
+Validation on the fix build (branch `f15c-transcost`, no timing claimed): (1) full build including the metal-tt archive translation, no ICE; (2) runtime JIT with `--no-pipeline-archive --pipeline-sync`, 640x360: `specular-grid-sun`
+(`reflection_rt_lobe`) PIPELINES `failures 0`, exit 0; chess back-light glass with clustered DI and with ReSTIR DI, `failures 0`, exit 0; (3) the five F13 exactness PFMs cmp-identical to the 5405c57 build; engine PFMs of
+transmission-glass-behind-glass, transmission-tinted-bodies, transmissive-shadow-{pane-sun@rt, water-sun@rt, volume-pane@rt, point@restir, curved@rt} cmp-identical tip vs fix; `f15_transport_check.py volume|masked|thin-backlit|glass-weights`
+exit 0 on both binaries (gates hold, controls fail) and all 12 captured PFMs cmp-identical; (4) ctest 45/45 (1 skipped: terrain_materials_verify).  (f15_check captures were run with the archive-miss lines allowed in a throw-away local edit
+of run_checked.py, because the shared archive in my tree lagged the orchestrator's: the miss is `visibility_lit_resolve`, identical for both binaries; the evaluation step needs numpy and was not run.)
+Quiet A/B: `python3 -I tools/f15_costs.py run --binary build/tip/phosphor --only t1-transmission-chess-backlight --out build/f15-costs/tip` and the same with `build/fix128/phosphor` (each with `shaders/` beside it).
+
+**Quiet A/B (orchestrator, 2026-11-16 07:56-08:02, Mitsuba renders SIGSTOPped, quietgate passed, load1 at run start 1.3-4.0 for the tip and 1.5-1.8
+for the fix, 0 GPU allocations and 0 fallback draws in every run; `build/f15-costs-r2/trans-{tip,fix128}`), back-light rig, effect = B - mean(A0, A2),
+median of 3 replicas:** frame GPU p50 effect tip (144 B) +14.46 ms (B arm 51.92) against fix (128 B) +12.62 ms (B arm 49.92): **-1.84 ms**;
+`Local clustered RT shading` +11.36 -> +9.67, `F13 reflection samples` +3.18 -> +2.96.  The quiet number is half the -3.7 ms the loaded spike
+suggested.  The B arm stays about +2.2 ms above 41be99b (47.75 ms, 124-byte payload): that is the price of the closed-volume interior and the
+masked casters (049f570) plus the bounded Fresnel weights (aa3b19b) beyond the payload bytes, correctness work kept, not attributed further.
+**ADOPTED** (f7d1f22, evidence dabaeaf; integrated tip verified as int12: ctest 45/45, F13 exactness 5/5, visual 0 px, runtime JIT failures 0,
+transport fixtures 4/4).
+
+## 2026-11-16 — F15.4 (ticket 23) / F15.2 option (a): what the layer-stack resolve pays since round 1 (exact-maths module; in-stack texture-transform specialisation ADOPTED)
+
+**Question.** On the CC0 terrain at 1080p (union pipeline, `Material resolve` mean) the layer arms grew from the base 3ef8f41 (layers-1 0.129, layers-4 0.203,
+full 0.199 ms) to 41be99b (0.286 / 0.383 / 0.544 ms; perf-log entry "F15 closure round 2").  Candidates: (1) the exact-maths copy of the resolve kernels that
+scenes with material features select (owner option (a) of F15.2, fa6786d: safe math mode plus scoped `contract(off)` / precise), (2) the blending of feature
+blocks and emission (e074074), (3) per-slot texture transforms inside stacks (7fcbb3d), (4) multiple-scattering compensation (3812871).
+**Method.** Branch `f15c-layercost` (Sonnet writer): a debug-only `--debug-material-module exact|fast` (ce3997d; `fast` makes `exactModuleKernel` the identity, so
+the same binary runs the fast-maths kernels) and a compute-pipeline limits log (`PHOSPHOR_LOG_COMPUTE_LIMITS`: `maxTotalThreadsPerThreadgroup` is 1024 for every
+pipeline including the layered exact variants, no register-pressure signal).  Static reading found candidate (3) live in every stack: the transform helpers
+ran at each mask, height and layer slot even without constant 26.  Quiet rotation (orchestrator, renders paused, quietgate passed; `build/f15-costs-r2/module-rot`):
+four arms (pre-fix tip and fix binary, each `exact` and `fast`), terrain CC0 1920x1080, union, `--material-binning off --pipeline-sync --no-vsync
+--gpu-timing-serial`, 64 warm-up + 320 frames, 3 replicas with the order reversed every replica; 0 GPU allocations, 0 fallback draws, 0 compiler calls in
+every measured window.  `Material resolve` mean ms, median (3 runs):
+
+| arm | tip exact | tip fast | fix exact | fix fast |
+|---|---|---|---|---|
+| single material (no material feature: base module) | 0.095 | 0.095 | 0.095 | 0.096 |
+| layers-1 | 0.283 | 0.175 | 0.282 | 0.158 |
+| layers-4 | 0.380 | 0.269 | 0.353 | 0.239 |
+| full (generated mask, height contrast, coat finish) | 0.542 | 0.299 | 0.494 | 0.277 |
+
+**Findings.** (a) The exact-maths module is the dominant cost: on the fix binary +0.124 ms (layers-1, +78 %), +0.114 (layers-4, +48 %), +0.217 (full, +78 %);
+scenes without material features keep the fast base module and pay nothing (single 0.095 both).  (b) The in-stack transform code: compiled out by c8e240f
+(b6e3a55) when no material of the scene carries a transform (the scene store counts `MATERIAL_FLAG_LAYER_TRANSFORM` too): exact layers-4 0.380 -> 0.353 (-7 %),
+full 0.542 -> 0.494 (-9 %), layers-1 unchanged; images: 39 of 39 sampled `layers-*` keys of `f15_check.py` and the five F13 exactness PFMs `cmp`-identical to the
+pre-change binary.  (c) Left after both: fast fix against the base, layers-1 +0.029 ms, full +0.078 ms (feature-block / emission blending, coverage alpha, MS
+compensation), not attributed further inside the timebox.
+**Decision.** c8e240f ADOPTED (b6e3a55).  The exact module stays: it is what makes class bins and the all-lobes pipeline 0 px / 0 ULP apart (owner option (a));
+its price, 0.11-0.22 ms of resolve at 1080p on the terrain (+48..78 % of the resolve), is reported to the owner in the handoff as the trade-off of that option.
+`--debug-material-module fast` stays debug-only for future A/Bs (its pipelines are not archived: always measure it with `--pipeline-sync`).
+
+
+## 2026-11-16 — F15.2 / F15.4 (tickets 21, 23): material binning re-measured on the exact resolve module (NOT adopted)
+
+**Question.** Round 1 kept per-class binning opt-in (never >= 5 % on chess or terrain) with the fast module.  Since F15.2 option (a) every
+scene with material features resolves with the exact-maths module, whose class bins are exact copies too: does binning pay now?
+**Method.** Final binary (`build/d2-final/final3`, perf-log "F15 closure round 3: final window"), A = union (`--material-binning off`), B =
+bins, A/B/A x 3 replicas, `--gpu-timing-serial`; terrain CC0 1080p per arm (`tools/f15_layers_timing.py run --binning`), chess rigs
+(`tools/f15_costs.py t6-binning-chess-*`).  Resolve = `Material resolve` + `Material classification`.  The window was flagged disturbed by
+quietgate (java and the Virtualization VM, not ours); the decision does not depend on it (no arm comes near a 5 % gain).
+**Result.** Terrain union / bin ms: layers-1 0.279 / 0.291, layers-2 0.311 / 0.325, layers-3 0.332 / 0.341, layers-4 0.352 / 0.363, full
+0.492 / 0.503, blocks-1..4 1.265 / 1.286, 1.494 / 1.580, 1.608 / 1.683, 2.433 / 2.412 (the only gain, -0.9 %).  Chess: side-light +2.9 %
+(A-A noise 0.8 %), shadow rig +10.3 % (1.9 %), back-light +4.4 % (4.6 %).
+**Decision.** NOT adopted: union stays the default, binning stays opt-in (decision 05).

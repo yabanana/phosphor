@@ -41,6 +41,15 @@ TEST_CASE("pipeline key: canonical string format") {
     b.output(1, rg::Format::RGBA16Float, ColorOutput::Blend::AlphaOver);
     b.color[1].writeMask = 0x7;
     CHECK(canonicalString(b) == "R|forward_vs|forward_fs|c0:u=7,c1:b=1|o0=BGRA8Srgb/none/F,o1=RGBA16Float/over/7");
+    // F15.1 (ticket 15): the transmittance-map blend (RGB sum, alpha maximum) is its own key token; every older key is unchanged.
+    PipelineDesc t;
+    t.kind = PipelineKind::Render;
+    t.functions = {"shadow_transmit_vertex", "shadow_transmit_fragment", ""};
+    t.output(0, rg::Format::RGBA32Float, ColorOutput::Blend::TransmittanceMap);
+    CHECK(canonicalString(t) == "R|shadow_transmit_vertex|shadow_transmit_fragment||o0=RGBA32Float/tmap/F");
+    PipelineDesc plain = t;
+    plain.output(0, rg::Format::RGBA32Float);
+    CHECK(pipelineKey(t) != pipelineKey(plain));
 }
 
 TEST_CASE("pipeline key: golden hashes (changing them invalidates harvested data)") {

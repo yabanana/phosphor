@@ -18,7 +18,9 @@ void RtConsumer::prepare(u32 slot, pipe::PipelineHandle handle) {
     if (s.pipeline != pipeline || s.generation != pipelines_.generation()) {
         context_.memory().release(s.table, MemoryCategory::RayTracing);
         s.table = nullptr;
-        auto* function = pipeline->functionHandle(NS::String::string("rt_alpha_generic", NS::UTF8StringEncoding));
+        // F15 ticket 24: a pipeline links exactly one of the two alpha entries (the payload type is part of the signature).
+        auto* function = pipeline->functionHandle(NS::String::string("rt_alpha_lite", NS::UTF8StringEncoding));
+        if (!function) function = pipeline->functionHandle(NS::String::string("rt_alpha_generic", NS::UTF8StringEncoding));
         if (!function) throw std::runtime_error("RT consumer PSO is missing its linked alpha function");
         s.table = context_.memory().newIntersectionFunctionTable(pipeline, 1, MemoryCategory::RayTracing,
                                                                  "Lighting consumer per-slot alpha IFT");
@@ -36,6 +38,7 @@ void RtConsumer::prepare(u32 slot, pipe::PipelineHandle handle) {
     s.table->setBuffer(r.instances, 0, 4);
     s.table->setBuffer(r.meshes, 0, 5);
     s.table->setBuffer(r.params, 0, 6);
+    s.table->setBuffer(r.extensions, 0, 7);
 }
 void RtConsumer::bind(MTL4::ArgumentTable* table, u32 asBinding, u32 iftBinding) const {
     const auto r = rt_.traceResources(slot_);

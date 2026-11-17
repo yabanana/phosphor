@@ -8,7 +8,7 @@ import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"tools"))
 import json
 import tempfile
-from volume_snapshot_check import VOLUME_GATES,FOG_SLICING_GATES,analytic_component,camera_geometry_evidence,check_record,fog_slicing_evidence,fog_slicing_sample,volume_words,temporal_record
+from volume_snapshot_check import FOG_WORDS,FOG_SCALAR_WORDS,fog_words,VOLUME_GATES,FOG_SLICING_GATES,analytic_component,camera_geometry_evidence,check_record,fog_slicing_evidence,fog_slicing_sample,volume_words,temporal_record
 
 def words(floats):return list(struct.unpack("<"+"I"*len(floats),struct.pack("<"+"f"*len(floats),*floats)))
 def record_fixture():
@@ -18,7 +18,7 @@ def record_fixture():
     f=[0.0]*112
     for i in (0,5,15,16,21,26,31):f[i]=1
     f[10]=-1;f[72]=1;f[73]=9
-    fw=words(f);fw[64:67]=[1,1,2];fw[99]=11
+    fw=words(f)+[0,0,0,0];fw[64:67]=[1,1,2];fw[99]=11  # + the two u64 GPU addresses of GPUFogParams
     blocks={"encoding":"little-endian-u32-shared-scalar-ABI","expected_atmosphere":aw,"submitted_atmosphere":list(aw),"fog":fw}
     settings={"fixture_extinction_m_inv":.01,"fixture_source":[.01,.02,.03]}
     cases=[]
@@ -97,12 +97,12 @@ def perspective_blocks(width=64,height=36,near=0.1,far=500.0,camera=(0.0,1.7,0.0
     inv[8]=camera[0]/near;inv[9]=camera[1]/near;inv[10]=camera[2]/near
     view=[1,0,0,0, 0,1,0,0, 0,0,1,0, -camera[0],-camera[1],-camera[2],1]
     f=[0.0]*112;f[0:16]=inv;f[16:32]=view;f[72]=near;f[73]=far;f[92:95]=list(camera)
-    fw=words(f);fw[64:67]=[64,36,32];fw[68]=width;fw[69]=height
+    fw=words(f)+[0,0,0,0];fw[64:67]=[64,36,32];fw[68]=width;fw[69]=height
     return f,fw
 class FogSlicingTests(unittest.TestCase):
     def snapshot(self,falloff,perturb=0.0,rows=None):
-        f,fw=perspective_blocks();f[75]=falloff;fw=words(f);fw[64:67]=[64,36,32];fw[68]=64;fw[69]=36
-        f=list(volume_words(fw,112)) # the evaluator sees float32 parameters
+        f,fw=perspective_blocks();f[75]=falloff;fw=words(f)+[0,0,0,0];fw[64:67]=[64,36,32];fw[68]=64;fw[69]=36
+        f=list(fog_words(fw)) # the evaluator sees float32 parameters
         params={"width":64,"height":36,"grid":[64,36,32],"inverse":f[0:16],"view":f[16:32],"camera":f[92:95],"near":f[72],"far":f[73]}
         samples=[]
         for y in range(0,36,3):
@@ -169,3 +169,15 @@ class CameraGeometryTests(unittest.TestCase):
         self.assertFalse(self.run_geometry([self.record(0,2,[0,1,0])],spec)["passed"])
 
 if __name__=="__main__":unittest.main()
+
+
+class FogAbiTests(unittest.TestCase):
+    def test_fog_block_length_follows_gpu_types(self):
+        # F15 grew GPUFogParams to 464 bytes (two trailing u64 addresses); the oracle must follow the C++ static_assert, not a stale count
+        import re
+        header=(Path(__file__).resolve().parents[1]/"src"/"renderer"/"gpu_types.h").read_text()
+        size=int(re.search(r"sizeof\(GPUFogParams\)\s*==\s*(\d+)",header).group(1))
+        self.assertEqual(FOG_WORDS*4,size)
+        self.assertEqual(len(fog_words([0]*FOG_WORDS)),FOG_SCALAR_WORDS)
+        with self.assertRaises(ValueError):fog_words([0]*FOG_SCALAR_WORDS)  # the pre-F15 112-word layout is rejected
+

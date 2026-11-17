@@ -98,3 +98,133 @@ TEST_CASE("procedural meshes are well formed") {
         for (const auto& n : m.normals) CHECK(glm::length(n) == doctest::Approx(1.0f).epsilon(1e-3));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Review (ticket 04): setMaterialDescription semantics.
+// ---------------------------------------------------------------------------
+namespace {
+constexpr u32 kWhite = 90, kMr = 91, kNormal = 92;
+
+GPUMaterial texturedMaterial() {
+    GPUMaterial g{};
+    g.baseColorTex = 10;
+    g.metallicRoughnessTex = 11;
+    g.normalTex = 12;
+    g.occlusionTex = 13;
+    g.emissiveTex = 14;
+    return g;
+}
+
+MaterialDescription describedWithAllTextures() {
+    MaterialDescription d;
+    d.base.baseColorTexture.index         = 10;
+    d.base.metallicRoughnessTexture.index = 11;
+    d.base.normalTexture.index            = 12;
+    d.base.occlusionTexture.index         = 13;
+    d.base.emissiveTexture.index          = 14;
+    return d;
+}
+} // namespace
+
+TEST_CASE("GpuScene::setMaterialDescription: a removed texture binds the documented default, never the old one") {
+    GpuScene scene;
+    scene.setBaseTextureDefaults(kWhite, kMr, kNormal);
+    scene.addMaterial(texturedMaterial(), describedWithAllTextures(), "m", MaterialSupportReport{});
+
+    MaterialDescription edited = describedWithAllTextures();
+    edited.base.normalTexture = textureSlot(TextureColorSpace::Linear, TextureChannel::Rgb); // removed
+    edited.base.emissiveTexture = textureSlot(TextureColorSpace::SRGB, TextureChannel::Rgb); // removed
+    REQUIRE(scene.setMaterialDescription(0, edited));
+    const GPUMaterial& g = scene.materials()[0];
+    CHECK(g.normalTex == kNormal);
+    CHECK(g.emissiveTex == kWhite);
+    CHECK(g.baseColorTex == 10u); // untouched slots keep their texture
+    CHECK(g.metallicRoughnessTex == 11u);
+    CHECK(g.occlusionTex == 13u);
+
+    // Removing every texture binds the three defaults.
+    MaterialDescription bare;
+    REQUIRE(scene.setMaterialDescription(0, bare));
+    CHECK(g.baseColorTex == kWhite);
+    CHECK(g.metallicRoughnessTex == kMr);
+    CHECK(g.normalTex == kNormal);
+    CHECK(g.occlusionTex == kWhite);
+    CHECK(g.emissiveTex == kWhite);
+}
+
+TEST_CASE("GpuScene::setMaterialDescription: without registered defaults a removed texture is the shader fallback") {
+    GpuScene scene;
+    scene.addMaterial(texturedMaterial(), describedWithAllTextures(), "m", MaterialSupportReport{});
+    REQUIRE(scene.setMaterialDescription(0, MaterialDescription{}));
+    CHECK(scene.materials()[0].baseColorTex == INVALID_TEXTURE_INDEX);
+    CHECK(scene.materials()[0].normalTex == INVALID_TEXTURE_INDEX);
+}
+
+TEST_CASE("GpuScene::setMaterialDescription: a path that is not resolved yet keeps the current binding") {
+    GpuScene scene;
+    scene.setBaseTextureDefaults(kWhite, kMr, kNormal);
+    scene.addMaterial(texturedMaterial(), describedWithAllTextures(), "m", MaterialSupportReport{});
+    MaterialDescription d = describedWithAllTextures();
+    d.base.baseColorTexture.index = INVALID_TEXTURE_INDEX;
+    d.base.baseColorTexture.path  = "wax.png";
+    REQUIRE(scene.setMaterialDescription(0, d));
+    CHECK(scene.materials()[0].baseColorTex == 10u);
+}
+
+TEST_CASE("GpuScene::setMaterialDescription: the support entry is recomputed from the new description") {
+    GpuScene scene;
+    MaterialDescription plain;
+    scene.addMaterial(GPUMaterial{}, plain, "wax", buildSupportReport(plain, MaterialSourceInfo{}));
+    REQUIRE(scene.materialSupport()[0].features.empty());
+
+    MaterialDescription sheened;
+    sheened.sheen = SheenBlock{};
+    sheened.sheen->color = {0.5f, 0.5f, 0.5f};
+    REQUIRE(scene.setMaterialDescription(0, sheened));
+    REQUIRE(scene.materialSupport()[0].features.size() == 1);
+    CHECK(scene.materialSupport()[0].features[0].feature == "sheen");
+    CHECK(scene.materialSupport()[0].features[0].level == currentSupportTable()
+                                                              .features[static_cast<size_t>(MaterialFeature::Sheen)].level);
+    CHECK(scene.materialSupport()[0].name == "wax");
+
+    // A removed feature disappears from the report.
+    REQUIRE(scene.setMaterialDescription(0, plain));
+    CHECK(scene.materialSupport()[0].features.empty());
+}
+
+TEST_CASE("GpuScene::setMaterialDescription: the GPU emissive is clamped to >= 0, the description keeps the value") {
+    GpuScene scene;
+    scene.addMaterial(GPUMaterial{}, MaterialDescription{}, "m", MaterialSupportReport{});
+    MaterialDescription d;
+    d.base.emissive = {-2.0f, 0.5f, 3.0f};
+    REQUIRE(scene.setMaterialDescription(0, d));
+    CHECK(scene.materials()[0].emissive[0] == 0.0f);
+    CHECK(scene.materials()[0].emissive[1] == 0.5f);
+    CHECK(scene.materials()[0].emissive[2] == 3.0f);
+    CHECK(scene.materialDescriptions()[0].base.emissive[0] == -2.0f);
+}
+
+TEST_CASE("GpuScene::setMaterialDescription after the store mirrored the library bumps the edit version") {
+    GpuScene scene;
+    GPUMaterial g{};
+    g.roughness = 0.9f;
+    scene.addMaterial(g, MaterialDescription{}, "m", MaterialSupportReport{});
+    CHECK_FALSE(scene.materialLibrarySealed());
+    CHECK(scene.materialEditVersion() == 0);
+    MaterialDescription d;
+    d.base.roughness = 0.1f;
+    CHECK(scene.setMaterialDescription(0, d));
+    CHECK(scene.materials()[0].roughness == doctest::Approx(0.1f));
+    CHECK(scene.materialEditVersion() == 1);
+
+    // F15.1 (ticket 05): edits stay valid once sealed; SceneStore re-derives the library.
+    scene.sealMaterialLibrary();
+    CHECK(scene.materialLibrarySealed());
+    d.base.roughness = 0.7f;
+    CHECK(scene.setMaterialDescription(0, d));
+    CHECK(scene.materials()[0].roughness == doctest::Approx(0.7f));
+    CHECK(scene.materialEditVersion() == 2);
+
+    scene.clear();
+    CHECK_FALSE(scene.materialLibrarySealed());
+}

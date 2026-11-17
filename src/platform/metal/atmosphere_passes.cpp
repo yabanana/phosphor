@@ -131,7 +131,7 @@ struct AtmospherePasses::Impl {
         const char* names[]={"volume_clear_counters","atmosphere_transmittance","atmosphere_multiscattering","atmosphere_sky_view","atmosphere_apply",
                              "fog_inject","fog_temporal","fog_integrate","fog_apply","clouds_march","clouds_temporal","clouds_apply"};
         if(active)for(u32 i=0;i<FogSnapshot;++i)handles[i]=p.request(lighting::kernel(names[i]));
-        if(o.fog&&a){fogRtHandle=p.request(lighting::kernel("fog_inject_rt",true));fogConsumer=std::make_unique<RtConsumer>(c,p,*a);}
+        if(o.fog&&a){fogRtHandle=p.request(lighting::kernel("fog_inject_rt",true,true));fogConsumer=std::make_unique<RtConsumer>(c,p,*a);}
         if(!o.volumeOracle.empty()||o.debugVolumeCorrupt){
             if(!o.debugLighting)throw std::invalid_argument("Volume oracle requires --debug-lighting N");
             if(o.fogHomogeneous&&(!o.fog||o.volumeOracle.empty()))throw std::invalid_argument("Homogeneous fog requires fog and a volume oracle directory");
@@ -258,7 +258,7 @@ struct AtmospherePasses::Impl {
             hadFogHistory=hadFogHistory&&!fogDecision.reset&&!(diagnostics&&diagnostics->homogeneousFog());
             fogParams={};std::memcpy(fogParams.inverseViewProjection,glm::value_ptr(inverse),64);std::memcpy(fogParams.view,f.constants.view,64);
             std::memcpy(fogParams.previousViewProjection,fogHistory.get(f.view).previousViewProjection.data(),64);std::memcpy(fogParams.previousView,views[f.view].fogPreviousView.data(),64);
-            fogParams.gridX=fog.gridX;fogParams.gridY=fog.gridY;fogParams.gridZ=fog.gridZ;fogParams.maxLocalLights=fog.maxLocalLights;
+            fogParams.materialExtensions=scene.materialExtensionsAddress();fogParams.vertexColors=scene.vertexColorsAddress();fogParams.gridX=fog.gridX;fogParams.gridY=fog.gridY;fogParams.gridZ=fog.gridZ;fogParams.maxLocalLights=fog.maxLocalLights;
             fogParams.outputWidth=f.width;fogParams.outputHeight=f.height;fogParams.frameIndex=u32(f.index);fogParams.viewID=f.view;
             fogParams.nearDistance=fogNear;fogParams.farDistance=fogFar;
             fogParams.densityAtBase=float(fog.densityAtBase);fogParams.heightBase=float(fog.heightBase);fogParams.heightFalloff=float(fog.heightFalloff);fogParams.maxDensity=float(fog.maxDensity);

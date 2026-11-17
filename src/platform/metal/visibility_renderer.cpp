@@ -4,12 +4,20 @@
 #include "platform/metal/mesh_renderer.h"
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/upload_ring.h"
+#include "platform/metal/acceleration_structures.h"
+#include "platform/metal/rt_consumer.h"
+#include "platform/metal/lighting_dispatch.h"
+#include "platform/metal/metal_graph_executor.h"
+#include "renderer/subsurface_walk_table.h"
 #include "pipeline/forward_variants.h"
+#include "pipeline/material_classes.generated.h"
+#include "core/log.h"
 #include "renderer/scene_store.h"
 #include "rendergraph/pass_context.h"
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
+#include <string_view>
 
 namespace phosphor {
 namespace {
@@ -28,6 +36,12 @@ constexpr rg::Format resolveFormat(u32 index,bool lighting) {
     // Preserve its range before F13/F14 composition; F7/F8 keeps its HALF ABI.
     return index==0&&lighting?rg::Format::RGBA32Float:kFormats[index];
 }
+constexpr u16 kSssConstant = 23; // reserved SSS_OUTPUT (shaders/variants.def)
+// F15.2: the generated class table (shaders/material_classes.def) and the shared layout agree.
+static_assert(pipe::matclass::gen::kActiveClassBudget == VISIBILITY_FEATURE_CLASSES, "active-class budget of material_classes.def");
+static_assert(pipe::matclass::gen::kBinClassFlag == VISIBILITY_BIN_CLASS && pipe::matclass::gen::kBinOverflowValue == VISIBILITY_BIN_OVERFLOW,
+              "RESOLVE_BIN values");
+static_assert(pipe::matclass::gen::kSssOutputConstantIndex == kSssConstant, "SSS_OUTPUT constant index");
 constexpr std::array<const char *, 6> kNames = {
     "Linear HDR", "Signed normal + roughness", "Diffuse albedo", "Specular albedo", "Motion pixels", "Reactive mask"};
 } // namespace
@@ -44,7 +58,7 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
     }
     clear_ = p.request(compute("visibility_clear"));
     classify_ = p.request(compute("visibility_classify"));
-    generic_ = p.request(compute(lighting_ ? "visibility_lit_resolve" : "visibility_resolve"));
+    generic_ = p.request(pipe::forward::inExactModuleIfAllScenes(compute(lighting_ ? "visibility_lit_resolve" : "visibility_resolve"))); // exact-all: test only
     if (adaptive_ || p.harvesting()) {
         adaptivePipeline_ = p.request(compute("visibility_adaptive"));
         saveHistory_ = p.request(compute("visibility_history"));
@@ -58,7 +72,7 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
     for (u32 i = 0; i < VISIBILITY_CLASSES; ++i) {
         auto d = compute(lighting_ ? "visibility_lit_resolve" : "visibility_resolve");
         d.constant(21, pipe::ConstantType::UInt, i);
-        resolve_[i] = p.request(d);
+        resolve_[i] = p.request(pipe::forward::inExactModuleIfAllScenes(d));
     }
     pipe::PipelineDesc d;
     d.kind = pipe::PipelineKind::Render;
@@ -66,17 +80,16 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
     d.functions = {"visibility_present_vs", "visibility_present_fs", ""};
     d.output(0, rg::Format::BGRA8Srgb);
     present_ = p.request(d);
-    d = pipe::forward::genericDesc(resolveFormat(0,lighting_));
-    d.label = "Visibility indexed overflow fallback";
-    d.functions[0] = "forward_surface_vs";
-    d.functions[1] = lighting_ ? "forward_surface_lit_fs" : "forward_surface_fs";
-    for (u32 i = 0; i < kFormats.size(); ++i)
-        d.output(i, resolveFormat(i,lighting_));
-    fallback_ = p.request(d);
+    fallback_ = p.request(fallbackDesc());
+    // Ticket 17: the base of the fallback while the specialised one compiles, for a scene whose pass has the diffuse-irradiance attachment
+    // (SSS_OUTPUT without the feature union: it writes the target as 0).  Requested at startup like every base pipeline (archive entry).
+    fallbackSss_ = p.request(fallbackDesc(1u));
+    sssClear_ = p.request(compute("subsurface_clear"));
+    sssDiffuse_ = p.request(compute("subsurface_diffuse"));
     for (auto &table : tables_) {
         auto *desc = MTL4::ArgumentTableDescriptor::alloc()->init();
         desc->setMaxBufferBindCount(18);
-        desc->setMaxTextureBindCount(10);
+        desc->setMaxTextureBindCount(16); // 11 = E(-N) companion of the GI irradiance (ticket 19); up to 15 for the subsurface walk accumulation (ticket 17)
         NS::Error *error = nullptr;
         table = c.device()->newArgumentTable(desc, &error);
         desc->release();
@@ -84,8 +97,46 @@ VisibilityRenderer::VisibilityRenderer(MetalContext &c, PipelineCache &p, SceneR
             throw std::runtime_error("Visibility argument table creation failed");
     }
 }
+pipe::PipelineHandle VisibilityRenderer::binPipeline(u32 mask, bool overflow) {
+    // Bin pipelines are keyed by what they compile, not by the scene: the class table of the generator names them.
+    // sssOutput() is 0..2 (bits 17-18); texture transform 19 (moved at integration); dropLobes_ (a feature mask) from bit 20; vertex colour 60.
+    const u64 key = u64(mask) | (u64(overflow) << 16) | (u64(sssOutput()) << 17) | (u64(textureTransform_) << 19) | (u64(dropLobes_) << 20) | (u64(vertexColor_) << 60);
+    auto it = binHandles_.find(key);
+    if (it == binHandles_.end()) {
+        const auto describe = [&](const char* kernel) {
+            auto d = compute(kernel);
+            const u32 compiled = overflow ? MATERIAL_FEATURES_ALL : (mask & ~dropLobes_); // dropLobes_: negative control
+            if (compiled != 0u) d.constant(pipe::matclass::gen::kMaterialFeaturesConstantIndex, pipe::ConstantType::UInt, compiled);
+            if (subsurface_) d.constant(kSssConstant, pipe::ConstantType::UInt, sssOutput());
+            if (textureTransform_) d = pipe::forward::withTextureTransform(d); // F15.1 (ticket 22)
+            if (vertexColor_) d = pipe::forward::withVertexColor(d);           // F15 closure (COLOR_0)
+            d.constant(pipe::matclass::gen::kResolveBinConstantIndex, pipe::ConstantType::UInt,
+                       overflow ? VISIBILITY_BIN_OVERFLOW : (VISIBILITY_BIN_CLASS | mask));
+            return pipe::forward::inExactModule(d); // F15.2 (ticket 21): the exact-maths copy of the kernel
+        };
+        // A harvest (--harvest-pipelines) records both resolve kernels of every class (the plan names both), whichever lighting
+        // path the harvested run uses.
+        if (pipelines_.harvesting()) (void)pipelines_.request(describe(lighting_ ? "visibility_resolve" : "visibility_lit_resolve"));
+        it = binHandles_.emplace(key, pipelines_.request(describe(lighting_ ? "visibility_lit_resolve" : "visibility_resolve"))).first;
+    }
+    return it->second;
+}
+pipe::PipelineDesc VisibilityRenderer::fallbackDesc(u32 sss) const {
+    pipe::PipelineDesc d = pipe::forward::genericDesc(resolveFormat(0, lighting_));
+    d.label = "Visibility indexed overflow fallback";
+    d.functions[0] = "forward_surface_vs";
+    d.functions[1] = lighting_ ? "forward_surface_lit_fs" : "forward_surface_fs";
+    for (u32 i = 0; i < kFormats.size(); ++i)
+        d.output(i, resolveFormat(i, lighting_));
+    if (sss != 0u) { // F15.1 (ticket 17): the diffuse-irradiance attachment of volumetric subsurface (SSS_OUTPUT 1 diffusion, 2 RT walk)
+        d.output(kFormats.size(), rg::Format::RGBA32Float);
+        d.constant(kSssConstant, pipe::ConstantType::UInt, sss);
+    }
+    return d;
+}
 VisibilityRenderer::~VisibilityRenderer() {
     context_.waitIdle();
+    for (auto *t : {histTerm_[0], histTerm_[1], histGain_[0], histGain_[1]}) if (t) context_.memory().release(t, MemoryCategory::Other);
     if (lightingFallbackDepth_) lightingFallbackDepth_->release();
     for (auto &f : frames_) {
         context_.memory().release(f.tiles, MemoryCategory::Other);
@@ -138,12 +189,93 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
         previousInstances_[view_] = context_.memory().newBuffer(
             poseCapacity_, MTL::ResourceStorageModePrivate, MemoryCategory::Other, "Previous instance poses per view");
     const auto temporalUpload = context_.frameUploads().allocate(sizeof(temporal));
-    std::memcpy(temporalUpload.cpu, &temporal, sizeof(temporal));
+    GPUTemporalParams uploaded = temporal;
+    uploaded.materialExtensions = scene_.materialExtensionsAddress(); // F15.4 / F15.1 ticket 22: alpha tests read stacks and transforms
+    std::memcpy(temporalUpload.cpu, &uploaded, sizeof(uploaded));
     temporalAddress_ = temporalUpload.gpu;
     scene_.setTemporalInputs(previousInstances_[view_]->gpuAddress(), temporalAddress_);
     mesh_.setTemporalInputs(temporalAddress_);
-    useBinning_ =
-        binning_ && std::all_of(resolve_.begin(), resolve_.end(), [this](auto h) { return pipelines_.isFinal(h); });
+    // F15.1: with material features every shading pipeline is the one specialised by the scene's
+    // feature union (the all-lobes reference while it compiles); union 0 keeps today's handles.
+    // Ticket 17: a scene with volumetric subsurface also sets SSS_OUTPUT (constant 23) on the compute resolve and the overflow fallback
+    // (its own cache slots: the same union without subsurface keeps its pipelines).
+    {
+        // --resolve-features all: the all-lobes pipeline resolves the whole scene (reference of the class pipelines).
+        const u32 mask = forceAllLobes_ && store.featureUnion() != 0u ? MATERIAL_FEATURES_ALL : store.featureUnion();
+        // F15.1 (ticket 22): per-slot texture transforms: the marker rides on the mask the shading pipelines are served with (the
+        // lobe-only `mask` keeps deciding binning, subsurface and the tile path).
+        textureTransform_ = store.textureTransformInUse();
+        vertexColor_ = store.vertexColorInUse();
+        const u32 shadeMask = mask | (textureTransform_ ? FEATURE_UNION_TEXTURE_TRANSFORM : 0u) | (vertexColor_ ? FEATURE_UNION_VERTEX_COLOR : 0u);
+        // F15.2: a scene with features bins per feature class (the legacy normal/emission classes only serve scenes without).
+        const bool featureBinsWanted = binning_ && !forceAllLobes_ && mask != 0u;
+        subsurface_ = subsurfaceAllowed_ && !tileResolve_ && mask != 0u && store.volumetricSubsurface();
+        // Ticket 17/18: the optional RT walk replaces the diffusion when the acceleration structures exist and its kernel is resident.
+        // F15.1 (ticket 14, round 3): a scene with transmissive materials is served by the glass walk (full payload, shadow rays through glass).
+        if (walkWanted_ && sssWalkLite_ != pipe::INVALID_PIPELINE) {
+            const bool glass = (store.featureUnion() & MATERIAL_FEATURE_TRANSMISSION) != 0u;
+            if (glass && sssWalkGlass_ == pipe::INVALID_PIPELINE) sssWalkGlass_ = pipelines_.request(lighting::kernel("subsurface_walk_glass", true, false));
+            sssWalk_ = glass ? sssWalkGlass_ : sssWalkLite_;
+        }
+        walk_ = subsurface_ && walkWanted_ && walkRt_ && walkRt_->active() && sssWalk_ != pipe::INVALID_PIPELINE && pipelines_.isFinal(sssWalk_) &&
+                (!accumulate_ || pipelines_.isFinal(sssAccumulate_));
+        const u32 so = walk_ ? 100u : (subsurface_ ? 50u : 0u);
+        const auto sssConstant = [&](pipe::PipelineDesc d) {
+            if (subsurface_) d.constant(kSssConstant, pipe::ConstantType::UInt, sssOutput());
+            return d;
+        };
+        const char *kernel = lighting_ ? "visibility_lit_resolve" : "visibility_resolve";
+        for (u32 i = 0; i < VISIBILITY_CLASSES; ++i) {
+            if (featureBinsWanted) {
+                servedResolve_[i] = resolve_[i]; // not used: the class bins below serve this scene
+                continue;
+            }
+            servedResolve_[i] = features_.serve(pipelines_, 100 + so + i, resolve_[i], shadeMask, [&] {
+                auto d = compute(kernel);
+                d.constant(21, pipe::ConstantType::UInt, i);
+                return sssConstant(d);
+            });
+        }
+        servedGeneric_ = features_.serve(pipelines_, 110 + so, adaptive_ ? adaptivePipeline_ : generic_, shadeMask,
+                                         [&] { return sssConstant(compute(adaptive_ ? "visibility_adaptive" : kernel)); });
+        if (pipelines_.harvesting()) {
+            // F15.2 (ticket 21): the archive holds the exact-module resolve pipelines of both lighting paths, specialised and the all-lobes fallback (a scene of
+            // one path is exercised by runners of the other; serve() asks for the all-lobes pipeline until the specialised one is final).
+            for (const char *k : {"visibility_resolve", "visibility_lit_resolve"})
+                features_.requestBoth(pipelines_, 500 + so + (std::string_view(k) == "visibility_lit_resolve" ? 100u : 0u), shadeMask,
+                                      [&] { return sssConstant(compute(k)); });
+        }
+        servedTile_ = tile_ == pipe::INVALID_PIPELINE ? tile_ : features_.serve(pipelines_, 111, tile_, shadeMask, [&] { // round 3 (COLOR_0): shadeMask carries the markers
+            auto d = compute("visibility_tile");
+            d.kind = pipe::PipelineKind::Tile;
+            d.output(0, rg::Format::R32Uint);
+            return d;
+        });
+        servedFallback_ = features_.serve(pipelines_, 112 + so, subsurface_ ? fallbackSss_ : fallback_, shadeMask,
+                                          [&] { return fallbackDesc(sssOutput()); });
+    }
+    featureBins_ = binning_ && !forceAllLobes_ && store.featureUnion() != 0u;
+    if (featureBins_) {
+        // F15.2 (ticket 21): one pipeline per class of the scene's class table (the archived class pipelines of the
+        // generator) plus the all-lobes overflow bin when the scene has more classes than the budget; while one is not
+        // final the frame uses the union-served generic dispatch (a transient after a load, never a fallback pipeline).
+        classTable_ = buildMaterialClassTable(store.materials(), classBudget_);
+        for (u32 i = 0; i < classTable_.count; ++i) servedBins_[i] = binPipeline(classTable_.masks[i], false);
+        servedOverflow_ = classTable_.overflow() ? binPipeline(MATERIAL_FEATURES_ALL, true) : pipe::INVALID_PIPELINE;
+        if (pipelines_.harvesting()) (void)binPipeline(MATERIAL_FEATURES_ALL, true); // the archive holds the overflow bin of every scene
+        if (classTable_.overflowClasses != loggedOverflowClasses_) {
+            loggedOverflowClasses_ = classTable_.overflowClasses;
+            if (classTable_.overflow())
+                LOG_WARN("Material classes: %u classes exceed the %u-class bin budget; their %u material(s) run the all-lobes pipeline",
+                         classTable_.overflowClasses, VISIBILITY_FEATURE_CLASSES, classTable_.overflowMaterials);
+        }
+        useBinning_ = true;
+        for (u32 i = 0; i < classTable_.count; ++i) useBinning_ = useBinning_ && pipelines_.isFinal(servedBins_[i]);
+        if (classTable_.overflow()) useBinning_ = useBinning_ && pipelines_.isFinal(servedOverflow_);
+    } else {
+        useBinning_ = binning_ && std::all_of(servedResolve_.begin(), servedResolve_.end(),
+                                              [this](auto h) { return pipelines_.isFinal(h); });
+    }
     params_ = {width,
                height,
                (width + 15) / 16,
@@ -154,14 +286,17 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
                debugMode,
                exposure,
                temporal.mipBias,
-               useBinning_ ? 1u : 0u,
+               useBinning_ ? (featureBins_ ? 2u : 1u) : 0u,
                store.slotCapacity(),
                outputWidth,
                outputHeight,
                adaptive_ ? (shadingHistoryValid_[view_] ? 3u : 1u) : 0u,
-               0,
+               featureBins_ && useBinning_ ? classTable_.count : 0u,
                {background_[0], background_[1], background_[2]},
-               0};
+               0,
+               {}};
+    if (featureBins_ && useBinning_)
+        for (u32 i = 0; i < classTable_.count; ++i) params_.classMasks[i] = classTable_.masks[i];
     const u64 tiles = u64((outputWidth + 15) / 16) * ((outputHeight + 15) / 16);
     if (tiles > tileCapacity_) {
         tileCapacity_ = tiles;
@@ -169,9 +304,9 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
             context_.memory().release(f.tiles, MemoryCategory::Other);
             context_.memory().release(f.args, MemoryCategory::Other);
             f.tiles =
-                context_.memory().newBuffer(tiles * VISIBILITY_CLASSES * sizeof(u32), MTL::ResourceStorageModePrivate,
+                context_.memory().newBuffer(tiles * VISIBILITY_MAX_BINS * sizeof(u32), MTL::ResourceStorageModePrivate,
                                             MemoryCategory::Other, "Material tile bins");
-            f.args = context_.memory().newBuffer(64, MTL::ResourceStorageModeShared, MemoryCategory::Other,
+            f.args = context_.memory().newBuffer(256, MTL::ResourceStorageModeShared, MemoryCategory::Other,
                                                  "Material indirect arguments");
         }
     }
@@ -197,15 +332,81 @@ void VisibilityRenderer::prepareFrame(u32 slot, u32 width, u32 height, u32 outpu
     const auto upload = context_.frameUploads().allocate(sizeof(params_));
     std::memcpy(upload.cpu, &params_, sizeof(params_));
     paramsAddress_ = upload.gpu;
+    if (subsurface_) {
+        const GPUSubsurfaceParams sp{width, height, outputWidth, outputHeight, sssNear_, sssTanX_, sssTanY_, 0};
+        const auto su = context_.frameUploads().allocate(sizeof(sp));
+        std::memcpy(su.cpu, &sp, sizeof(sp));
+        sssParamsAddress_ = su.gpu;
+    }
+    if (walk_) {
+        GPUSubsurfaceWalkParams wp{};
+        wp.width = width; wp.height = height; wp.outputWidth = outputWidth; wp.outputHeight = outputHeight;
+        wp.tanHalfFovX = sssTanX_; wp.tanHalfFovY = sssTanY_;
+        wp.slotCount = store.slotCapacity(); wp.meshCount = static_cast<u32>(walkRt_->meshes().size());
+        wp.samples = walkSamples_; wp.maxSteps = walkSteps_; wp.frameIndex = constants.frameIndex ^ (walkSeed_ * 2654435761u); wp.flags = walkFlags_;
+        wp.lightCount = constants.lightCount; wp.materialCount = static_cast<u32>(store.materials().size());
+        walkParamsAddress_ = lighting::upload(context_, wp);
+        const auto table = context_.frameUploads().allocate(sizeof(kSubsurfaceTableData));
+        std::memcpy(table.cpu, kSubsurfaceTableData, sizeof(kSubsurfaceTableData));
+        walkTableAddress_ = table.gpu;
+        if (accumulate_) {
+            // the history: two RGBA32F textures per signal (term, gain), ping-pong; (re)allocated with the output size (a new history then)
+            if (histWidth_ != outputWidth || histHeight_ != outputHeight || !histTerm_[0]) {
+                for (auto **t : {&histTerm_[0], &histTerm_[1], &histGain_[0], &histGain_[1]}) {
+                    if (*t) context_.memory().release(*t, MemoryCategory::Other);
+                    auto *d = MTL::TextureDescriptor::texture2DDescriptor(MTL::PixelFormatRGBA32Float, outputWidth, outputHeight, false);
+                    d->setStorageMode(MTL::StorageModePrivate);
+                    d->setUsage(MTL::TextureUsageShaderRead | MTL::TextureUsageShaderWrite);
+                    *t = context_.memory().newTexture(d, MemoryCategory::Other, "Subsurface walk accumulation history");
+                    if (!*t) throw std::runtime_error("Subsurface accumulation history allocation failed");
+                }
+                histWidth_ = outputWidth;
+                histHeight_ = outputHeight;
+                histFresh_ = true;
+            }
+            histCur_ ^= 1u; // the texture written this frame; the other one holds the previous frame
+            GPUSubsurfaceAccumParams ap{};
+            ap.width = width; ap.height = height; ap.outputWidth = outputWidth; ap.outputHeight = outputHeight;
+            ap.flags = ((histFresh_ || histResetRequested_ || !temporal.historyValid) ? SSS_ACCUM_RESET : 0u) | (accumNoReject_ ? SSS_ACCUM_NO_REJECT : 0u);
+            ap.window = accumWindow_; ap.maxCount = accumMaxCount_;
+            // depth tolerance (prefilter neighbours and history), relative to the VIEW depth, 10 %: a strafing camera changes the view depth of a surface point by more than 2 % per frame and 2 % rejected the history (clip: product 0.197 / 0.734; 10 %: 0.070 / 0.190); the normal test (0.9) still separates surfaces
+            ap.nearPlane = sssNear_; ap.depthTolerance = 0.10f; ap.normalCosine = 0.9f;
+            accumParamsAddress_ = lighting::upload(context_, ap);
+            histFresh_ = false;
+            histResetRequested_ = false;
+        }
+    }
+}
+void VisibilityRenderer::setSubsurfaceWalk(AccelerationStructures *rt, u32 samples, u32 maxSteps, u32 flags) {
+    walkRt_ = rt;
+    walkWanted_ = rt != nullptr;
+    walkSamples_ = std::max(samples, 1u);
+    walkSteps_ = std::clamp(maxSteps, 1u, 8192u);
+    walkFlags_ = flags;
+    if (!walkWanted_) return;
+    // linked alpha function: the walk traces with the 16-byte lite payload (the alpha test is the same, rt_common.h)
+    sssWalkLite_ = sssWalk_ = pipelines_.request(lighting::kernel("subsurface_walk", true, true));
+    sssAccumulate_ = pipelines_.request(lighting::kernel("subsurface_accumulate"));
+    walkConsumer_ = std::make_unique<RtConsumer>(context_, pipelines_, *rt);
+}
+void VisibilityRenderer::bindFrame(MetalGraphExecutor &executor) {
+    if (!(walk_ && accumulate_ && histTerm_[0])) return;
+    executor.bindTexture(histTermPrev_, histTerm_[histCur_ ^ 1u]);
+    executor.bindTexture(histTermCur_, histTerm_[histCur_]);
+    executor.bindTexture(histGainPrev_, histGain_[histCur_ ^ 1u]);
+    executor.bindTexture(histGainCur_, histGain_[histCur_]);
+}
+void VisibilityRenderer::prepareSubsurfaceWalk(u32 slot) {
+    if (walk_) walkConsumer_->prepare(slot, sssWalk_);
 }
 void VisibilityRenderer::prepareLighting(u32 flags, u32 sunIndex, std::array<float, 3> environment, float sunAngularRadius) {
     const GPUResolveLightingParams p{flags, sunIndex, params_.width, params_.height, {environment[0], environment[1], environment[2]}, sunAngularRadius};
     auto u = context_.frameUploads().allocate(sizeof p); std::memcpy(u.cpu, &p, sizeof p); lightingAddress_ = u.gpu;
 }
-void VisibilityRenderer::setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi) {
-    sun_ = sun; direct_ = direct; indirect_ = gi;
+void VisibilityRenderer::setLightingTextures(rg::TextureRef sun, rg::TextureRef direct, rg::TextureRef gi, rg::TextureRef giBack) {
+    sun_ = sun; direct_ = direct; indirect_ = gi; indirectBack_ = giBack.valid() ? giBack : gi; // F15 closure ticket 19: E(-N) companion (gi itself when the scene has none: bound, never read)
 }
-void VisibilityRenderer::bind(rg::PassContext &ctx, MTL4::ArgumentTable *table) {
+void VisibilityRenderer::bind(rg::PassContext &ctx, MTL4::ArgumentTable *table, bool withSss) {
     table->setAddress(scene_.frameConstantsAddress(), 0);
     table->setAddress(scene_.vertexBuffer()->gpuAddress(), 1);
     table->setAddress(scene_.buffers().instances()->gpuAddress(), 2);
@@ -225,6 +426,7 @@ void VisibilityRenderer::bind(rg::PassContext &ctx, MTL4::ArgumentTable *table) 
         table->setTexture(static_cast<MTL::Texture*>(ctx.texture(sun_))->gpuResourceID(), 7);
         table->setTexture(static_cast<MTL::Texture*>(ctx.texture(direct_))->gpuResourceID(), 8);
         table->setTexture(static_cast<MTL::Texture*>(ctx.texture(indirect_))->gpuResourceID(), 9);
+        table->setTexture(static_cast<MTL::Texture*>(ctx.texture(indirectBack_))->gpuResourceID(), 11);
     }
     if (adaptive_)
         table->setAddress(shadingHistory_[view_]->gpuAddress(), 16);
@@ -233,6 +435,7 @@ void VisibilityRenderer::bind(rg::PassContext &ctx, MTL4::ArgumentTable *table) 
     table->setTexture(static_cast<MTL::Texture *>(ctx.texture(visibility_))->gpuResourceID(), 0);
     for (u32 i = 0; i < outputs_.size(); ++i)
         table->setTexture(static_cast<MTL::Texture *>(ctx.texture(outputs_[i]))->gpuResourceID(), i + 1);
+    if (withSss) table->setTexture(static_cast<MTL::Texture *>(ctx.texture(sss_))->gpuResourceID(), 10);
 }
 rg::BufferRef VisibilityRenderer::importPoseHistory(rg::RenderGraph& graph) {
     // The caller imports before receiver guides; addResolve reuses this exact
@@ -263,7 +466,7 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
     if (adaptive_)
         shadingHistoryRef_ = graph.importBuffer("Adaptive shading history per view", {shadingHistorySize_[view_]},
                                                 ImportContentsDefined | ImportOutput);
-    bins_ = graph.importBuffer("Material bins and arguments", {tileCapacity_ * VISIBILITY_CLASSES * sizeof(u32) + 64},
+    bins_ = graph.importBuffer("Material bins and arguments", {tileCapacity_ * VISIBILITY_MAX_BINS * sizeof(u32) + 256},
                                ImportPerFrame);
     if (tileResolve_) {
         graph.addPass(
@@ -284,7 +487,7 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
             [this](PassContext &ctx) {
                 auto *enc = static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder());
                 bind(ctx, tables_[2]);
-                enc->setRenderPipelineState(pipelines_.render(tile_));
+                enc->setRenderPipelineState(pipelines_.render(servedTile_));
                 enc->setArgumentTable(tables_[2], MTL::RenderStageTile);
                 enc->dispatchThreadsPerTile(MTL::Size::Make(VISIBILITY_TILE, VISIBILITY_TILE, 1));
                 scene_.countCommands(3);
@@ -328,6 +531,28 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
                                               MTL::Size::Make(16, 16, 1));
                     scene_.countCommands(3);
                 });
+        if (subsurface_) {
+            // F15.1 (ticket 17): the diffuse-irradiance target, cleared every frame (the resolve writes only volumetric pixels).
+            graph.addPass(
+                "Subsurface clear", PassType::Compute,
+                [&](PassBuilder &b) {
+                    sss_ = b.createTexture("Subsurface diffuse irradiance",
+                                           {Format::RGBA32Float, params_.outputWidth, params_.outputHeight});
+                    sss_ = b.write(sss_, Usage::ShaderWrite, StageDispatch);
+                },
+                [this](PassContext &ctx) {
+                    auto *enc = static_cast<MTL4::ComputeCommandEncoder *>(ctx.encoder());
+                    auto *table = tables_[5];
+                    table->setAddress(sssParamsAddress_, 0);
+                    table->setTexture(static_cast<MTL::Texture *>(ctx.texture(sss_))->gpuResourceID(), 0);
+                    enc->setComputePipelineState(pipelines_.compute(sssClear_));
+                    enc->setArgumentTable(table);
+                    enc->dispatchThreadgroups(
+                        MTL::Size::Make((params_.outputWidth + 15) / 16, (params_.outputHeight + 15) / 16, 1),
+                        MTL::Size::Make(16, 16, 1));
+                    scene_.countCommands(3);
+                });
+        }
         graph.addPass(
             "Material resolve", PassType::Compute,
             [&](PassBuilder &b) {
@@ -344,24 +569,43 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
                     b.read(output, Usage::ShaderRead, StageDispatch);
                     output = b.write(output, Usage::ShaderWrite, StageDispatch);
                 }
-                if (lighting_) for (auto ref : {sun_, direct_, indirect_}) b.read(ref, Usage::ShaderRead, StageDispatch);
+                if (lighting_) for (auto ref : {sun_, direct_, indirect_, indirectBack_}) b.read(ref, Usage::ShaderRead, StageDispatch);
+                if (subsurface_) {
+                    b.read(sss_, Usage::ShaderRead, StageDispatch);
+                    sss_ = b.write(sss_, Usage::ShaderWrite, StageDispatch);
+                }
                 b.setProfileShaders(lighting_ ? "visibility_lit_resolve" : "visibility_resolve");
             },
             [this](PassContext &ctx) {
                 auto *enc = static_cast<MTL4::ComputeCommandEncoder *>(ctx.encoder());
-                bind(ctx, tables_[2]);
+                bind(ctx, tables_[2], subsurface_);
                 enc->setArgumentTable(tables_[2]);
-                if (useBinning_) {
+                if (useBinning_ && featureBins_) {
+                    // F15.2: one dispatch per class bin (indirect arguments of the bin) plus the overflow bin when used.
+                    ++binnedFrames_;
+                    ++featureBinnedFrames_;
+                    for (u32 i = 0; i < classTable_.count; ++i) {
+                        enc->setComputePipelineState(pipelines_.compute(servedBins_[i]));
+                        enc->dispatchThreadgroups(frames_[slot_].args->gpuAddress() + i * 12, MTL::Size::Make(16, 16, 1));
+                    }
+                    u32 dispatches = classTable_.count;
+                    if (classTable_.overflow()) {
+                        enc->setComputePipelineState(pipelines_.compute(servedOverflow_));
+                        enc->dispatchThreadgroups(frames_[slot_].args->gpuAddress() + VISIBILITY_FEATURE_CLASSES * 12, MTL::Size::Make(16, 16, 1));
+                        ++dispatches;
+                    }
+                    scene_.countCommands(1 + 2 * dispatches);
+                } else if (useBinning_) {
                     ++binnedFrames_;
                     for (u32 i = 0; i < VISIBILITY_CLASSES; ++i) {
-                        enc->setComputePipelineState(pipelines_.compute(resolve_[i]));
+                        enc->setComputePipelineState(pipelines_.compute(servedResolve_[i]));
                         enc->dispatchThreadgroups(frames_[slot_].args->gpuAddress() + i * 12,
                                                   MTL::Size::Make(16, 16, 1));
                     }
                     scene_.countCommands(1 + 2 * VISIBILITY_CLASSES);
                 } else {
                     ++genericFrames_;
-                    enc->setComputePipelineState(pipelines_.compute(adaptive_ ? adaptivePipeline_ : generic_));
+                    enc->setComputePipelineState(pipelines_.compute(servedGeneric_));
                     enc->dispatchThreadgroups(MTL::Size::Make(params_.tilesX, params_.tilesY, 1),
                                               MTL::Size::Make(adaptive_ ? 8 : 16, adaptive_ ? 8 : 16, 1));
                     scene_.countCommands(3);
@@ -373,18 +617,167 @@ rg::TextureRef VisibilityRenderer::addResolve(rg::RenderGraph &graph, rg::Textur
         [&](PassBuilder &b) {
             for (u32 i = 0; i < outputs_.size(); ++i)
                 outputs_[i] = b.writeColor(outputs_[i], i, LoadIntent::Preserve);
+            if (subsurface_) sss_ = b.writeColor(sss_, u32(outputs_.size()), LoadIntent::Preserve);
             depth_ = b.writeDepth(depth_, LoadIntent::Preserve);
             scene_.declareDrawReads(b);
             b.read(poses_, Usage::ShaderRead, StageVertex);
-            if (lighting_) for (auto ref : {sun_, direct_, indirect_}) b.read(ref, Usage::ShaderRead, StageFragment);
+            if (lighting_) for (auto ref : {sun_, direct_, indirect_, indirectBack_}) b.read(ref, Usage::ShaderRead, StageFragment);
             b.setProfileShaders(lighting_ ? "forward_surface_vs,forward_surface_lit_fs" : "forward_vs,forward_surface_fs");
         },
         [this](PassContext &ctx) {
             if (lighting_) scene_.setLightingInputs(lightingAddress_, static_cast<MTL::Texture*>(ctx.texture(sun_)),
                                                      static_cast<MTL::Texture*>(ctx.texture(direct_)),
-                                                     static_cast<MTL::Texture*>(ctx.texture(indirect_)));
-            scene_.encodeOverlay(static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder()), fallback_, true, lightingFallbackDepth_);
+                                                     static_cast<MTL::Texture*>(ctx.texture(indirect_)),
+                                                     static_cast<MTL::Texture*>(ctx.texture(indirectBack_)));
+            scene_.encodeOverlay(static_cast<MTL4::RenderCommandEncoder *>(ctx.encoder()), servedFallback_, true, lightingFallbackDepth_);
         });
+    if (subsurface_ && walk_) {
+        // F15.1 (ticket 17/18, RT tier): the random walk through the real geometry replaces the screen-space diffusion (same inputs, same
+        // output: a new colour version that every later consumer reads).  With accumulation (the default) the walk's noisy term and gain go through the
+        // temporal / spatial accumulation pass below, which produces the colour and the gain the product reads.
+        const TextureRef resolved = outputs_[0];
+        const TextureRef sss = sss_;
+        const TextureRef normal = outputs_[1];
+        const TextureRef depthRef = depth_;
+        const TextureRef motion = outputs_[4];
+        graph.addPass(
+            "Subsurface RT walk", PassType::Compute,
+            [&](PassBuilder &b) {
+                b.read(resolved, Usage::ShaderRead, StageDispatch);
+                b.read(sss, Usage::ShaderRead, StageDispatch);
+                b.read(normal, Usage::ShaderRead, StageDispatch);
+                b.read(scene_.dataRef(), Usage::ShaderRead, StageDispatch);
+                walkRt_->declareTraceReads(b);
+                TextureRef out = b.createTexture("Subsurface walk raw colour",
+                                                 {resolveFormat(0, lighting_), params_.outputWidth, params_.outputHeight});
+                walkRaw_ = b.write(out, Usage::ShaderWrite, StageDispatch);
+                TextureRef gain = b.createTexture("Subsurface ambient gain (raw)", {Format::RGBA16Float, params_.outputWidth, params_.outputHeight});
+                walkGain_ = b.write(gain, Usage::ShaderWrite, StageDispatch);
+                TextureRef term = b.createTexture("Subsurface walk term (raw)", {Format::RGBA16Float, params_.outputWidth, params_.outputHeight});
+                walkTerm_ = b.write(term, Usage::ShaderWrite, StageDispatch);
+                b.setProfileShaders("subsurface_walk");
+            },
+            [this, resolved, sss, normal](PassContext &ctx) {
+                auto *enc = static_cast<MTL4::ComputeCommandEncoder *>(ctx.encoder());
+                auto *table = tables_[6];
+                const auto r = walkRt_->traceResources(slot_);
+                table->setAddress(walkParamsAddress_, 0);
+                table->setAddress(scene_.frameConstantsAddress(), 1);
+                table->setAddress(scene_.buffers().materials()->gpuAddress(), 2);
+                walkConsumer_->bind(table, 3, 4);
+                table->setAddress(r.instances->gpuAddress(), 5);
+                table->setAddress(r.meshes->gpuAddress(), 6);
+                table->setAddress(r.vertices->gpuAddress(), 7);
+                table->setAddress(r.indices->gpuAddress(), 8);
+                table->setAddress(scene_.lightsAddress(), 9);
+                table->setAddress(walkTableAddress_, 10);
+                table->setAddress(r.textures->gpuAddress(), 11);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(resolved))->gpuResourceID(), 0);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(sss))->gpuResourceID(), 1);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(normal))->gpuResourceID(), 2);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(walkRaw_))->gpuResourceID(), 3);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(walkGain_))->gpuResourceID(), 4);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(walkTerm_))->gpuResourceID(), 5);
+                enc->setComputePipelineState(pipelines_.compute(sssWalk_));
+                enc->setArgumentTable(table);
+                enc->dispatchThreadgroups(
+                    MTL::Size::Make((params_.outputWidth + 15) / 16, (params_.outputHeight + 15) / 16, 1),
+                    MTL::Size::Make(16, 16, 1));
+                scene_.countCommands(3);
+            });
+        if (accumulate_) {
+            const auto describe = [&](const char *name) { return graph.importTexture(name, {Format::RGBA32Float, params_.outputWidth, params_.outputHeight}, ImportContentsDefined | ImportOutput); };
+            histTermPrev_ = describe("Subsurface walk term history (previous)");
+            histTermCur_ = describe("Subsurface walk term history (current)");
+            histGainPrev_ = describe("Subsurface walk gain history (previous)");
+            histGainCur_ = describe("Subsurface walk gain history (current)");
+            const TextureRef prevT = histTermPrev_, prevG = histGainPrev_;
+            graph.addPass(
+                "Subsurface walk accumulation", PassType::Compute,
+                [&](PassBuilder &b) {
+                    for (auto ref : {resolved, sss, normal, depthRef, motion, walkTerm_, walkGain_, prevT, prevG})
+                        b.read(ref, Usage::ShaderRead, StageDispatch);
+                    TextureRef out = b.createTexture("Subsurface linear HDR",
+                                                     {resolveFormat(0, lighting_), params_.outputWidth, params_.outputHeight});
+                    sssResult_ = b.write(out, Usage::ShaderWrite, StageDispatch);
+                    TextureRef gain = b.createTexture("Subsurface ambient gain", {Format::RGBA16Float, params_.outputWidth, params_.outputHeight});
+                    sssGain_ = b.write(gain, Usage::ShaderWrite, StageDispatch);
+                    histTermCur_ = b.write(histTermCur_, Usage::ShaderWrite, StageDispatch);
+                    histGainCur_ = b.write(histGainCur_, Usage::ShaderWrite, StageDispatch);
+                    b.setProfileShaders("subsurface_accumulate");
+                },
+                [this, resolved, sss, normal, depthRef, motion, prevT, prevG](PassContext &ctx) {
+                    auto *enc = static_cast<MTL4::ComputeCommandEncoder *>(ctx.encoder());
+                    auto *table = tables_[7];
+                    table->setAddress(accumParamsAddress_, 0);
+                    const auto bindTexture = [&](TextureRef ref, u32 index) {
+                        table->setTexture(static_cast<MTL::Texture *>(ctx.texture(ref))->gpuResourceID(), index);
+                    };
+                    bindTexture(resolved, 0);
+                    bindTexture(walkTerm_, 1);
+                    bindTexture(walkGain_, 2);
+                    bindTexture(sss, 3);
+                    bindTexture(depthRef, 4);
+                    bindTexture(normal, 5);
+                    bindTexture(motion, 6);
+                    bindTexture(prevT, 7);
+                    bindTexture(prevG, 8);
+                    bindTexture(sssResult_, 9);
+                    bindTexture(histTermCur_, 10);
+                    bindTexture(histGainCur_, 11);
+                    bindTexture(sssGain_, 12);
+                    enc->setComputePipelineState(pipelines_.compute(sssAccumulate_));
+                    enc->setArgumentTable(table);
+                    enc->dispatchThreadgroups(
+                        MTL::Size::Make((params_.outputWidth + 15) / 16, (params_.outputHeight + 15) / 16, 1),
+                        MTL::Size::Make(16, 16, 1));
+                    scene_.countCommands(3);
+                });
+        } else {
+            sssResult_ = walkRaw_;
+            sssGain_ = walkGain_;
+        }
+        composedColor_ = sssResult_;
+    } else if (subsurface_) {
+        // F15.1 (ticket 17): screen-space Burley diffusion of the volumetric pixels' diffuse irradiance, added to the resolved colour.
+        // It is a new colour version: every later consumer reads color() (reflections, atmosphere, post, capture).
+        const TextureRef resolved = outputs_[0];
+        const TextureRef sss = sss_;
+        const TextureRef depth = depth_;
+        const TextureRef normal = outputs_[1];
+        graph.addPass(
+            "Subsurface diffusion", PassType::Compute,
+            [&](PassBuilder &b) {
+                b.read(resolved, Usage::ShaderRead, StageDispatch);
+                b.read(sss, Usage::ShaderRead, StageDispatch);
+                b.read(depth, Usage::ShaderRead, StageDispatch);
+                b.read(normal, Usage::ShaderRead, StageDispatch);
+                b.read(scene_.dataRef(), Usage::ShaderRead, StageDispatch);
+                TextureRef out = b.createTexture("Subsurface linear HDR",
+                                                 {resolveFormat(0, lighting_), params_.outputWidth, params_.outputHeight});
+                sssResult_ = b.write(out, Usage::ShaderWrite, StageDispatch);
+                b.setProfileShaders("subsurface_diffuse");
+            },
+            [this, resolved, sss, depth, normal](PassContext &ctx) {
+                auto *enc = static_cast<MTL4::ComputeCommandEncoder *>(ctx.encoder());
+                auto *table = tables_[6];
+                table->setAddress(sssParamsAddress_, 0);
+                table->setAddress(scene_.frameConstantsAddress(), 1);
+                table->setAddress(scene_.buffers().materials()->gpuAddress(), 2);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(resolved))->gpuResourceID(), 0);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(sss))->gpuResourceID(), 1);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(depth))->gpuResourceID(), 2);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(normal))->gpuResourceID(), 3);
+                table->setTexture(static_cast<MTL::Texture *>(ctx.texture(sssResult_))->gpuResourceID(), 4);
+                enc->setComputePipelineState(pipelines_.compute(sssDiffuse_));
+                enc->setArgumentTable(table);
+                enc->dispatchThreadgroups(
+                    MTL::Size::Make((params_.outputWidth + 15) / 16, (params_.outputHeight + 15) / 16, 1),
+                    MTL::Size::Make(16, 16, 1));
+                scene_.countCommands(3);
+            });
+        composedColor_ = sssResult_;
+    }
     return outputs_[0];
 }
 void VisibilityRenderer::addPoseSnapshot(rg::RenderGraph &graph) {

@@ -1,10 +1,13 @@
 #include "platform/metal/direct_lighting_passes.h"
+#include "core/log.h"
 #include "platform/metal/lighting_dispatch.h"
 #include "platform/metal/scene_renderer.h"
 #include "platform/metal/mesh_renderer.h"
 #include "platform/metal/visibility_renderer.h"
 #include "platform/metal/acceleration_structures.h"
 #include "platform/metal/metal_graph_executor.h"
+#include "platform/metal/feature_pipelines.h"
+#include "renderer/lobe_guide_reference.h"
 #include "renderer/local_light_scene.h"
 #include "renderer/emissive_domain.h"
 #include "renderer/transform_reference.h"
@@ -15,6 +18,7 @@
 #include "rendergraph/pass_context.h"
 #include <glm/gtc/type_ptr.hpp>
 #include <cstdlib>
+#include <fstream>
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -28,11 +32,23 @@ struct DirectLightingPasses::Impl {
     di::EmissiveDomainTracker emissiveDomain;std::vector<float> emissiveWorlds;
     std::array<pipe::PipelineHandle,Count> kernels{};pipe::PipelineHandle receiver{};
     MTL::DepthStencilState* equalDepth=nullptr;
+    // F15.1 (ticket 06): lobe guide producers specialised by the scene's feature union (ADR-0003).
+    FeaturePipelines features;pipe::PipelineHandle guideServed{},receiverServed{};
+    // F15.1 (ticket 07): the DI kernels that evaluate the BRDF, "<name>_lobe" entry points (restir_common.h) specialised like
+    // the producers (slots 202..206); the base
+    // kernel serves while neither the specialised nor the all-lobes pipeline is available (base BRDF, as before).
+    std::array<pipe::PipelineHandle,Count> diServed{};pipe::PipelineHandle clusterServed{};
+    u32 featureUnion=0;bool guideValid=false;u64 guideCapacity=0;bool sssWalk=false;
+    rg::BufferRef lobeGuideRef{},lobeReadbackRef{};
     std::unique_ptr<RtConsumer> restirConsumer,clusterConsumer;
     struct Slot {
         MTL::Buffer *source=nullptr,*lights=nullptr,*emitters=nullptr,*alias=nullptr,*surface=nullptr;
         MTL::Buffer *fresh=nullptr,*temporal=nullptr,*spatial=nullptr,*cells=nullptr,*indices=nullptr,*check=nullptr,*signalErrors=nullptr;
         MTL::Buffer* motionTrace=nullptr;u64 traceRowBytes=0,tracePlaneBytes=0,traceStageBytes=0,traceFrame=0;
+        // F15.1: per-pixel lobe guide (allocated only for a non-zero feature union) and the --debug-lobe-guide readback
+        // (DI surfaces then guide records, written by the snapshot pass of the frame recorded in readback*).
+        MTL::Buffer *lobeGuide=nullptr,*lobeReadback=nullptr;
+        u32 readbackWidth=0,readbackHeight=0,readbackUnion=0;bool readbackValid=false,readbackRecorded=false;u64 readbackFrame=0;
         u32 traceWidth=0,traceHeight=0,traceRecorded=0;
         std::array<MTL4::ArgumentTable*,Count> tables{};
     };std::array<Slot,METAL_FRAMES_IN_FLIGHT> slots{};
@@ -48,6 +64,10 @@ struct DirectLightingPasses::Impl {
     rg::BufferRef checkRef{},signalErrorsRef{};pipe::PipelineHandle signalClear{},corruptFinite{};GPULightingCheckParams checkParams{};MTL::GPUAddress checkAddress=0;
     pipe::PipelineHandle checkClear{},checkDi{},corruptAlias{},corruptGeneration{};
     rg::TextureRef visibilityRef{},depthRef{},motionRef{},fallbackShading{},fallbackAlbedo{},fallbackOcclusion{},fallbackEmission{},output{};
+    static pipe::PipelineDesc receiverDesc(const char* fragment){
+        pipe::PipelineDesc d;d.kind=pipe::PipelineKind::Render;d.label="Indexed overflow DI guides";d.functions={"forward_surface_vs",fragment,""};
+        d.indirectCommandBuffers=true;d.output(0,rg::Format::RGBA16Float).output(1,rg::Format::RGBA16Float).output(2,rg::Format::RG32Float).output(3,rg::Format::R16Float).output(4,rg::Format::R32Uint);return d;
+    }
     Impl(MetalContext& context,PipelineCache& pipelines,SceneRenderer& s,MeshRenderer& m,VisibilityRenderer& v,AccelerationStructures* a,ShadowPasses& sh,const LaunchOptions& o)
         :c(context),p(pipelines),scene(s),mesh(m),vis(v),rt(a),shadow(sh),options(o) {
         if(a){restirConsumer=std::make_unique<RtConsumer>(c,p,*a);clusterConsumer=std::make_unique<RtConsumer>(c,p,*a);}
@@ -55,8 +75,7 @@ struct DirectLightingPasses::Impl {
                              "restir_di_candidates","restir_di_temporal","restir_di_spatial","restir_di_shade_rt"};
         for(u32 i=0;i<Snapshot;++i)kernels[i]=p.request(lighting::kernel(i==Shade&&!rt?"restir_di_shade":names[i],i==Shade&&rt));
         clusterShade=p.request(lighting::kernel(rt?"light_cluster_shade_rt":"light_cluster_shade",rt!=nullptr));
-        pipe::PipelineDesc d;d.kind=pipe::PipelineKind::Render;d.label="Indexed overflow DI guides";d.functions={"forward_surface_vs","forward_di_receiver_fs",""};
-        d.indirectCommandBuffers=true;d.output(0,rg::Format::RGBA16Float).output(1,rg::Format::RGBA16Float).output(2,rg::Format::RG32Float).output(3,rg::Format::R16Float).output(4,rg::Format::R32Uint);receiver=p.request(d);
+        receiver=p.request(receiverDesc("forward_di_receiver_fs"));
         auto* dd=MTL::DepthStencilDescriptor::alloc()->init();dd->setDepthCompareFunction(MTL::CompareFunctionGreaterEqual);dd->setDepthWriteEnabled(false);equalDepth=c.device()->newDepthStencilState(dd);dd->release();
         for(auto& f:slots) {for(auto*& t:f.tables)t=lighting::table(c);if(o.debugLighting)f.check=lighting::buffer(c,32,"Lighting independent state check",true);f.signalErrors=lighting::buffer(c,16,"DI numerical errors before sanitization",true);}
         if(o.debugLighting){checkClear=p.request(lighting::kernel("lighting_check_clear"));checkDi=p.request(lighting::kernel("lighting_check_di"));
@@ -68,7 +87,7 @@ struct DirectLightingPasses::Impl {
         ranks=lighting::buffer(c,stbn.ranks.size()*4,"Generated STBN ranks",true);std::memcpy(ranks->contents(),stbn.ranks.data(),stbn.ranks.size()*4);
     }
     pipe::PipelineHandle clusterShade{};
-    ~Impl(){c.waitIdle();for(auto& f:slots){for(auto* b:{f.source,f.lights,f.emitters,f.alias,f.surface,f.fresh,f.temporal,f.spatial,f.cells,f.indices,f.check,f.signalErrors,f.motionTrace})c.memory().release(b,MemoryCategory::RayTracing);for(auto* t:f.tables)if(t)t->release();}for(auto& v:views){c.memory().release(v.reservoir,MemoryCategory::RayTracing);c.memory().release(v.surface,MemoryCategory::RayTracing);}c.memory().release(ranks,MemoryCategory::RayTracing);if(equalDepth)equalDepth->release();}
+    ~Impl(){c.waitIdle();for(auto& f:slots){for(auto* b:{f.source,f.lights,f.emitters,f.alias,f.surface,f.fresh,f.temporal,f.spatial,f.cells,f.indices,f.check,f.signalErrors,f.motionTrace,f.lobeGuide,f.lobeReadback})c.memory().release(b,MemoryCategory::RayTracing);for(auto* t:f.tables)if(t)t->release();}for(auto& v:views){c.memory().release(v.reservoir,MemoryCategory::RayTracing);c.memory().release(v.surface,MemoryCategory::RayTracing);}c.memory().release(ranks,MemoryCategory::RayTracing);if(equalDepth)equalDepth->release();}
     void load(const GpuScene& g,const SceneStore& s){lightScene.rebuild(g,s,g.lights());for(u32 v=0;v<4;++v)history.invalidate(v,"scene load");reserve(std::max<size_t>(1,lightScene.lights.size()),pixelCapacity);++graphVersion;}
     void reserve(u64 lights,u64 pixels){
         if(lights>lightCapacity){lightCapacity=std::max<u64>(lights,lightCapacity+lightCapacity/2);for(auto& f:slots){for(auto* b:{f.source,f.lights,f.emitters,f.alias})c.memory().release(b,MemoryCategory::RayTracing);f.source=lighting::buffer(c,lightCapacity*sizeof(GPUSampledLight),"Local source lights",true);f.lights=lighting::buffer(c,lightCapacity*sizeof(GPUSampledLight),"Local world lights");f.emitters=lighting::buffer(c,lightCapacity*sizeof(GPUEmissiveSurface),"Full scene emitter records",true);f.alias=lighting::buffer(c,lightCapacity*sizeof(GPUAliasEntry),"Light proposal aliases",true);}++graphVersion;}
@@ -77,9 +96,51 @@ struct DirectLightingPasses::Impl {
         const u64 cells=u64(preset.clusterX)*preset.clusterY*preset.clusterZ;
         for(auto& f:slots)if(!f.cells){f.cells=lighting::buffer(c,cells*sizeof(GPULightCluster),"3D light cluster cells");f.indices=lighting::buffer(c,cells*preset.clusterCapacity*4,"Bounded cluster indices");}
     }
+    // F15.1: the guide exists only while the scene's feature union is non-zero (Sponza allocates nothing).  One record
+    // per DI surface (same indexing), sized like the surfaces; allocation changes rebuild the graph.
+    void reserveGuide(u32 mask,u64 pixels){
+        featureUnion=mask;
+        if(!mask){
+            if(guideCapacity){for(auto& f:slots){c.memory().release(f.lobeGuide,MemoryCategory::RayTracing);c.memory().release(f.lobeReadback,MemoryCategory::RayTracing);f.lobeGuide=f.lobeReadback=nullptr;}guideCapacity=0;++graphVersion;
+                LOG_INFO("Lobe guide released (empty feature union)");}
+            return;
+        }
+        if(pixels>guideCapacity){
+            for(auto& f:slots){c.memory().release(f.lobeGuide,MemoryCategory::RayTracing);c.memory().release(f.lobeReadback,MemoryCategory::RayTracing);
+                f.lobeGuide=lighting::buffer(c,pixels*sizeof(GPULobeGuide),"Lobe guide");
+                f.lobeReadback=options.debugLobeGuide?lighting::buffer(c,pixels*(sizeof(GPUDISurface)+sizeof(GPULobeGuide)),"Lobe guide readback",true):nullptr;}
+            guideCapacity=pixels;++graphVersion;
+            // F15 ticket 06 (criterion 3): the guide exists only for a non-empty feature union; quote its memory per category.
+            LOG_INFO("Lobe guide: %zu frame slots x %.1f MiB (%llu pixels x %zu B), category RayTracing, feature union 0x%x",slots.size(),
+                     double(pixels*sizeof(GPULobeGuide))/(1024.0*1024.0),static_cast<unsigned long long>(pixels),sizeof(GPULobeGuide),mask);
+        }
+    }
     void prepare(const GpuScene& g,const SceneStore& s,std::span<const GPULight> l,const ShadowPasses::Frame& f){
         frame=f;lightScene.rebuild(g,s,l);reserve(std::max<size_t>(1,lightScene.lights.size()),u64(f.backingWidth)*f.backingHeight);
         auto& slot=slots[f.slot];const size_t n=lightScene.lights.size();
+        // F15.1: guide buffer and the producers specialised by the feature union (all-lobes pipelines while they compile;
+        // the base pipelines write no guide and the flexible fallback objects of a render pipeline are unspecialised, so
+        // the guide is valid for consumers only when both producers are final and none is the base pipeline).
+        reserveGuide(s.featureUnion(),u64(f.backingWidth)*f.backingHeight);
+        // F15.1 (ticket 22): both producers sample material textures: a scene with per-slot texture transforms compiles them in
+        // (the marker rides on the mask; featureUnion stays the lobe union that decides the guide).
+        const u32 shadeUnion=featureUnion|(s.textureTransformInUse()?FEATURE_UNION_TEXTURE_TRANSFORM:0u)|(s.vertexColorInUse()?FEATURE_UNION_VERTEX_COLOR:0u);
+        guideServed=features.serve(p,200,kernels[Guide],shadeUnion,[&]{return lighting::kernel("material_lighting_guides");});
+        receiverServed=features.serve(p,201,receiver,shadeUnion,[&]{return receiverDesc(options.debugLobeGuideNoRog?"forward_di_receiver_guide_norog_fs":"forward_di_receiver_guide_fs");});
+        {static const char* diNames[]={"restir_di_candidates_lobe","restir_di_temporal_lobe","restir_di_spatial_lobe"};
+            // Only the active estimator's kernels are requested (RT shade pipelines are compiled, never archived).
+            const bool ris=options.directLighting==DirectLightingMode::ReSTIR;
+            for(u32 k:{u32(Candidate),u32(Temporal),u32(Spatial)})diServed[k]=ris?features.serve(p,202+(k-Candidate),kernels[k],featureUnion,[&]{return lighting::kernel(diNames[k-Candidate]);}):kernels[k];
+            const char* shadeName=rt?"restir_di_shade_rt_lobe":"restir_di_shade_lobe";
+            diServed[Shade]=ris?features.serve(p,205,kernels[Shade],featureUnion,[&]{return lighting::kernel(shadeName,rt!=nullptr);}):kernels[Shade];
+            clusterServed=ris?clusterShade:features.serve(p,206,clusterShade,featureUnion,[&]{return lighting::kernel(rt?"light_cluster_shade_rt_lobe":"light_cluster_shade_lobe",rt!=nullptr);});
+            // One BSDF per frame: the RIS target (candidates, temporal, spatial) and the shading must agree, so while any
+            // ReSTIR kernel still serves its base pipeline (compiling) every ReSTIR pass uses the base kernels.
+            const bool restirLobes=diServed[Candidate]!=kernels[Candidate]&&diServed[Temporal]!=kernels[Temporal]&&
+                                   diServed[Spatial]!=kernels[Spatial]&&diServed[Shade]!=kernels[Shade];
+            if(!restirLobes)for(u32 k:{u32(Candidate),u32(Temporal),u32(Spatial),u32(Shade)})diServed[k]=kernels[k];}
+        guideValid=featureUnion!=0&&guideServed!=kernels[Guide]&&receiverServed!=receiver&&p.isFinal(guideServed)&&p.isFinal(receiverServed);
+        slot.readbackWidth=f.width;slot.readbackHeight=f.height;slot.readbackUnion=featureUnion;slot.readbackValid=guideValid;slot.readbackRecorded=false;slot.readbackFrame=f.index;
         const bool empty = n == 0 && !options.debugLighting && !options.debugLightingCorrupt;
         if (empty != emptyLocalLighting) {
             emptyLocalLighting = empty;
@@ -105,7 +166,7 @@ struct DirectLightingPasses::Impl {
             referenceWorlds(s,f.motionSinCos.data(),emissiveWorlds);
         } else emissiveWorlds.clear();
         if(emissiveDomain.update(lightScene.emitters,emissiveWorlds))++sceneSignal;
-        if(s.stats().structure||s.stats().fullMaterials||!s.materialDeltas().empty())++sceneSignal;
+        if(s.stats().structure||s.materialsChanged())++sceneSignal;
         const Signal signal{f.scene,sceneSignal,rt?rt->geometryRevision():g.geometryVersion(),lightScene.revision};
         if(!(signal==lastSignal)){++signalEpoch;lastSignal=signal;}
         const u64 revision=signalEpoch;
@@ -116,8 +177,14 @@ struct DirectLightingPasses::Impl {
         params.spatialCount=(options.reducedLighting||options.forceApple9)?std::min(options.lightingSpatialSamples,preset.neighbors):options.lightingSpatialSamples;
         params.spatialRadius=preset.radius;params.maxHistoryM=preset.maxHistoryM;params.maxHistoryAge=preset.maxHistoryAge;
         params.flags=DI_ENABLE_TEMPORAL|DI_ENABLE_SPATIAL|(rt?DI_ENABLE_VISIBILITY:0u)|DI_USE_STBN|(decision.reset?DI_RESET_HISTORY:0u);
+        if(slot.lobeGuide)params.flags|=DI_LOBE_GUIDE_BOUND;
+        if(guideValid)params.flags|=DI_LOBE_GUIDE_VALID;
+        if(sssWalk&&guideValid)params.flags|=DI_SSS_WALK;
+        if(options.debugLobeGuideCorrupt)params.flags|=DI_LOBE_GUIDE_CORRUPT;
+        if(options.debugLobeGuideDelay)params.flags|=DI_LOBE_GUIDE_DELAY;
+        if(options.specularMs)params.flags|=DI_SPECULAR_MS;
         params.stbnWidth=stbn.config.width;params.stbnHeight=stbn.config.height;params.stbnFrames=stbn.config.frames;params.stbnDimensions=stbn.config.dimensions;params.stbnSeed=options.lightingSeed;
-        params.depthRelativeThreshold=0.02f;params.normalThreshold=0.95f;params.targetFloor=1e-6f;params.slotCount=s.slotCapacity();params.pad1=options.directLighting==DirectLightingMode::BruteForce;
+        params.depthRelativeThreshold=0.02f;params.normalThreshold=0.95f;params.targetFloor=1e-6f;params.materialExtensions=scene.materialExtensionsAddress();params.vertexColors=scene.vertexColorsAddress();params.slotCount=s.slotCapacity();params.pad1=options.directLighting==DirectLightingMode::BruteForce;
         // F13.1: whenever a reflection path sees emissive geometry (RT rays or
         // their SSR fallback, SSR, a captured probe), DI keeps only the
         // roughness band of the emitter lobe; the reflection paths own the rest.
@@ -128,9 +195,10 @@ struct DirectLightingPasses::Impl {
         clusterParams={};std::memcpy(clusterParams.view,f.constants.view,64);clusterParams.nearPlane=f.nearPlane;clusterParams.farPlane=1000;
         auto projection=glm::make_mat4(f.unjitteredVP)*glm::inverse(glm::make_mat4(f.constants.view));clusterParams.tanHalfFovX=1.0f/projection[0][0];clusterParams.tanHalfFovY=1.0f/projection[1][1];
         clusterParams.gridX=preset.clusterX;clusterParams.gridY=preset.clusterY;clusterParams.gridZ=preset.clusterZ;clusterParams.capacity=preset.clusterCapacity;clusterParams.lightCount=n;clusterAddress=lighting::upload(c,clusterParams);
-        if(rt){restirConsumer->prepare(f.slot,kernels[Shade]);clusterConsumer->prepare(f.slot,clusterShade);}
+        if(slot.lobeGuide)scene.setLobeGuideInputs(slot.lobeGuide->gpuAddress(),paramsAddress);
+        if(rt){restirConsumer->prepare(f.slot,diServed[Shade]);clusterConsumer->prepare(f.slot,clusterServed);}
     }
-    void bindCommon(MTL4::ArgumentTable* t){auto& f=slots[frame.slot];auto& v=views[frame.view];t->setAddress(paramsAddress,0);t->setAddress(f.surface->gpuAddress(),1);t->setAddress(f.lights->gpuAddress(),2);t->setAddress(f.alias->gpuAddress(),3);t->setAddress(f.fresh->gpuAddress(),4);t->setAddress(v.reservoir->gpuAddress(),5);t->setAddress(v.surface->gpuAddress(),6);t->setAddress(ranks->gpuAddress(),8);t->setAddress(f.emitters->gpuAddress(),12);t->setAddress(scene.buffers().materials()->gpuAddress(),13);t->setAddress(scene.textureTableAddress(),14);t->setAddress(f.signalErrors->gpuAddress(),15);}
+    void bindCommon(MTL4::ArgumentTable* t){auto& f=slots[frame.slot];auto& v=views[frame.view];t->setAddress(paramsAddress,0);t->setAddress(f.surface->gpuAddress(),1);t->setAddress(f.lights->gpuAddress(),2);t->setAddress(f.alias->gpuAddress(),3);t->setAddress(f.fresh->gpuAddress(),4);t->setAddress(v.reservoir->gpuAddress(),5);t->setAddress(v.surface->gpuAddress(),6);t->setAddress(ranks->gpuAddress(),8);t->setAddress(f.emitters->gpuAddress(),12);t->setAddress(scene.buffers().materials()->gpuAddress(),13);t->setAddress(scene.textureTableAddress(),14);t->setAddress(f.signalErrors->gpuAddress(),15);if(f.lobeGuide)t->setAddress(f.lobeGuide->gpuAddress(),16);}
     void tex(MTL4::ArgumentTable* t,rg::PassContext& ctx,rg::TextureRef r,u32 b){t->setTexture(static_cast<MTL::Texture*>(ctx.texture(r))->gpuResourceID(),b);}
     void addMotionReadback(rg::RenderGraph& g,u32 stage){
         if(!traceMotion)return;if(stage>=motionTraceRefs.size())throw std::logic_error("Invalid motion diagnostic stage");
@@ -180,15 +248,24 @@ struct DirectLightingPasses::Impl {
         aliasRef=g.importBuffer("Alias light proposal",{f.alias->length()},ImportPerFrame|ImportContentsDefined);
         rankRef=g.importBuffer("STBN ranks",{ranks->length()},ImportContentsDefined);
         surfaceRef=g.importBuffer("DI surfaces",{f.surface->length()},ImportPerFrame);
+        lobeGuideRef=f.lobeGuide?g.importBuffer("Lobe guide",{f.lobeGuide->length()},ImportPerFrame|ImportOutput):BufferRef{};lobeReadbackRef={};
         freshRef=g.importBuffer("DI candidates",{f.fresh->length()},ImportPerFrame);temporalRef=g.importBuffer("DI temporal",{f.temporal->length()},ImportPerFrame);spatialRef=g.importBuffer("DI spatial",{f.spatial->length()},ImportPerFrame);
         cellRef=g.importBuffer("Local light clusters",{f.cells->length()},ImportPerFrame);indexRef=g.importBuffer("Local cluster indices",{f.indices->length()},ImportPerFrame);
         historyRef=g.importBuffer("DI history reservoirs per view",{view.reservoir->length()},ImportContentsDefined|ImportOutput);previousSurfaceRef=g.importBuffer("DI history surfaces per view",{view.surface->length()},ImportContentsDefined|ImportOutput);poseRef=vis.importPoseHistory(g);
         g.addPass("World emissive lights",PassType::Compute,[&](PassBuilder& b){b.read(sourceRef,Usage::ShaderRead,StageDispatch);b.read(emittersRef,Usage::ShaderRead,StageDispatch);emittersRef=b.write(emittersRef,Usage::ShaderWrite,StageDispatch);b.read(scene.dataRef(),Usage::ShaderRead,StageDispatch);if(rt)b.read(rt->geometryBufferRef(),Usage::ShaderRead,StageDispatch);lightsRef=b.write(lightsRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("light_emissive_update");},[this](PassContext& ctx){auto& f=slots[frame.slot];auto* t=f.tables[Emit];t->setAddress(emitterAddress,0);t->setAddress(f.emitters->gpuAddress(),1);t->setAddress(scene.buffers().instances()->gpuAddress(),2);t->setAddress(scene.buffers().materials()->gpuAddress(),3);t->setAddress(f.source->gpuAddress(),4);t->setAddress(f.lights->gpuAddress(),5);t->setAddress(scene.vertexBuffer()->gpuAddress(),6);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,kernels[Emit],t,std::max(1u,params.lightCount));});
-        g.addPass("Pre-resolve material lighting guides",PassType::Compute,[&](PassBuilder& b){b.read(visibilityRef,Usage::ShaderRead,StageDispatch);b.read(shadow.surfaces(),Usage::ShaderRead,StageDispatch);b.read(scene.dataRef(),Usage::ShaderRead,StageDispatch);b.read(mesh.frameListsRef(),Usage::ShaderRead,StageDispatch);b.read(poseRef,Usage::ShaderRead,StageDispatch);surfaceRef=b.write(surfaceRef,Usage::ShaderWrite,StageDispatch);motionRef=b.createTexture("Pre-resolve pixel motion",{Format::RG32Float,receiverDepth.width,receiverDepth.height});motionRef=b.write(motionRef,Usage::ShaderWrite,StageDispatch);fallbackShading=b.createTexture("Indexed DI shading normal roughness",{Format::RGBA16Float,receiverDepth.width,receiverDepth.height});fallbackShading=b.write(fallbackShading,Usage::ShaderWrite,StageDispatch);fallbackAlbedo=b.createTexture("Indexed DI albedo metallic",{Format::RGBA16Float,receiverDepth.width,receiverDepth.height});fallbackAlbedo=b.write(fallbackAlbedo,Usage::ShaderWrite,StageDispatch);fallbackOcclusion=b.createTexture("Indexed material occlusion",{Format::R16Float,receiverDepth.width,receiverDepth.height});fallbackOcclusion=b.write(fallbackOcclusion,Usage::ShaderWrite,StageDispatch);fallbackEmission=b.createTexture("Indexed resolve emission",{Format::R32Uint,receiverDepth.width,receiverDepth.height});fallbackEmission=b.write(fallbackEmission,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("material_lighting_guides");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Guide];t->setAddress(scene.frameConstantsAddress(),0);t->setAddress(scene.vertexBuffer()->gpuAddress(),1);t->setAddress(scene.buffers().instances()->gpuAddress(),2);t->setAddress(scene.buffers().materials()->gpuAddress(),3);t->setAddress(scene.lightsAddress(),4);t->setAddress(scene.textureTableAddress(),5);t->setAddress(mesh.meshletBuffer()->gpuAddress(),6);t->setAddress(mesh.meshletVertexBuffer()->gpuAddress(),7);t->setAddress(mesh.meshletTriangleBuffer()->gpuAddress(),8);t->setAddress(mesh.frame(frame.slot).candidates->gpuAddress(),9);t->setAddress(mesh.frame(frame.slot).bList->gpuAddress(),10);t->setAddress(vis.paramsAddress(),11);t->setAddress(vis.previousPoseAddress(),14);t->setAddress(vis.temporalAddress(),15);t->setAddress(slots[frame.slot].surface->gpuAddress(),16);t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(shadow.surfaces()))->gpuAddress(),17);t->setAddress(paramsAddress,18);tex(t,ctx,visibilityRef,0);tex(t,ctx,motionRef,7);tex(t,ctx,fallbackShading,8);tex(t,ctx,fallbackAlbedo,9);tex(t,ctx,fallbackOcclusion,10);tex(t,ctx,fallbackEmission,11);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,kernels[Guide],t,frame.width,frame.height);});
+        g.addPass("Pre-resolve material lighting guides",PassType::Compute,[&](PassBuilder& b){b.read(visibilityRef,Usage::ShaderRead,StageDispatch);b.read(shadow.surfaces(),Usage::ShaderRead,StageDispatch);b.read(scene.dataRef(),Usage::ShaderRead,StageDispatch);b.read(mesh.frameListsRef(),Usage::ShaderRead,StageDispatch);b.read(poseRef,Usage::ShaderRead,StageDispatch);surfaceRef=b.write(surfaceRef,Usage::ShaderWrite,StageDispatch);if(lobeGuideRef.valid())lobeGuideRef=b.write(lobeGuideRef,Usage::ShaderWrite,StageDispatch);motionRef=b.createTexture("Pre-resolve pixel motion",{Format::RG32Float,receiverDepth.width,receiverDepth.height});motionRef=b.write(motionRef,Usage::ShaderWrite,StageDispatch);fallbackShading=b.createTexture("Indexed DI shading normal roughness",{Format::RGBA16Float,receiverDepth.width,receiverDepth.height});fallbackShading=b.write(fallbackShading,Usage::ShaderWrite,StageDispatch);fallbackAlbedo=b.createTexture("Indexed DI albedo metallic",{Format::RGBA16Float,receiverDepth.width,receiverDepth.height});fallbackAlbedo=b.write(fallbackAlbedo,Usage::ShaderWrite,StageDispatch);fallbackOcclusion=b.createTexture("Indexed material occlusion",{Format::R16Float,receiverDepth.width,receiverDepth.height});fallbackOcclusion=b.write(fallbackOcclusion,Usage::ShaderWrite,StageDispatch);fallbackEmission=b.createTexture("Indexed resolve emission",{Format::R32Uint,receiverDepth.width,receiverDepth.height});fallbackEmission=b.write(fallbackEmission,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("material_lighting_guides");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Guide];t->setAddress(scene.frameConstantsAddress(),0);t->setAddress(scene.vertexBuffer()->gpuAddress(),1);t->setAddress(scene.buffers().instances()->gpuAddress(),2);t->setAddress(scene.buffers().materials()->gpuAddress(),3);t->setAddress(scene.lightsAddress(),4);t->setAddress(scene.textureTableAddress(),5);t->setAddress(mesh.meshletBuffer()->gpuAddress(),6);t->setAddress(mesh.meshletVertexBuffer()->gpuAddress(),7);t->setAddress(mesh.meshletTriangleBuffer()->gpuAddress(),8);t->setAddress(mesh.frame(frame.slot).candidates->gpuAddress(),9);t->setAddress(mesh.frame(frame.slot).bList->gpuAddress(),10);t->setAddress(vis.paramsAddress(),11);t->setAddress(vis.previousPoseAddress(),14);t->setAddress(vis.temporalAddress(),15);t->setAddress(slots[frame.slot].surface->gpuAddress(),16);t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(shadow.surfaces()))->gpuAddress(),17);t->setAddress(paramsAddress,18);if(slots[frame.slot].lobeGuide)t->setAddress(slots[frame.slot].lobeGuide->gpuAddress(),19);tex(t,ctx,visibilityRef,0);tex(t,ctx,motionRef,7);tex(t,ctx,fallbackShading,8);tex(t,ctx,fallbackAlbedo,9);tex(t,ctx,fallbackOcclusion,10);tex(t,ctx,fallbackEmission,11);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,guideServed,t,frame.width,frame.height);});
         addMotionReadback(g,0);
-        g.addPass("Indexed overflow material receivers",PassType::Raster,[&](PassBuilder& b){fallbackShading=b.writeColor(fallbackShading,0,LoadIntent::Preserve);fallbackAlbedo=b.writeColor(fallbackAlbedo,1,LoadIntent::Preserve);motionRef=b.writeColor(motionRef,2,LoadIntent::Preserve);fallbackOcclusion=b.writeColor(fallbackOcclusion,3,LoadIntent::Preserve);fallbackEmission=b.writeColor(fallbackEmission,4,LoadIntent::Preserve);b.readDepth(depthRef);scene.declareDrawReads(b);b.read(poseRef,Usage::ShaderRead,StageVertex);b.setProfileShaders("forward_surface_vs,forward_di_receiver_fs");},[this](PassContext& ctx){scene.encodeOverlay(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()),receiver,true,equalDepth);});
+        g.addPass("Indexed overflow material receivers",PassType::Raster,[&](PassBuilder& b){fallbackShading=b.writeColor(fallbackShading,0,LoadIntent::Preserve);fallbackAlbedo=b.writeColor(fallbackAlbedo,1,LoadIntent::Preserve);motionRef=b.writeColor(motionRef,2,LoadIntent::Preserve);fallbackOcclusion=b.writeColor(fallbackOcclusion,3,LoadIntent::Preserve);fallbackEmission=b.writeColor(fallbackEmission,4,LoadIntent::Preserve);b.readDepth(depthRef);scene.declareDrawReads(b);b.read(poseRef,Usage::ShaderRead,StageVertex);if(lobeGuideRef.valid()){b.read(lobeGuideRef,Usage::ShaderRead,StageFragment);lobeGuideRef=b.write(lobeGuideRef,Usage::ShaderWrite,StageFragment);}b.setProfileShaders("forward_surface_vs,forward_di_receiver_fs,forward_di_receiver_guide_fs");},[this](PassContext& ctx){scene.encodeOverlay(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()),receiverServed,true,equalDepth);});
         addMotionReadback(g,1);
-        g.addPass("Indexed DI receiver pack",PassType::Compute,[&](PassBuilder& b){for(auto r:{shadow.worldPosition(),shadow.geometricNormal(),shadow.receiverKeys(),fallbackShading,fallbackAlbedo,fallbackOcclusion,fallbackEmission})b.read(r,Usage::ShaderRead,StageDispatch);b.read(surfaceRef,Usage::ShaderRead,StageDispatch);surfaceRef=b.write(surfaceRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("di_receiver_pack");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Pack];t->setAddress(scene.frameConstantsAddress(),0);t->setAddress(paramsAddress,1);t->setAddress(slots[frame.slot].surface->gpuAddress(),2);tex(t,ctx,shadow.worldPosition(),5);tex(t,ctx,shadow.geometricNormal(),6);tex(t,ctx,shadow.receiverKeys(),10);tex(t,ctx,fallbackShading,11);tex(t,ctx,fallbackAlbedo,12);tex(t,ctx,fallbackOcclusion,13);tex(t,ctx,fallbackEmission,14);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,kernels[Pack],t,frame.width,frame.height);});
+        g.addPass("Indexed DI receiver pack",PassType::Compute,[&](PassBuilder& b){for(auto r:{shadow.worldPosition(),shadow.geometricNormal(),shadow.receiverKeys(),fallbackShading,fallbackAlbedo,fallbackOcclusion,fallbackEmission})b.read(r,Usage::ShaderRead,StageDispatch);b.read(surfaceRef,Usage::ShaderRead,StageDispatch);surfaceRef=b.write(surfaceRef,Usage::ShaderWrite,StageDispatch);if(lobeGuideRef.valid()){b.read(lobeGuideRef,Usage::ShaderRead,StageDispatch);lobeGuideRef=b.write(lobeGuideRef,Usage::ShaderWrite,StageDispatch);}b.setProfileShaders("di_receiver_pack");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Pack];t->setAddress(scene.frameConstantsAddress(),0);t->setAddress(paramsAddress,1);t->setAddress(slots[frame.slot].surface->gpuAddress(),2);t->setAddress((slots[frame.slot].lobeGuide?slots[frame.slot].lobeGuide:slots[frame.slot].surface)->gpuAddress(),3); // without a guide the binding is never read (DI_LOBE_GUIDE_BOUND clear); shader validation wants it set
+            tex(t,ctx,shadow.worldPosition(),5);tex(t,ctx,shadow.geometricNormal(),6);tex(t,ctx,shadow.receiverKeys(),10);tex(t,ctx,fallbackShading,11);tex(t,ctx,fallbackAlbedo,12);tex(t,ctx,fallbackOcclusion,13);tex(t,ctx,fallbackEmission,14);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,kernels[Pack],t,frame.width,frame.height);});
+        if(options.debugLobeGuide&&lobeGuideRef.valid()&&f.lobeReadback){
+            // --debug-lobe-guide: the frame's DI surfaces then guide records land in the slot's shared readback buffer.
+            lobeReadbackRef=g.importBuffer("Lobe guide readback",{f.lobeReadback->length()},ImportPerFrame|ImportOutput);
+            g.addPass("Lobe guide snapshot",PassType::Blit,[&](PassBuilder& b){b.read(surfaceRef,Usage::CopySrc,StageBlit);b.read(lobeGuideRef,Usage::CopySrc,StageBlit);lobeReadbackRef=b.write(lobeReadbackRef,Usage::CopyDst,StageBlit);},
+                [this](PassContext& ctx){auto& s=slots[frame.slot];auto* e=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());const u64 count=u64(frame.width)*frame.height;
+                    e->copyFromBuffer(s.surface,0,s.lobeReadback,0,count*sizeof(GPUDISurface));e->copyFromBuffer(s.lobeGuide,0,s.lobeReadback,count*sizeof(GPUDISurface),count*sizeof(GPULobeGuide));s.readbackRecorded=true;});
+        }
         signalErrorsRef=g.importBuffer("DI numerical error words",{16},ImportPerFrame|ImportOutput);
         g.addPass("DI numerical errors clear",PassType::Compute,[&](PassBuilder& b){signalErrorsRef=b.write(signalErrorsRef,Usage::ShaderWrite,StageDispatch);},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[SignalClear];t->setAddress(slots[frame.slot].signalErrors->gpuAddress(),15);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,signalClear,t,4);});
         // Directional lighting is resolved separately. The empty local estimator is exactly zero.
@@ -197,18 +274,18 @@ struct DirectLightingPasses::Impl {
             return;
         }
         if(options.debugLightingCorrupt==7)g.addPass("Negative: finite radiance overflow",PassType::Compute,[&](PassBuilder& b){b.read(surfaceRef,Usage::ShaderRead,StageDispatch);b.read(lightsRef,Usage::ShaderRead,StageDispatch);lightsRef=b.write(lightsRef,Usage::ShaderWrite,StageDispatch);},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[CheckNegative];t->setAddress(paramsAddress,0);t->setAddress(slots[frame.slot].surface->gpuAddress(),1);t->setAddress(slots[frame.slot].lights->gpuAddress(),2);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,corruptFinite,t,1);});
-        auto reads=[&](PassBuilder& b){for(auto r:{surfaceRef,lightsRef,emittersRef,aliasRef,rankRef})b.read(r,Usage::ShaderRead,StageDispatch);b.read(scene.dataRef(),Usage::ShaderRead,StageDispatch);};
+        auto reads=[&](PassBuilder& b){for(auto r:{surfaceRef,lightsRef,emittersRef,aliasRef,rankRef})b.read(r,Usage::ShaderRead,StageDispatch);b.read(scene.dataRef(),Usage::ShaderRead,StageDispatch);if(lobeGuideRef.valid())b.read(lobeGuideRef,Usage::ShaderRead,StageDispatch);};
         if(options.debugLightingCorrupt==5 && options.directLighting==DirectLightingMode::ReSTIR)
             g.addPass("Negative: alias PDF",PassType::Compute,[&](PassBuilder& b){b.read(aliasRef,Usage::ShaderRead,StageDispatch);aliasRef=b.write(aliasRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("lighting_corrupt_alias");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[CheckNegative];t->setAddress(checkAddress,0);t->setAddress(slots[frame.slot].alias->gpuAddress(),1);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,corruptAlias,t,std::max(1u,params.lightCount));});
         if(options.directLighting==DirectLightingMode::ReSTIR){
-            g.addPass("DI candidates",PassType::Compute,[&](PassBuilder& b){reads(b);freshRef=b.write(freshRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("restir_di_candidates");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Candidate];bindCommon(t);t->setAddress(slots[frame.slot].fresh->gpuAddress(),7);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,kernels[Candidate],t,params.width*params.height);});
-            g.addPass("DI temporal",PassType::Compute,[&](PassBuilder& b){reads(b);b.read(freshRef,Usage::ShaderRead,StageDispatch);b.read(historyRef,Usage::ShaderRead,StageDispatch);b.read(previousSurfaceRef,Usage::ShaderRead,StageDispatch);b.read(motionRef,Usage::ShaderRead,StageDispatch);temporalRef=b.write(temporalRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("restir_di_temporal");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Temporal];bindCommon(t);t->setAddress(slots[frame.slot].temporal->gpuAddress(),7);tex(t,ctx,motionRef,0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,kernels[Temporal],t,params.width*params.height);});
-            g.addPass("DI spatial",PassType::Compute,[&](PassBuilder& b){reads(b);b.read(temporalRef,Usage::ShaderRead,StageDispatch);spatialRef=b.write(spatialRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("restir_di_spatial");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Spatial];bindCommon(t);t->setAddress(slots[frame.slot].temporal->gpuAddress(),4);t->setAddress(slots[frame.slot].spatial->gpuAddress(),7);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,kernels[Spatial],t,params.width*params.height);});
+            g.addPass("DI candidates",PassType::Compute,[&](PassBuilder& b){reads(b);freshRef=b.write(freshRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("restir_di_candidates");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Candidate];bindCommon(t);t->setAddress(slots[frame.slot].fresh->gpuAddress(),7);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,diServed[Candidate],t,params.width*params.height);});
+            g.addPass("DI temporal",PassType::Compute,[&](PassBuilder& b){reads(b);b.read(freshRef,Usage::ShaderRead,StageDispatch);b.read(historyRef,Usage::ShaderRead,StageDispatch);b.read(previousSurfaceRef,Usage::ShaderRead,StageDispatch);b.read(motionRef,Usage::ShaderRead,StageDispatch);temporalRef=b.write(temporalRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("restir_di_temporal");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Temporal];bindCommon(t);t->setAddress(slots[frame.slot].temporal->gpuAddress(),7);tex(t,ctx,motionRef,0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,diServed[Temporal],t,params.width*params.height);});
+            g.addPass("DI spatial",PassType::Compute,[&](PassBuilder& b){reads(b);b.read(temporalRef,Usage::ShaderRead,StageDispatch);spatialRef=b.write(spatialRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("restir_di_spatial");},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Spatial];bindCommon(t);t->setAddress(slots[frame.slot].temporal->gpuAddress(),4);t->setAddress(slots[frame.slot].spatial->gpuAddress(),7);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,diServed[Spatial],t,params.width*params.height);});
         } else {
             g.addPass("3D light clusters",PassType::Compute,[&](PassBuilder& b){b.read(lightsRef,Usage::ShaderRead,StageDispatch);cellRef=b.write(cellRef,Usage::ShaderWrite,StageDispatch);indexRef=b.write(indexRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("light_cluster_build");},[this](PassContext& ctx){auto& f=slots[frame.slot];auto* t=f.tables[Cluster];t->setAddress(clusterAddress,0);t->setAddress(f.lights->gpuAddress(),1);t->setAddress(f.cells->gpuAddress(),2);t->setAddress(f.indices->gpuAddress(),3);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,kernels[Cluster],t,clusterParams.gridX*clusterParams.gridY*clusterParams.gridZ);});
         }
         const bool ris=options.directLighting==DirectLightingMode::ReSTIR;
-        g.addPass(ris?"Local ReSTIR RT shading":options.directLighting==DirectLightingMode::BruteForce?"Local brute-force RT shading":"Local clustered RT shading",PassType::Compute,[&](PassBuilder& b){reads(b);b.read(signalErrorsRef,Usage::ShaderRead,StageDispatch);signalErrorsRef=b.write(signalErrorsRef,Usage::ShaderWrite,StageDispatch);if(rt)rt->declareTraceReads(b);if(ris)b.read(spatialRef,Usage::ShaderRead,StageDispatch);else{b.read(cellRef,Usage::ShaderRead,StageDispatch);b.read(indexRef,Usage::ShaderRead,StageDispatch);}output=b.createTexture("Local direct radiance",{Format::RGBA32Float,frame.width,frame.height});output=b.write(output,Usage::ShaderWrite,StageDispatch);b.setProfileShaders(ris?"restir_di_shade_rt":"light_cluster_shade_rt");},[this,ris](PassContext& ctx){auto& f=slots[frame.slot];auto* t=f.tables[Shade];bindCommon(t);if(ris){t->setAddress(f.spatial->gpuAddress(),3);t->setAddress(scene.buffers().instances()->gpuAddress(),4);if(restirConsumer)restirConsumer->bind(t,5,6);}else{t->setAddress(clusterAddress,3);t->setAddress(f.cells->gpuAddress(),4);t->setAddress(f.indices->gpuAddress(),5);t->setAddress(ranks->gpuAddress(),6);t->setAddress(scene.buffers().instances()->gpuAddress(),7);if(clusterConsumer)clusterConsumer->bind(t,8,9);}tex(t,ctx,output,0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,ris?kernels[Shade]:clusterShade,t,params.width*params.height);});
+        g.addPass(ris?"Local ReSTIR RT shading":options.directLighting==DirectLightingMode::BruteForce?"Local brute-force RT shading":"Local clustered RT shading",PassType::Compute,[&](PassBuilder& b){reads(b);b.read(signalErrorsRef,Usage::ShaderRead,StageDispatch);signalErrorsRef=b.write(signalErrorsRef,Usage::ShaderWrite,StageDispatch);if(rt)rt->declareTraceReads(b);if(ris)b.read(spatialRef,Usage::ShaderRead,StageDispatch);else{b.read(cellRef,Usage::ShaderRead,StageDispatch);b.read(indexRef,Usage::ShaderRead,StageDispatch);}output=b.createTexture("Local direct radiance",{Format::RGBA32Float,frame.width,frame.height});output=b.write(output,Usage::ShaderWrite,StageDispatch);b.setProfileShaders(ris?"restir_di_shade_rt":"light_cluster_shade_rt");},[this,ris](PassContext& ctx){auto& f=slots[frame.slot];auto* t=f.tables[Shade];bindCommon(t);if(ris){t->setAddress(f.spatial->gpuAddress(),3);t->setAddress(scene.buffers().instances()->gpuAddress(),4);if(restirConsumer)restirConsumer->bind(t,5,6);}else{t->setAddress(clusterAddress,3);t->setAddress(f.cells->gpuAddress(),4);t->setAddress(f.indices->gpuAddress(),5);t->setAddress(ranks->gpuAddress(),6);t->setAddress(scene.buffers().instances()->gpuAddress(),7);if(clusterConsumer)clusterConsumer->bind(t,8,9);}tex(t,ctx,output,0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,ris?diServed[Shade]:clusterServed,t,params.width*params.height);});
         if(options.debugLighting){
             checkRef=g.importBuffer("Lighting state check counters",{32},ImportPerFrame|ImportOutput);
             g.addPass("Lighting state check clear",PassType::Compute,[&](PassBuilder& b){checkRef=b.write(checkRef,Usage::ShaderWrite,StageDispatch);},[this](PassContext& ctx){auto* t=slots[frame.slot].tables[CheckClear];t->setAddress(slots[frame.slot].check->gpuAddress(),0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),p,checkClear,t,8);});
@@ -217,7 +294,7 @@ struct DirectLightingPasses::Impl {
         }
         if(ris)g.addPass("DI history snapshot",PassType::Blit,[&](PassBuilder& b){b.read(temporalRef,Usage::CopySrc,StageBlit);b.read(surfaceRef,Usage::CopySrc,StageBlit);historyRef=b.write(historyRef,Usage::CopyDst,StageBlit);previousSurfaceRef=b.write(previousSurfaceRef,Usage::CopyDst,StageBlit);},[this](PassContext& ctx){auto* e=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());const u64 count=u64(frame.width)*frame.height;auto& f=slots[frame.slot];auto& v=views[frame.view];e->copyFromBuffer(f.temporal,0,v.reservoir,0,count*sizeof(GPUDIReservoir));e->copyFromBuffer(f.surface,0,v.surface,0,count*sizeof(GPUDISurface));history.read(frame.view,frame.index+1);history.write(frame.view,frame.index+1,frame.constants.viewProjection);});
     }
-    void bind(MetalGraphExecutor& e){auto& f=slots[frame.slot];if(traceMotion)for(auto ref:motionTraceRefs)if(ref.valid())e.bindBuffer(ref,f.motionTrace);auto& v=views[frame.view];e.bindBuffer(sourceRef,f.source);e.bindBuffer(lightsRef,f.lights);e.bindBuffer(emittersRef,f.emitters);e.bindBuffer(aliasRef,f.alias);e.bindBuffer(surfaceRef,f.surface);e.bindBuffer(freshRef,f.fresh);e.bindBuffer(temporalRef,f.temporal);e.bindBuffer(spatialRef,f.spatial);e.bindBuffer(cellRef,f.cells);e.bindBuffer(indexRef,f.indices);e.bindBuffer(historyRef,v.reservoir);e.bindBuffer(previousSurfaceRef,v.surface);e.bindBuffer(rankRef,ranks);if(options.debugLighting)e.bindBuffer(checkRef,f.check);e.bindBuffer(signalErrorsRef,f.signalErrors);}
+    void bind(MetalGraphExecutor& e){auto& f=slots[frame.slot];if(traceMotion)for(auto ref:motionTraceRefs)if(ref.valid())e.bindBuffer(ref,f.motionTrace);auto& v=views[frame.view];e.bindBuffer(sourceRef,f.source);e.bindBuffer(lightsRef,f.lights);e.bindBuffer(emittersRef,f.emitters);e.bindBuffer(aliasRef,f.alias);e.bindBuffer(surfaceRef,f.surface);e.bindBuffer(freshRef,f.fresh);e.bindBuffer(temporalRef,f.temporal);e.bindBuffer(spatialRef,f.spatial);e.bindBuffer(cellRef,f.cells);e.bindBuffer(indexRef,f.indices);e.bindBuffer(historyRef,v.reservoir);e.bindBuffer(previousSurfaceRef,v.surface);e.bindBuffer(rankRef,ranks);if(lobeGuideRef.valid())e.bindBuffer(lobeGuideRef,f.lobeGuide);if(lobeReadbackRef.valid())e.bindBuffer(lobeReadbackRef,f.lobeReadback);if(options.debugLighting)e.bindBuffer(checkRef,f.check);e.bindBuffer(signalErrorsRef,f.signalErrors);}
 };
 DirectLightingPasses::DirectLightingPasses(MetalContext& c,PipelineCache& p,SceneRenderer& s,MeshRenderer& m,VisibilityRenderer& v,AccelerationStructures* a,ShadowPasses& sh,const LaunchOptions& o):impl_(std::make_unique<Impl>(c,p,s,m,v,a,sh,o)){}
 DirectLightingPasses::~DirectLightingPasses()=default;
@@ -231,6 +308,46 @@ rg::BufferRef DirectLightingPasses::surfaceRef()const{return impl_->surfaceRef;}
 MTL::Buffer* DirectLightingPasses::lightsBuffer()const{return impl_->slots[impl_->frame.slot].lights;}MTL::Buffer* DirectLightingPasses::emittersBuffer()const{return impl_->slots[impl_->frame.slot].emitters;}
 u32 DirectLightingPasses::lightCount()const{return impl_->params.lightCount;}u32 DirectLightingPasses::lightRevision()const{return impl_->lightScene.radianceRevision;}u64 DirectLightingPasses::version()const{return impl_->graphVersion;}
 bool DirectLightingPasses::emptyLocalLighting() const { return impl_->emptyLocalLighting; }
+rg::BufferRef DirectLightingPasses::lobeGuideRef() const { return impl_->lobeGuideRef; }
+bool DirectLightingPasses::lobeGuideValid() const { return impl_->guideValid; }
+void DirectLightingPasses::setSubsurfaceWalk(bool active) { impl_->sssWalk = active; }
+bool DirectLightingPasses::checkLobeGuide(u32 slot, const SceneStore& store) const {
+    // F15.1 (ticket 06): called after the frame completed (the engine waits for the GPU first).
+    const auto& s = impl_->slots.at(slot);
+    const auto& options = impl_->options;
+    auto say = [&](const std::string& line) { std::printf("%s\n", line.c_str()); std::fflush(stdout); };
+    if (!s.lobeGuide || !s.lobeReadback) {
+        say("LOBE-GUIDE check frame " + std::to_string(s.readbackFrame) + " | scene has no material features: guide not allocated | PASS");
+        return true;
+    }
+    if (!s.readbackRecorded) {
+        say("LOBE-GUIDE check frame " + std::to_string(s.readbackFrame) + " | FAIL (snapshot pass did not run)");
+        return false;
+    }
+    if (!s.readbackValid) {
+        say("LOBE-GUIDE check frame " + std::to_string(s.readbackFrame) + " | skipped: producers not specialised yet (base fallback) | SKIP");
+        return true;
+    }
+    const u64 count = u64(s.readbackWidth) * s.readbackHeight;
+    const auto* bytes = static_cast<const u8*>(s.lobeReadback->contents());
+    LobeGuideCheckInput in;
+    in.width = s.readbackWidth;
+    in.height = s.readbackHeight;
+    in.surfaces = {reinterpret_cast<const GPUDISurface*>(bytes), size_t(count)};
+    in.guides = {reinterpret_cast<const GPULobeGuide*>(bytes + count * sizeof(GPUDISurface)), size_t(count)};
+    in.instances = store.instances();
+    in.materials = store.materials();
+    in.extensions = store.extensions();
+    in.featureUnion = s.readbackUnion;
+    const LobeGuideCheckResult r = ::phosphor::checkLobeGuide(in);
+    say(formatLobeGuideCheck(s.readbackFrame, r));
+    if (!options.debugLobeGuideDump.empty()) {
+        std::ofstream file(options.debugLobeGuideDump, std::ios::binary | std::ios::trunc);
+        file.write(reinterpret_cast<const char*>(in.guides.data()), std::streamsize(count * sizeof(GPULobeGuide)));
+        if (!file) { say("LOBE-GUIDE dump failed: " + options.debugLobeGuideDump); return false; }
+    }
+    return r.pass();
+}
 } // namespace phosphor
 
 namespace phosphor {

@@ -39,6 +39,9 @@ public:
         MTL::AccelerationStructure* tlas = nullptr;
         MTL::Buffer *materials = nullptr, *textures = nullptr, *vertices = nullptr, *indices = nullptr;
         MTL::Buffer *instances = nullptr, *meshes = nullptr, *params = nullptr;
+        /// F15.1 (ticket 14): the material extension records the intersection function reads (the materials buffer stands in while the scene
+        /// has no extended material: it is then never read, a transmissive material has an extension group).
+        MTL::Buffer* extensions = nullptr;
     };
     struct Readback {
         bool valid = false;

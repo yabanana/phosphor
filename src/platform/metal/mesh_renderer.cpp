@@ -6,6 +6,7 @@
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/metal_graph_executor.h"
 #include "platform/metal/pipeline_cache.h"
+#include "platform/metal/render_state_tracker.h"
 #include "platform/metal/scene_renderer.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/meshlet_cull_math.h"
@@ -74,6 +75,16 @@ u64 grow(u64 have, u64 need) { return need <= have ? have : std::max<u64>(need +
 
 } // namespace
 
+pipe::PipelineDesc MeshRenderer::visibilityRasterDesc(u32 pass, bool textureTransform) const {
+    auto d = meshDesc(pipe::forward::genericDesc(rg::Format::R32Uint), "Visibility raster");
+    d.functions[0] = pass == 1 ? "visibility_object_opaque" : "visibility_object_alpha";
+    d.functions[1] = "visibility_mesh";
+    d.functions[2] = pass == 1 ? "visibility_opaque_fs" :
+        options_.lightingReceivers ? (textureTransform ? "visibility_alpha_lit_tt_fs" : "visibility_alpha_lit_fs")
+                                   : (textureTransform ? "visibility_alpha_tt_fs" : "visibility_alpha_fs");
+    return d;
+}
+
 MeshRenderer::MeshRenderer(MetalContext& context, PipelineCache& pipelines, SceneRenderer& scene, const Options& options)
     : context_(context), pipelines_(pipelines), scene_(scene), options_(options) {
     gObjectStage  = options_.objectStage;
@@ -89,14 +100,8 @@ MeshRenderer::MeshRenderer(MetalContext& context, PipelineCache& pipelines, Scen
     if (options_.visibility) {
         if (!options_.objectStage || options_.triangleCull || options_.debugView != MeshletDebugView::None)
             throw std::runtime_error("Visibility needs the object-stage mesh path without triangle-cull/debug views");
-        for (u32 pass = 1; pass <= 2; ++pass) {
-            auto d = meshDesc(pipe::forward::genericDesc(rg::Format::R32Uint), "Visibility raster");
-            d.functions[0] = pass == 1 ? "visibility_object_opaque" : "visibility_object_alpha";
-            d.functions[1] = "visibility_mesh";
-            d.functions[2] = pass == 1 ? "visibility_opaque_fs" :
-                options_.lightingReceivers ? "visibility_alpha_lit_fs" : "visibility_alpha_fs";
-            (pass == 1 ? visibilityOpaque_ : visibilityAlpha_) = pipelines_.request(d);
-        }
+        for (u32 pass = 1; pass <= 2; ++pass)
+            (pass == 1 ? visibilityOpaque_ : visibilityAlpha_) = pipelines_.request(visibilityRasterDesc(pass));
     }
 
     {
@@ -348,6 +353,23 @@ void MeshRenderer::prepareFrame(const SceneStore& store, const GpuScene& scene, 
     if (options_.visibility) {
         pipeline_ = pipelines_.render(visibilityOpaque_);
         usingFallback_ = false;
+        // F15.1 (ticket 22): the alpha test samples the base colour slot through its KHR_texture_transform: a scene with per-slot
+        // transforms rasterises its cut-outs with the pipeline that compiles them (requested on first use; the plain one serves
+        // until it is final, a transient that --pipeline-sync removes).
+        alphaServed_ = visibilityAlpha_;
+        if (scene_.vertexColorInUse()) {
+            // F15 closure (COLOR_0): the alpha test multiplies the vertex colour's alpha; the mesh stage emits it.
+            const u32 k = scene_.textureTransformInUse() ? 1u : 0u;
+            if (visibilityAlphaVC_[k] == pipe::INVALID_PIPELINE)
+                visibilityAlphaVC_[k] = pipelines_.request(pipe::forward::withVertexColor(visibilityRasterDesc(2, k == 1u)));
+            if (pipelines_.isFinal(visibilityAlphaVC_[k])) alphaServed_ = visibilityAlphaVC_[k];
+            else pipelines_.noteFallbackUse();
+        } else if (scene_.textureTransformInUse()) {
+            if (visibilityAlphaTT_ == pipe::INVALID_PIPELINE)
+                visibilityAlphaTT_ = pipelines_.request(visibilityRasterDesc(2, true));
+            if (pipelines_.isFinal(visibilityAlphaTT_)) alphaServed_ = visibilityAlphaTT_;
+            else pipelines_.noteFallbackUse();
+        }
     } else {
         // Pipelines: the forward variant of the frame (SceneRenderer chose it),
         // generic meanwhile; debug views use the debug pipeline.
@@ -360,8 +382,17 @@ void MeshRenderer::prepareFrame(const SceneStore& store, const GpuScene& scene, 
         }
         const bool debug =
             options_.debugView == MeshletDebugView::Meshlets || options_.debugView == MeshletDebugView::Cull;
-        usingFallback_ = !debug && (options_.genericOnly || !pipelines_.isFinal(handle));
-        pipeline_ = pipelines_.render(debug ? debug_ : handle);
+        // F15.1: the scene's feature union specialises the meshlet forward pipeline too.
+        const pipe::PipelineHandle served = featurePipelines_.serve(
+            pipelines_, options_.genericOnly ? 1000u : vi, handle, scene_.pipelineFeatureUnion(), [&] {
+                return meshDesc(options_.genericOnly
+                                    ? pipe::forward::genericDesc(rg::Format::BGRA8Srgb)
+                                    : pipe::forward::pipelineDesc(pipe::forward::variantAt(vi), rg::Format::BGRA8Srgb,
+                                                                  options_.salt),
+                                options_.genericOnly ? "Meshlet forward (generic)" : "Meshlet forward");
+            });
+        usingFallback_ = !debug && (options_.genericOnly || !pipelines_.isFinal(served));
+        pipeline_ = pipelines_.render(debug ? debug_ : served);
         if (!pipeline_)
             pipeline_ = pipelines_.render(generic_);
         if (usingFallback_)
@@ -666,10 +697,11 @@ void MeshRenderer::encodeRaster(MTL4::RenderCommandEncoder *enc, u32 phase, bool
     const FrameSet& f      = frames_[frame_.slot];
     MTL4::ArgumentTable* t = drawTables_[phase];
     u32 n = 0;
-    enc->setDepthStencilState(scene_.depthState());
-    enc->setViewport(
-        MTL::Viewport{0.0, 0.0, static_cast<double>(frame_.width), static_cast<double>(frame_.height), 0.0, 1.0});
-    n += 2;
+    // Fused render groups share the encoder: the tracker skips a state the encoder already holds (tickets 20/22).
+    if (metal_state::setDepthStencil(enc, scene_.depthState())) ++n;
+    if (metal_state::setViewport(
+            enc, MTL::Viewport{0.0, 0.0, static_cast<double>(frame_.width), static_cast<double>(frame_.height), 0.0, 1.0}))
+        ++n;
     // Cull state per class, tracked from Metal's defaults (clockwise, none):
     // validation rejects redundant changes (as SceneRenderer::encodeForward).
     MTL::Winding winding   = MTL::WindingClockwise;
@@ -695,7 +727,7 @@ void MeshRenderer::encodeRaster(MTL4::RenderCommandEncoder *enc, u32 phase, bool
         }
         const u32 draw = phase * SCENE_CULL_CLASSES + c;
         if (!meshState) {
-            enc->setRenderPipelineState(alpha ? pipelines_.render(visibilityAlpha_) : pipeline_);
+            enc->setRenderPipelineState(alpha ? pipelines_.render(alphaServed_) : pipeline_);
             ++n;
         }
         t->setAddress(f.ranges->gpuAddress() + draw * sizeof(GPUMeshletDrawRange), MR_RANGE);

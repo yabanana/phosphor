@@ -43,7 +43,7 @@ MTL::Buffer* GpuSceneBuffers::sharedBuffer(u64 size, const char* label) {
 
 void GpuSceneBuffers::releaseAll() {
     GpuMemory& m = context_.memory();
-    for (MTL::Buffer** b : {&instances_, &materials_, &nodes_, &motions_, &identity_, &buckets_, &commandBuckets_,
+    for (MTL::Buffer** b : {&instances_, &materials_, &extensions_, &nodes_, &motions_, &identity_, &buckets_, &commandBuckets_,
                             &childOffsets_, &childSlots_, &motionSlots_, &queues_, &motionParents_}) {
         m.release(*b, MemoryCategory::Scene);
         *b = nullptr;
@@ -56,7 +56,7 @@ void GpuSceneBuffers::releaseAll() {
         m.release(f.icb, MemoryCategory::Scene);
         f.icb = nullptr;
     }
-    slotCap_ = materialCap_ = bucketCap_ = commandCap_ = childCap_ = motionCap_ = queueStride_ = motionParentCap_ = 0;
+    slotCap_ = materialCap_ = extensionCap_ = bucketCap_ = commandCap_ = childCap_ = motionCap_ = queueStride_ = motionParentCap_ = 0;
 }
 
 void GpuSceneBuffers::clear() {
@@ -97,6 +97,14 @@ bool GpuSceneBuffers::reserve(const SceneStore& store) {
     if (materials != materialCap_) {
         materialCap_ = materials;
         swap(materials_, privateBuffer(u64(materials) * sizeof(GPUMaterial), "Scene materials"));
+    }
+    // F15.1: only scenes with extended materials own the buffer (Sponza allocates nothing).
+    if (!store.extensions().empty()) {
+        const u32 records = grow(extensionCap_, static_cast<u32>(store.extensions().size()));
+        if (records != extensionCap_) {
+            extensionCap_ = records;
+            swap(extensions_, privateBuffer(u64(records) * sizeof(GPUMaterialExtRecord), "Scene material extensions"));
+        }
     }
     const u32 buckets = grow(bucketCap_, std::max<u32>(static_cast<u32>(store.gpuBuckets().size()), 1u));
     if (buckets != bucketCap_) {
@@ -170,6 +178,7 @@ void GpuSceneBuffers::loadAll(const SceneStore& store) {
     };
     upload(instances_, store.instances().data(), bytesOf(store.instances()));
     upload(materials_, store.materials().data(), bytesOf(store.materials()));
+    if (extensions_) upload(extensions_, store.extensions().data(), bytesOf(store.extensions()));
     upload(nodes_, store.nodes().data(), bytesOf(store.nodes()));
     upload(motions_, store.motions().data(), bytesOf(store.motions()));
     upload(buckets_, store.gpuBuckets().data(), bytesOf(store.gpuBuckets()));
@@ -255,8 +264,11 @@ u64 GpuSceneBuffers::stageFrame(const SceneStore& store) {
     stage(1, store.materialDeltas(), st.fullMaterials, materials_, store.materials().data(), bytesOf(store.materials()));
     stage(2, store.nodeDeltas(), st.fullNodes, nodes_, store.nodes().data(), bytesOf(store.nodes()));
     stage(3, store.motionDeltas(), st.fullMotions, motions_, store.motions().data(), bytesOf(store.motions()));
-    for (u32 i = 0; i < 4; ++i) {
-        if (!scatters_[i].dst) scatters_[i].dst = i == 0 ? instances_ : i == 1 ? materials_ : i == 2 ? nodes_ : motions_;
+    if (extensions_)
+        stage(4, store.extensionDeltas(), st.fullExtensions, extensions_, store.extensions().data(), bytesOf(store.extensions()));
+    for (u32 i = 0; i < kScatters; ++i) {
+        // (no extension buffer: the empty extension scatter points at a harmless destination, count 0)
+        if (!scatters_[i].dst) scatters_[i].dst = i == 0 ? instances_ : i == 1 ? materials_ : i == 2 ? nodes_ : i == 3 ? motions_ : materials_;
     }
     if (st.motionParentsChanged && !reallocated) {
         const std::vector<u8>& q = motionParentQueue(store);

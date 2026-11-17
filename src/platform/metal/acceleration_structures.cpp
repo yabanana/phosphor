@@ -584,6 +584,8 @@ struct AccelerationStructures::Impl {
         f.ift->setBuffer(renderer.buffers().instances(), 0, 4);
         f.ift->setBuffer(f.meshTable, 0, 5);
         f.ift->setBuffer(f.params, 0, 6);
+        auto* extensions = renderer.buffers().extensions();
+        f.ift->setBuffer(extensions ? extensions : renderer.buffers().materials(), 0, 7);
     }
     void bindRayTable(FrameSet& f, Table table, MTL::Buffer* rays, MTL::Buffer* hits, MTL::Buffer* counters) {
         auto* t = f.tables[table];
@@ -617,7 +619,7 @@ struct AccelerationStructures::Impl {
                 if (proxy.selections[mesh].level != RtProxyLevel::Full)
                     throw std::runtime_error("RT proxy material assignment changed; reload with full/protected geometry");
         }
-        if (!store.materialDeltas().empty() || store.stats().fullMaterials)
+        if (store.materialsChanged())
             for (const auto& material : store.materials())
                 if (material.baseColorTex != INVALID_TEXTURE_INDEX && material.baseColorTex >= textures->textureCount())
                     throw std::invalid_argument("RT dynamic material texture index is outside bindless table");
@@ -643,7 +645,9 @@ struct AccelerationStructures::Impl {
         // while backing buffers/AS may retain a larger capacity after shrink.
         f.descriptor->setInstanceCount(slots);
         const GPURtParams params{slots, static_cast<u32>(meshTable.size()), materialCount,
-            diagnostic ? static_cast<u32>(options.debugRtCorrupt) : RT_CORRUPT_NONE};
+            diagnostic ? static_cast<u32>(options.debugRtCorrupt) : RT_CORRUPT_NONE,
+            (options.debugTransmittanceDedup ? 0u : RT_TRANSMITTANCE_NO_DEDUP) | (options.debugTransmittanceInject ? RT_TRANSMITTANCE_INJECT_DUPLICATE : 0u),
+            0u, renderer.vertexColorsAddress()};
         std::memcpy(f.params->contents(), &params, sizeof(params));
         std::memcpy(f.meshTable->contents(), meshTable.data(), meshTable.size() * sizeof(GPURtMesh));
         GPURtProbeParams probe{};
@@ -1033,9 +1037,10 @@ rg::BufferRef AccelerationStructures::geometryBufferRef() const { return impl_->
 AccelerationStructures::TraceResources AccelerationStructures::traceResources(u32 slot) const {
     const auto& f = impl_->frames.at(slot);
     if (!impl_->enabled || !f.tlas || !impl_->textures) return {};
+    auto* extensions = impl_->renderer.buffers().extensions();
     return {f.tlas, impl_->renderer.buffers().materials(), impl_->textures->tableBuffer(),
             impl_->renderer.vertexBuffer(), impl_->indexBuffer, impl_->renderer.buffers().instances(),
-            f.meshTable, f.params};
+            f.meshTable, f.params, extensions ? extensions : impl_->renderer.buffers().materials()};
 }
 void AccelerationStructures::declareTraceReads(rg::PassBuilder& b) const {
     using namespace rg;

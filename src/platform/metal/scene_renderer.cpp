@@ -1,9 +1,14 @@
 #include "platform/metal/scene_renderer.h"
+#include "renderer/aniso_table.h"
+#include "renderer/dfg_table.h"
+#include "renderer/ms_table.h"
+#include "renderer/sheen_table.h"
 #include "core/log.h"
 #include "core/profile.h"
 #include "pipeline/forward_variants.h"
 #include "platform/metal/gpu_memory.h"
 #include "platform/metal/pipeline_cache.h"
+#include "platform/metal/render_state_tracker.h"
 #include "renderer/gpu_queue.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/gpu_scene_layout.h"
@@ -34,7 +39,9 @@ enum Binding : NS::UInteger {
     BindVisible = FORWARD_BIND_VISIBLE,
     BindLightingParams = 9,
     BindLightingTextures = 10,
-    BindCount = 11,
+    BindLobeGuide = 11,       // F15.1: forward_di_receiver_guide_fs (device write), see shaders/forward.metal
+    BindLobeGuideParams = 12, // GPUDIParams of the frame (DI surface width, flags)
+    BindCount = 13,
 };
 
 constexpr u32 kQueues = SCENE_MAX_LEVELS - 1;
@@ -106,6 +113,21 @@ SceneRenderer::SceneRenderer(MetalContext& context, PipelineCache& pipelines, u3
     drawGateOpen_ = context_.memory().newBuffer(16, MTL::ResourceStorageModeShared, MemoryCategory::Scene, "Draw gate (open)");
     *static_cast<u32*>(drawGateOpen_->contents()) = 1u;
     drawGate_ = drawGateOpen_->gpuAddress();
+    // F15: the DFG table as a buffer; written once, never modified (no frame upload).
+    // F15 closure (--specular-ms): the multiple-scattering tables (renderer/ms_table.h: 1 - E_avg per roughness, then the lost-energy table)
+    // follow the DFG table in the same buffer; the shaders address them as frame.dfgTable + DfgTableSize * DfgTableSize * 2 (BSDF_MS_LOSS_AVG)
+    // and + MsTableSize more (BSDF_MS_LOST): nothing else of this buffer moves.  F15.1 (ticket 11): the anisotropic albedo table (renderer/aniso_table.h)
+    // follows them (BSDF_ANISO_TABLE).
+    dfgTable_ = context_.memory().newBuffer(sizeof(DfgTable) + sizeof(MsLogLossAvgTable) + sizeof(MsLogLostTable) + sizeof(AnisoTable),
+                                            MTL::ResourceStorageModeShared, MemoryCategory::Scene, "DFG table");
+    char* dfgBytes = static_cast<char*>(dfgTable_->contents());
+    std::memcpy(dfgBytes, DfgTable, sizeof(DfgTable));
+    std::memcpy(dfgBytes + sizeof(DfgTable), MsLogLossAvgTable, sizeof(MsLogLossAvgTable));
+    std::memcpy(dfgBytes + sizeof(DfgTable) + sizeof(MsLogLossAvgTable), MsLogLostTable, sizeof(MsLogLostTable));
+    std::memcpy(dfgBytes + sizeof(DfgTable) + sizeof(MsLogLossAvgTable) + sizeof(MsLogLostTable), AnisoTable, sizeof(AnisoTable));
+    // F15.1 (ticket 10): the sheen albedo table, same rules.
+    sheenTable_ = context_.memory().newBuffer(sizeof(SheenTable), MTL::ResourceStorageModeShared, MemoryCategory::Scene, "Sheen table");
+    std::memcpy(sheenTable_->contents(), SheenTable, sizeof(SheenTable));
 }
 
 SceneRenderer::~SceneRenderer() {
@@ -114,6 +136,8 @@ SceneRenderer::~SceneRenderer() {
     for (MTL4::ArgumentTable* t : {arguments_, updateTable_, transformTable_, cullTable_, drawTable_}) t->release();
     depthState_->release();
     context_.memory().release(drawGateOpen_, MemoryCategory::Scene);
+    context_.memory().release(dfgTable_, MemoryCategory::Scene);
+    context_.memory().release(sheenTable_, MemoryCategory::Scene);
 }
 
 void SceneRenderer::requestAllVariants() {
@@ -147,7 +171,7 @@ MTL::Buffer* SceneRenderer::createPrivateBuffer(const void* data, size_t size, c
 }
 
 void SceneRenderer::releaseGeometry() {
-    for (MTL::Buffer** b : {&vertexBuffer_, &indexBuffer_, &meshBuffer_}) {
+    for (MTL::Buffer** b : {&vertexBuffer_, &vertexColorBuffer_, &indexBuffer_, &meshBuffer_}) {
         context_.memory().release(*b, MemoryCategory::Geometry);
         *b = nullptr;
     }
@@ -164,6 +188,8 @@ void SceneRenderer::syncGeometry(const GpuScene& scene) {
 
     vertexBuffer_ = createPrivateBuffer(scene.vertices().data(),
                                         scene.vertices().size() * sizeof(GPUVertex), "Vertices");
+    if (scene.hasVertexColors())
+        vertexColorBuffer_ = createPrivateBuffer(scene.vertexColors().data(), scene.vertexColors().size() * sizeof(glm::vec4), "Vertex colours");
     indexBuffer_  = createPrivateBuffer(scene.indices().data(),
                                         scene.indices().size() * sizeof(u32), "Indices");
     meshBuffer_   = createPrivateBuffer(scene.meshInfos().data(),
@@ -202,7 +228,11 @@ u64 SceneRenderer::prepareFrame(const SceneStore& store, std::span<const GPULigh
     hierSteps_    = store.maxDepth() == 0 ? 0u : std::min(store.maxDepth() + 1, SCENE_MAX_LEVELS);
     commandCount_ = store.commandCount();
 
-    const MTL::GPUAddress frameConstants = put(&constants, sizeof(constants));
+    // F15.1: the extension buffer may have been (re)allocated by stageFrame above.
+    FrameConstants frameConstantsData = constants;
+    frameConstantsData.materialExtensions = materialExtensionsAddress();
+    frameConstantsData.vertexColors = vertexColorsAddress(); // F15 closure (COLOR_0): 0 without a stream
+    const MTL::GPUAddress frameConstants = put(&frameConstantsData, sizeof(frameConstantsData));
     GPULight noLight{};
     const MTL::GPUAddress lightsAddress =
         lights.empty() ? put(&noLight, sizeof(noLight)) : put(lights.data(), lights.size_bytes());
@@ -216,9 +246,9 @@ u64 SceneRenderer::prepareFrame(const SceneStore& store, std::span<const GPULigh
     clear.queues      = kQueues;
     clear.strideBytes = buffers_.queueStride();
     clearParams_ = put(&clear, sizeof(clear));
-    std::array<GPUScatterParams, 4> scatter{};
+    std::array<GPUScatterParams, GpuSceneBuffers::kScatters> scatter{};
     const auto& scatters = buffers_.scatters();
-    for (u32 i = 0; i < 4; ++i) {
+    for (u32 i = 0; i < GpuSceneBuffers::kScatters; ++i) {
         scatter[i].count = scatters[i].count;
         scatter[i].words = 20;
     }
@@ -243,9 +273,27 @@ u64 SceneRenderer::prepareFrame(const SceneStore& store, std::span<const GPULigh
         instanceRecords = put(records.data(), records.size() * sizeof(GPUDeltaRecord));
         scatter[0].count = static_cast<u32>(records.size());
     }
+    // Negative control of the extension buffer (needs a scene with extended materials): a wrong
+    // record for the first record of the buffer; the readback must report it.
+    MTL::GPUAddress extensionRecords = scatters[4].records;
+    if (params.corrupt == SceneCorruption::Extension && !store.extensions().empty() && buffers_.extensions()) {
+        std::vector<GPUDeltaRecord> records(store.extensionDeltas().begin(), store.extensionDeltas().end());
+        auto it = std::find_if(records.begin(), records.end(), [](const GPUDeltaRecord& r) { return r.slot == 0; });
+        if (it == records.end()) {
+            GPUDeltaRecord bad{};
+            bad.slot = 0;
+            std::memcpy(bad.payload, &store.extensions()[0], sizeof(bad.payload));
+            records.push_back(bad);
+            it = records.end() - 1;
+        }
+        // GPUMaterialExt0::pad (word 19): never read by a shader, only the self-check can notice it.
+        it->payload[19] ^= 0x5A5A5A5Au;
+        extensionRecords = put(records.data(), records.size() * sizeof(GPUDeltaRecord));
+        scatter[4].count = static_cast<u32>(records.size());
+    }
     scatterParams_ = put(scatter.data(), sizeof(scatter));
-    scatterRecords_ = {instanceRecords, scatters[1].records, scatters[2].records, scatters[3].records};
-    for (u32 i = 0; i < 4; ++i) scatterCounts_[i] = scatter[i].count;
+    scatterRecords_ = {instanceRecords, scatters[1].records, scatters[2].records, scatters[3].records, extensionRecords};
+    for (u32 i = 0; i < GpuSceneBuffers::kScatters; ++i) scatterCounts_[i] = scatter[i].count;
 
     // Scene transforms: motion table, hierarchy levels, queue 0 (the dirty roots).
     GPUMotionFrame motion{};
@@ -314,8 +362,18 @@ u64 SceneRenderer::prepareFrame(const SceneStore& store, std::span<const GPULigh
                  pipe::forward::variantIndex(variant), variant.lightTypes, variant.emissive ? 1 : 0, variant.debugMode);
         handle = pipelines_.request(pipe::forward::pipelineDesc(variant, rg::Format::BGRA8Srgb, salt_));
     }
-    usingFallback_ = genericOnly_ || !pipelines_.isFinal(handle);
-    pipeline_ = pipelines_.render(handle);
+    // F15.1: a scene with material features shades with the pipeline specialised by its feature
+    // union (all-lobes reference while that compiles); union 0 keeps `handle` (today's pipelines).
+    featureUnion_ = store.featureUnion();
+    pipelineUnion_ = store.pipelineFeatureUnion();
+    // F15.1 (ticket 22): the texture-transform marker rides on the mask handed to serve (featureUnion_ stays the lobe union).
+    const pipe::PipelineHandle served = featurePipelines_.serve(
+        pipelines_, genericOnly_ ? 1000u : variantIndex_, handle, pipelineUnion_, [&] {
+            return genericOnly_ ? pipe::forward::genericDesc(rg::Format::BGRA8Srgb)
+                                : pipe::forward::pipelineDesc(variant, rg::Format::BGRA8Srgb, salt_);
+        });
+    usingFallback_ = genericOnly_ || !pipelines_.isFinal(served);
+    pipeline_ = pipelines_.render(served);
     if (!pipeline_) pipeline_ = pipelines_.render(generic_);
 
     // Triangles of every live instance (off draws all of them; on draws the
@@ -381,17 +439,21 @@ void SceneRenderer::addPassesToGraph(rg::RenderGraph& graph, GpuDrivenMode mode,
         [this](PassContext& ctx) { encodeDrawBuild(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder())); });
 }
 
-void SceneRenderer::setLightingInputs(MTL::GPUAddress params, MTL::Texture* sun, MTL::Texture* local, MTL::Texture* gi) {
+void SceneRenderer::setLightingInputs(MTL::GPUAddress params, MTL::Texture* sun, MTL::Texture* local, MTL::Texture* gi, MTL::Texture* giBack) {
     // The ICB inherits buffer bindings from this argument table. Encode the
     // three texture handles in a fresh frame-ring slice so in-flight draws
     // retain their exact resources across views/resize and later rebinding.
     static_assert(sizeof(MTL::ResourceID) == 8, "Metal resource-ID ABI");
-    const MTL::ResourceID handles[] = {sun->gpuResourceID(), local->gpuResourceID(), gi->gpuResourceID()};
-    static_assert(sizeof(handles) == 3 * 8, "Forward lighting texture-table ABI");
+    const MTL::ResourceID handles[] = {sun->gpuResourceID(), local->gpuResourceID(), gi->gpuResourceID(), giBack->gpuResourceID()}; // F15 closure ticket 19: E(-N) of thin-walled subsurface pixels (gi when the scene has none)
+    static_assert(sizeof(handles) == 4 * 8, "Forward lighting texture-table ABI");
     const auto slice = context_.frameUploads().allocate(sizeof(handles));
     std::memcpy(slice.cpu, handles, sizeof(handles));
     arguments_->setAddress(params, BindLightingParams);
     arguments_->setAddress(slice.gpu, BindLightingTextures);
+}
+void SceneRenderer::setLobeGuideInputs(MTL::GPUAddress guide, MTL::GPUAddress diParams) {
+    arguments_->setAddress(guide, BindLobeGuide);
+    arguments_->setAddress(diParams, BindLobeGuideParams);
 }
 void SceneRenderer::setTemporalInputs(MTL::GPUAddress previousInstances, MTL::GPUAddress temporalParams) {
     arguments_->setAddress(previousInstances, 7);
@@ -425,11 +487,12 @@ void SceneRenderer::encodeUpdate(MTL4::ComputeCommandEncoder* enc) const {
     enc->setArgumentTable(t);
     enc->dispatchThreads(MTL::Size::Make(32, 1, 1), MTL::Size::Make(32, 1, 1));
     n += 3;
-    // Delta scatters: four destinations, always encoded (count 0 returns).
+    // Delta scatters: five destinations (instances, materials, nodes, motion, extensions),
+    // always encoded (count 0 returns).
     enc->setComputePipelineState(kernel(kScatter_));
     ++n;
     const auto& scatters = buffers_.scatters();
-    for (u32 i = 0; i < 4; ++i) {
+    for (u32 i = 0; i < GpuSceneBuffers::kScatters; ++i) {
         t->setAddress(scatterParams_ + i * sizeof(GPUScatterParams), 0);
         t->setAddress(scatterRecords_[i] ? scatterRecords_[i] : scatterParams_, SB_SCATTER_RECORDS);
         t->setAddress(scatters[i].dst->gpuAddress(), SB_SCATTER_DST);
@@ -583,13 +646,12 @@ void SceneRenderer::encodeForward(MTL4::RenderCommandEncoder* enc, MTL::RenderPi
     // Null: the encoder's default (no depth test, no write); overlay passes
     // without a depth attachment must not set a redundant state.
     if (depthState) {
-        enc->setDepthStencilState(depthState);
-        ++n;
+        if (metal_state::setDepthStencil(enc, depthState)) ++n;
     }
     enc->setArgumentTable(arguments_, MTL::RenderStageVertex | MTL::RenderStageFragment);
-    enc->setViewport(MTL::Viewport{0.0, 0.0, static_cast<double>(frame_.width), static_cast<double>(frame_.height),
-                                   0.0, 1.0});
-    n += 3;
+    if (metal_state::setViewport(enc, MTL::Viewport{0.0, 0.0, static_cast<double>(frame_.width), static_cast<double>(frame_.height), 0.0, 1.0}))
+        ++n;
+    n += 2;
 
     // glTF convention: counter-clockwise front faces (Metal defaults to
     // clockwise).  A mirrored model matrix reverses the on-screen winding, so

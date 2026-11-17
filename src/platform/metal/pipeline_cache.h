@@ -74,6 +74,8 @@ public:
         bool        sync           = false;
         bool        interactiveQos = false; // negative control (F3.1)
         bool        fallbackOnly   = false; // debug: never apply final objects
+        u32         debugXpcFail   = 0;     // debug: first N compile attempts fail with a synthetic XPC interruption
+        bool        specularMs     = false; // --specular-ms: shading pipelines (forward_*, resolve) get SPECULAR_MS = 1 (variants.def)
     };
 
     PipelineCache(MetalContext& context, const Options& options);
@@ -100,6 +102,9 @@ public:
     [[nodiscard]] MTL::RenderPipelineState*  render(pipe::PipelineHandle h) const;
     [[nodiscard]] MTL::ComputePipelineState* compute(pipe::PipelineHandle h) const;
     [[nodiscard]] bool isFinal(pipe::PipelineHandle h) const { return registry_.isFinal(h); }
+    /// True when the handle has an object to bind now (final or a fallback).
+    /// Compute pipelines have no fallback object: until they compile this is false.
+    [[nodiscard]] bool available(pipe::PipelineHandle h) const { return registry_.get(h) != nullptr; }
 
     /// Frame start (render thread): apply finished compilations.  Returns the
     /// number of entries whose object changed.
@@ -163,9 +168,16 @@ private:
                  MTL::Library* library, bool allowFallback);
     /// Post a completion and wake the render thread if it is waiting.
     void complete(const pipe::Completion& completion);
+    void noteComputeLimits(const pipe::PipelineDesc& desc, const void* opaque) const; // debug log, env PHOSPHOR_LOG_COMPUTE_LIMITS
     /// Flexible pipeline of `generic` for `library` (compiled once, shared).
     MTL::RenderPipelineState* flexibleBase(const pipe::PipelineDesc& generic, MTL::Library* library,
                                            u32& compilerCalls, float& compileMs);
+    /// One compiler call with the bounded retry of transient compiler-service
+    /// interruptions and the --debug-pipeline-xpc-fail injection.  `call`
+    /// returns the created object or nullptr and sets the error.
+    NS::Object* compileWithRetry(const std::string& label, NS::Error** error,
+                                 const std::function<NS::Object*(NS::Error**)>& call);
+    std::atomic<u32> xpcFailBudget_{0};
     NS::Object* compileFinal(const pipe::PipelineDesc& desc, MTL::Library* library, NS::Error** error);
     NS::Object* archiveLookup(const pipe::PipelineDesc& desc, MTL::Library* library, NS::Error** error);
     void waitForCompletions(const std::function<bool()>& done);

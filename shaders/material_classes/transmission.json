@@ -1,0 +1,316 @@
+{
+  "scenes": [
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 244
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "transmission",
+            "volume"
+          ],
+          "mask": 97,
+          "materials": 8
+        }
+      ],
+      "family": "transmission",
+      "name": "transmission:transmission-roughness-ior",
+      "union": 97,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 242
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 6
+        }
+      ],
+      "family": "transmission",
+      "name": "transmission:transmission-attenuation",
+      "union": 96,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 243
+        },
+        {
+          "lobes": [
+            "transmission"
+          ],
+          "mask": 32,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 4
+        }
+      ],
+      "family": "transmission",
+      "name": "transmission:transmission-factor-tint",
+      "union": 96,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 241
+        },
+        {
+          "lobes": [
+            "transmission"
+          ],
+          "mask": 32,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 2
+        }
+      ],
+      "family": "transmission",
+      "name": "transmission:transmission-thin-volume",
+      "union": 96,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 241
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 3
+        }
+      ],
+      "family": "transmission",
+      "name": "transmission:transmission-single-sided",
+      "union": 96,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 242
+        },
+        {
+          "lobes": [
+            "transmission"
+          ],
+          "mask": 32,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "specular_ior",
+            "transmission",
+            "volume"
+          ],
+          "mask": 97,
+          "materials": 1
+        }
+      ],
+      "family": "transmission",
+      "name": "transmission:transmission-glass-behind-glass",
+      "union": 97,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "transmission"
+          ],
+          "mask": 32,
+          "materials": 2
+        }
+      ],
+      "family": "transmission",
+      "name": "transmission:transmission-emissive-panel",
+      "union": 32,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "transmission"
+          ],
+          "mask": 32,
+          "materials": 4
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 4
+        }
+      ],
+      "family": "transmission",
+      "name": "transmission:transmission-rtoff",
+      "union": 96,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 3
+        },
+        {
+          "lobes": [
+            "iridescence",
+            "transmission"
+          ],
+          "mask": 48,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "iridescence",
+            "transmission",
+            "volume"
+          ],
+          "mask": 112,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "transmission",
+            "subsurface"
+          ],
+          "mask": 160,
+          "materials": 2
+        },
+        {
+          "lobes": [
+            "iridescence",
+            "transmission",
+            "volume",
+            "subsurface"
+          ],
+          "mask": 240,
+          "materials": 2
+        }
+      ],
+      "family": "transmission",
+      "name": "transmission:transmission-rtoff-combinations",
+      "union": 240,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 242
+        },
+        {
+          "lobes": [
+            "transmission"
+          ],
+          "mask": 32,
+          "materials": 1
+        },
+        {
+          "lobes": [
+            "transmission",
+            "volume"
+          ],
+          "mask": 96,
+          "materials": 5
+        }
+      ],
+      "family": "transmission",
+      "name": "transmission:transmission-tinted-bodies",
+      "union": 96,
+      "volumetric": false
+    },
+    {
+      "classes": [
+        {
+          "lobes": [],
+          "mask": 0,
+          "materials": 243
+        },
+        {
+          "lobes": [
+            "transmission"
+          ],
+          "mask": 32,
+          "materials": 9
+        }
+      ],
+      "family": "transmission",
+      "name": "transmission:transmission-thin-rough",
+      "union": 32,
+      "volumetric": false
+    }
+  ],
+  "schema": "phosphor.material-class-manifest",
+  "source": "tools/class_manifest (F15 fixtures, family transmission)",
+  "version": 1
+}

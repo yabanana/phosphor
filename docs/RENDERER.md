@@ -26,7 +26,7 @@ The [showcase](SHOWCASE.md) uses a procedural scene. The original Vulkan rendere
 
 ## Status and roadmap
 
-F9 is integrated. F10–F14 provide an **experimental renderer baseline** with scoped M5 Max validation. The [integration handoff](F10_F14_HANDOFF.md) and [budget follow-up](implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md) document quality, hardware and performance evidence. The [F13/F14 closure](implementation/F13-F14-CLOSURE-2026-11-12.md) accepts F13.1–F13.6 and F14.1–F14.3 for development on M5 Max against independent reference clips, and measures full Sponza at native 1080p within 16.67 ms GPU p95. Production lighting uses the custom denoiser: native MetalFX was measured on the real inputs and rejected for quality. F14.4 stays open for a repeatability gap under shader validation. Current renderer work stays within F14.
+F9 is integrated. F10–F14 provide an **experimental renderer baseline** with scoped M5 Max validation. The [integration handoff](F10_F14_HANDOFF.md) and [budget follow-up](implementation/F13-F14-BUDGET-CLOSURE-2026-10-08.md) document quality, hardware and performance evidence. The [F13/F14 closure](implementation/F13-F14-CLOSURE-2026-11-12.md) accepts F13.1–F13.6 and F14.1–F14.3 for development on M5 Max against independent reference clips, and measures full Sponza at native 1080p within 16.67 ms GPU p95. Production lighting uses the custom denoiser: native MetalFX was measured on the real inputs and rejected for quality. F14.4 stays open for a repeatability gap under shader validation. F15 (advanced materials, shader-variant generation, material testbench, layered materials) is implemented and verified on M5 Max for the scope listed per roadmap ID in the [F15 handoff](F15_HANDOFF.md); no F15 roadmap box is ticked because each ID keeps documented partial items.
 
 The implementation roadmap — F0–F41 and OPT-0…OPT-15, organized by dependencies
 in seven eras — is in [`docs/ROADMAP.md`](../docs/ROADMAP.md) (Italian).
@@ -218,7 +218,7 @@ released by the engine, see the [root cause and verification](../docs/research/2
 The isolated workers of [PR #15](https://github.com/yabanana/phosphor/pull/15)
 remain opt-in ([historical cost](../docs/F8_METALFX_LIFETIME.md), rejected by the owner);
 see [delivery and limits](../docs/F7_F8_HANDOFF.md) and [renderer commands/contracts](../docs/RENDERING_F7_F8.md).
-The post-F8 review (`docs/research/2026-10-04-post-f8-review.md`) recorded the M5 OPT-4.16 baseline and moved OPT-2 after F13; F9 is integrated and the F10–F14 experimental baseline is documented in `docs/F10_F14_HANDOFF.md`. The owner stop is F14. Advance detail does not activate
+The post-F8 review (`docs/research/2026-10-04-post-f8-review.md`) recorded the M5 OPT-4.16 baseline and moved OPT-2 after F13; F9 is integrated and the F10–F14 experimental baseline is documented in `docs/F10_F14_HANDOFF.md`. The owner direction of 2026-11-10 continues with F15 and then F16. Advance detail does not activate
 the optional research catalog.
 
 Development acceptance uses the available M5 Max 128 GB. Apple9 fallback

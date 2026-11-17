@@ -18,7 +18,11 @@ public:
     /// Frames the signal's history of the current view holds, counting this one (1 = reset now).
     [[nodiscard]] u32 historyFrames(u32 signal)const;
     rg::TextureRef addSignal(rg::RenderGraph&,u32 signal,rg::TextureRef raw,rg::TextureRef motion,
-                            rg::BufferRef surfaces,rg::BufferRef specularMetadata={});
+                            rg::BufferRef surfaces,rg::BufferRef specularMetadata={},rg::BufferRef lobeGuide={});
+    /// F15.1 (ticket 08): the scene's material feature union for the specular lobe kernels (0 = base kernels); the kernels are requested whenever it is nonzero and used when `enable` (the transport serves its lobe variants). Call before prepareFrame.
+    void configureLobe(u32 featureMask,bool enable);
+    /// True when this frame's specular denoiser runs the lobe-contract kernels.
+    [[nodiscard]] bool lobeKernelsActive() const;
     std::array<rg::TextureRef,3> addDiffuseSignals(rg::RenderGraph&,std::array<rg::TextureRef,3> raw,
                                                 rg::TextureRef motion,rg::BufferRef surfaces,bool useDirectLighting);
     void bindFrame(MetalGraphExecutor&);

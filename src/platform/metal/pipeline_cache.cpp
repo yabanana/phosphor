@@ -7,6 +7,7 @@
 
 #include "core/log.h"
 #include "core/profile.h"
+#include "pipeline/compile_retry.h"
 #include "platform/metal/metal_context.h"
 #include "platform/metal/metal_graph_executor.h"
 #include "platform/metal/metalfx_lifetime.h"
@@ -21,6 +22,7 @@
 #include <functional>
 #include <memory>
 #include <stdexcept>
+#include <thread>
 
 namespace phosphor {
 
@@ -144,6 +146,15 @@ void setColorOutputs(MTL4::RenderPipelineColorAttachmentDescriptorArray* attachm
             color->setDestinationRGBBlendFactor(MTL::BlendFactorOneMinusSourceAlpha);
             color->setSourceAlphaBlendFactor(MTL::BlendFactorOne);
             color->setDestinationAlphaBlendFactor(MTL::BlendFactorOneMinusSourceAlpha);
+        } else if (out.blend == pipe::ColorOutput::Blend::TransmittanceMap) {
+            // RGB: the sum of the per-surface ln transmittance; alpha: the nearest (largest reverse-Z) transmissive depth.
+            color->setBlendingState(MTL4::BlendStateEnabled);
+            color->setRgbBlendOperation(MTL::BlendOperationAdd);
+            color->setAlphaBlendOperation(MTL::BlendOperationMax);
+            color->setSourceRGBBlendFactor(MTL::BlendFactorOne);
+            color->setDestinationRGBBlendFactor(MTL::BlendFactorOne);
+            color->setSourceAlphaBlendFactor(MTL::BlendFactorOne);
+            color->setDestinationAlphaBlendFactor(MTL::BlendFactorOne);
         }
     }
 }
@@ -244,6 +255,7 @@ std::shared_ptr<void> retainLibrary(MTL::Library* library) {
 
 PipelineCache::PipelineCache(MetalContext& context, const Options& options)
     : context_(context), options_(options) {
+    xpcFailBudget_.store(options.debugXpcFail);
     MTL::Device* device = context_.device();
     NS::Error* error = nullptr;
 
@@ -405,7 +417,38 @@ PipelineCache::requestTemporalWorker(std::shared_ptr<TemporalWorker> worker) {
 
 u32 PipelineCache::workerCount() const { return queue_ ? queue_->workerCount() : 0; }
 
-pipe::PipelineHandle PipelineCache::request(const pipe::PipelineDesc& desc, bool loading) {
+// F15 closure (--specular-ms): the functions that run shadeSurface (shaders/material_shading.h) take the SPECULAR_MS constant
+// (reserved 25, shaders/variants.def).  Every other pipeline keeps its descriptor and archive key.
+static bool runsShadeSurface(const pipe::PipelineDesc& desc) {
+    static constexpr const char* names[] = {"forward_fs",         "forward_shadow_receiver_fs", "forward_shadow_receiver_tt_fs", "forward_surface_fs",
+                                            "forward_surface_lit_fs", "forward_di_receiver_fs",  "forward_di_receiver_guide_fs", "forward_di_receiver_guide_norog_fs",
+                                            "visibility_resolve", "visibility_lit_resolve",     "visibility_adaptive",
+                                            "visibility_tile",    "material_lighting_guides"};
+    for (const std::string& full : desc.functions) {
+        std::string f = full; // the exact-maths module ("phx_exact::" prefix) and the vertex-colour variants ("_vc" suffix) run it too
+        if (f.rfind("phx_exact::", 0) == 0) f = f.substr(11);
+        if (f.size() > 3 && f.compare(f.size() - 3, 3, "_vc") == 0) f.resize(f.size() - 3);
+        for (const char* n : names)
+            if (f == n) return true;
+    }
+    return false;
+}
+
+// The descriptor with SPECULAR_MS = 1 when the option is on and the pipeline runs shadeSurface (also applied to the generic variant a fallback
+// or the fallback decision looks for: the generic forward pipeline carries the constant too, or every request would look "not ready").
+static pipe::PipelineDesc withSpecularMsConstant(const pipe::PipelineDesc& desc, bool on) {
+    constexpr u16 kSpecularMsConstant = 25; // reserved SPECULAR_MS (shaders/variants.def)
+    if (!on || !runsShadeSurface(desc)) return desc;
+    for (u32 i = 0; i < desc.constantCount; ++i)
+        if (desc.constants[i].index == kSpecularMsConstant) return desc;
+    pipe::PipelineDesc out = desc;
+    out.constant(kSpecularMsConstant, pipe::ConstantType::UInt, 1u);
+    return out;
+}
+
+pipe::PipelineHandle PipelineCache::request(const pipe::PipelineDesc& requested, bool loading) {
+    const pipe::PipelineDesc patched = withSpecularMsConstant(requested, options_.specularMs);
+    const pipe::PipelineDesc& desc = patched;
     const Clock::time_point requestStart = Clock::now();
     struct AddTime {
         double& total;
@@ -443,7 +486,7 @@ pipe::PipelineHandle PipelineCache::request(const pipe::PipelineDesc& desc, bool
     // only where it buys something.  --debug-pipeline-fallback forces it.
     bool allowFallback = options_.fallbackOnly;
     if (!allowFallback && startupDone_ && !loading && desc.kind == pipe::PipelineKind::Render) {
-        const pipe::PipelineHandle generic = registry_.find(pipe::pipelineKey(desc.generic()));
+        const pipe::PipelineHandle generic = registry_.find(pipe::pipelineKey(withSpecularMsConstant(desc.generic(), options_.specularMs)));
         allowFallback = generic == pipe::INVALID_PIPELINE || !registry_.isFinal(generic);
     }
     submit(handle, desc, generation, library, allowFallback);
@@ -459,6 +502,17 @@ void PipelineCache::submit(pipe::PipelineHandle handle, const pipe::PipelineDesc
                    });
 }
 
+// DEBUG (env PHOSPHOR_LOG_COMPUTE_LIMITS=1): the register-pressure / occupancy proxy of every compute pipeline that is created.
+void PipelineCache::noteComputeLimits(const pipe::PipelineDesc& desc, const void* opaque) const {
+    static const bool enabled = std::getenv("PHOSPHOR_LOG_COMPUTE_LIMITS") != nullptr;
+    if (!enabled || desc.kind != pipe::PipelineKind::Compute || !opaque) return;
+    auto* state = static_cast<MTL::ComputePipelineState*>(static_cast<NS::Object*>(const_cast<void*>(opaque)));
+    std::string constants;
+    for (u32 i = 0; i < desc.constantCount; ++i) constants += " c" + std::to_string(desc.constants[i].index) + "=" + std::to_string(desc.constants[i].bits);
+    LOG_INFO("COMPUTE_LIMITS %s fn=%s maxThreads=%lu staticTG=%lu%s", desc.label.c_str(), desc.functions[0].c_str(),
+             (unsigned long)state->maxTotalThreadsPerThreadgroup(), (unsigned long)state->staticThreadgroupMemoryLength(), constants.c_str());
+}
+
 void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDesc& desc, u32 generation,
                             MTL::Library* library, bool allowFallback) {
     NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
@@ -472,6 +526,8 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
     // lookupArchives is an optional cache hint, whose hit state is not exposed.
     // Report the actual compiler API call below, never an inferred archive hit.
     if (serializer_ || linkedCompute) done.archive = pipe::ArchiveOutcome::NotTried;
+    // F15 closure (ticket 16): the "compiler calls" of a warm run are exactly these pipelines (RT kernels linking rt_alpha_*); name them.
+    if (linkedCompute) LOG_INFO("Pipeline linked compute (compiler by policy, never archived): %s", desc.label.c_str());
 
     // 1. Archive (F3.4): no compiler API invocation on a direct hit.
     if (archive_ && !options_.fallbackOnly && !linkedCompute) {
@@ -479,6 +535,7 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
         if (NS::Object* object = archiveLookup(desc, library, &error)) {
             done.object  = toOpaque(object);
             done.archive = pipe::ArchiveOutcome::Hit;
+            noteComputeLimits(desc, done.object);
             complete(done);
             pool->release();
             return;
@@ -492,7 +549,7 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
     if (allowFallback && render && !desc.isFlexible()) {
         u32 calls = 0;
         float ms = 0.0f;
-        const pipe::PipelineDesc generic = desc.generic();
+        const pipe::PipelineDesc generic = withSpecularMsConstant(desc.generic(), options_.specularMs);
         MTL::RenderPipelineState* base = flexibleBase(generic, library, calls, ms);
         if (base) {
             MTL4::PipelineDescriptor* d = buildDescriptor(generic, library);
@@ -501,7 +558,10 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
             MTL::RenderPipelineState* fallback = nullptr;
             {
                 PH_ZONE("Pipeline fallback specialise");
-                fallback = compiler_->newRenderPipelineStateBySpecialization(d, base, &error);
+                fallback = static_cast<MTL::RenderPipelineState*>(
+                    compileWithRetry(desc.label + " (fallback specialisation)", &error, [&](NS::Error** e) -> NS::Object* {
+                        return compiler_->newRenderPipelineStateBySpecialization(d, base, e);
+                    }));
             }
             ms += msSince(start);
             ++calls;
@@ -547,6 +607,7 @@ void PipelineCache::resolve(pipe::PipelineHandle handle, const pipe::PipelineDes
     done.compileMs     = msSince(start);
     done.compilerCalls = 1;
     if (!done.object) LOG_ERROR("Pipeline %s failed: %s", desc.label.c_str(), reason(error).c_str());
+    noteComputeLimits(desc, done.object);
     complete(done);
     pool->release();
 }
@@ -565,10 +626,49 @@ NS::Object* PipelineCache::compileFinal(const pipe::PipelineDesc& desc, MTL::Lib
             // autoreleased reference is drained by resolve()'s autorelease pool.
             task->setLookupArchives(NS::Array::array(archive_));
         }
-        object = compiler_->newComputePipelineState(static_cast<MTL4::ComputePipelineDescriptor*>(d.get()), task.get(), error);
+        object = compileWithRetry(desc.label, error, [&](NS::Error** e) -> NS::Object* {
+            return compiler_->newComputePipelineState(static_cast<MTL4::ComputePipelineDescriptor*>(d.get()), task.get(), e);
+        });
     } else {
-        object = compiler_->newRenderPipelineState(d.get(), nullptr, error);
+        object = compileWithRetry(desc.label, error, [&](NS::Error** e) -> NS::Object* {
+            return compiler_->newRenderPipelineState(d.get(), nullptr, e);
+        });
     }
+    return object;
+}
+
+NS::Object* PipelineCache::compileWithRetry(const std::string& label, NS::Error** error,
+                                            const std::function<NS::Object*(NS::Error**)>& call) {
+    NS::Object* object = nullptr;
+    std::string why;
+    u32 retry = 0;
+    pipe::retryTransientCompile(
+        pipe::COMPILE_RETRY_LIMIT, why,
+        [&](std::string& reasonOut) {
+            *error = nullptr;
+            object = nullptr;
+            // --debug-pipeline-xpc-fail: the first N compile attempts fail with the
+            // synthetic interruption, before the real compile call.
+            u32 budget = xpcFailBudget_.load();
+            while (budget > 0 && !xpcFailBudget_.compare_exchange_weak(budget, budget - 1)) {}
+            if (budget > 0) {
+                NS::Dictionary* info = NS::Dictionary::dictionary(str(pipe::TRANSIENT_COMPILER_ERROR_TEXT), NS::LocalizedDescriptionKey);
+                *error = NS::Error::error(str("PhosphorDebugCompiler"), 1, info);
+                reasonOut = reason(*error);
+                return false;
+            }
+            object = call(error);
+            if (!object) reasonOut = reason(*error);
+            return object != nullptr;
+        },
+        [&](u32 n, const std::string& text) {
+            retry = n;
+            registry_.noteCompileRetry();
+            LOG_WARN("Pipeline %s: compiler service interrupted, retry %u/%u (%s)", label.c_str(), n,
+                     pipe::COMPILE_RETRY_LIMIT, text.c_str());
+            std::this_thread::sleep_for(std::chrono::milliseconds(50u << (n - 1))); // 50, 100, 200 ms
+        });
+    (void)retry;
     return object;
 }
 

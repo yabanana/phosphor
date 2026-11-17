@@ -4,8 +4,13 @@
 #include "renderer/meshlet_builder.h"
 #include "renderer/gpu_types.h"
 #include "renderer/mesh_bounds.h"
+#include "renderer/material_description.h"
+#include "renderer/material_support.h"
 
 #include <glm/glm.hpp>
+#include <optional>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace phosphor {
@@ -36,7 +41,13 @@ public:
                           const std::vector<glm::vec3>& normals,
                           const std::vector<glm::vec4>& tangents,
                           const std::vector<glm::vec2>& uvs,
-                          const std::vector<u32>& indices);
+                          const std::vector<u32>& indices,
+                          const std::vector<glm::vec4>& colors = {});
+
+    /// F15 closure (COLOR_0): the per-vertex colour stream, parallel to vertices() (RGBA float, white for the vertices of meshes without
+    /// COLOR_0).  EMPTY until a mesh with COLOR_0 is uploaded: a scene without vertex colours has no stream, no buffer and no cost.
+    [[nodiscard]] const std::vector<glm::vec4>& vertexColors() const { return vertexColors_; }
+    [[nodiscard]] bool hasVertexColors() const { return !vertexColors_.empty(); }
 
     /// Replace the per-frame instance list.
     void updateInstances(const std::vector<GPUInstance>& instances);
@@ -53,6 +64,53 @@ public:
     /// Append one material to the shared library and return its index.
     /// Instances whose entity has no MaterialComponent index this library.
     u32 addMaterial(const GPUMaterial& material);
+
+    /// F15.1: append one material together with its description, name and
+    /// support report (kept in vectors parallel to the library).
+    u32 addMaterial(const GPUMaterial& material, MaterialDescription description, std::string name,
+                    MaterialSupportReport support);
+
+    /// F15.1: replace the description of a material and refresh the GPU base
+    /// record fields it describes: the parameters (the emissive factor is
+    /// clamped to >= 0 on the GPU; the description keeps the authored value),
+    /// the texture of every slot (a slot without a texture, e.g. one an
+    /// override removed, binds the documented default registered with
+    /// setBaseTextureDefaults, or INVALID_TEXTURE_INDEX = the shader fallback
+    /// when none was registered; a slot whose path is not resolved yet keeps
+    /// its current binding) and the double-sided flag (the other flags are
+    /// kept).  The material's support entry is recomputed from the new
+    /// description (its features are then sourced from the description file).
+    ///
+    /// Valid at any time (F15.1 ticket 05): after the scene store mirrors the
+    /// library the edit bumps materialEditVersion() and the store's next sync
+    /// re-derives the library records, which reach the GPU as material and
+    /// extension deltas.  Returns false when `index` is out of range.
+    bool setMaterialDescription(u32 index, const MaterialDescription& description);
+
+    /// Bindless textures a material slot falls back to without a texture (the
+    /// loader registers the texture manager's defaults; cleared by clear()).
+    void setBaseTextureDefaults(u32 white, u32 metallicRoughness, u32 normal);
+
+    /// Mark the material library as mirrored by the scene store: from now on
+    /// setMaterialDescription is rejected.  Called by the engine after the
+    /// store's first sync of a scene; clear() reopens the library.
+    void sealMaterialLibrary() { materialLibrarySealed_ = true; }
+    [[nodiscard]] bool materialLibrarySealed() const { return materialLibrarySealed_; }
+    /// Incremented by every successful setMaterialDescription (SceneStore diffs
+    /// the library when it changes).
+    [[nodiscard]] u64 materialEditVersion() const { return materialEditVersion_; }
+
+    /// Description, name and support report of material `index` (parallel to
+    /// materials(); default-constructed for materials added without them).
+    [[nodiscard]] const std::vector<MaterialDescription>&  materialDescriptions() const { return materialDescriptions_; }
+    [[nodiscard]] const std::vector<std::string>&          materialNames() const { return materialNames_; }
+    [[nodiscard]] const std::vector<MaterialSupportReport>& materialSupport() const { return materialSupport_; }
+    /// Index of the first material with this name.
+    [[nodiscard]] std::optional<u32> findMaterial(const std::string& name) const;
+
+    /// glTF `extensionsUsed` entries of loaded assets that are not understood.
+    void addAssetUnknownExtensions(const std::vector<std::string>& names);
+    [[nodiscard]] const std::vector<std::string>& assetUnknownExtensions() const { return assetUnknownExtensions_; }
 
     /// Kept for source compatibility with loaders: geometry is flushed by the
     /// backend when geometryVersion() changes, so this is a no-op.
@@ -88,6 +146,7 @@ public:
 private:
     std::vector<MeshLocalBounds> meshBounds_;      // parallel to meshInfos_
     std::vector<GPUVertex>     vertices_;
+    std::vector<glm::vec4>     vertexColors_; // parallel to vertices_ once any mesh has COLOR_0, else empty
     std::vector<u32>           indices_;          // mesh-local indices, offset by GPUMeshInfo
     std::vector<Meshlet>       meshlets_;
     std::vector<u32>           meshletVertices_;  // global vertex indices
@@ -97,6 +156,16 @@ private:
 
     std::vector<GPUInstance>   instances_;
     std::vector<GPUMaterial>   materials_;
+    u64                                materialEditVersion_ = 0;
+    std::vector<MaterialDescription>   materialDescriptions_; // parallel to materials_
+    std::vector<std::string>           materialNames_;        // parallel to materials_
+    std::vector<MaterialSupportReport> materialSupport_;      // parallel to materials_
+    std::unordered_map<std::string, u32> materialByName_;     // first material of each name
+    std::vector<std::string>           assetUnknownExtensions_;
+    struct BaseTextureDefaults {
+        u32 white = INVALID_TEXTURE_INDEX, metallicRoughness = INVALID_TEXTURE_INDEX, normal = INVALID_TEXTURE_INDEX;
+    } baseTextureDefaults_;
+    bool materialLibrarySealed_ = false;
     std::vector<GPULight>      lights_;
     std::vector<GPUSampledLight> sampledLights_;
 

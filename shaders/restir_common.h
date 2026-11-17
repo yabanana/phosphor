@@ -1,6 +1,24 @@
 #pragma once
 #include <metal_stdlib>
 #include "renderer/gpu_types.h"
+#include "materials/bsdf.h"
+#include "renderer/lobe_guide_pack.h"
+#include "texture_transform_core.h" // F15.1 (ticket 22): per-slot texture transforms of emitter surfaces
+#include "renderer/layer_blend.h"   // F15.4 (ticket 23): the coverage of a layer stack that is an emitter
+#include "layer_resolve.h"
+// F15.1 (ticket 07): the lobe-guide kernels are separate entry points ("<name>_lobe", compiled by
+// restir_di_lobe.metal / light_cluster_lobe.metal with PHOSPHOR_DI_LOBE, linked into the first material module) that always carry the reserved function
+// constant MATERIAL_FEATURES (22, shaders/variants.def).  Everything else, the base kernels included, never
+// references the constant: a compute function with an unresolved constant cannot be lowered into the pipeline archive
+// (metal-tt, measured), so the base DI descriptors stay constant-free and archived.
+#ifdef PHOSPHOR_DI_LOBE
+#define DI_KERNEL(name) name##_lobe
+#define DI_FN(name) name##_lobe // helpers whose body differs between the two modes: distinct symbols (no ODR merge)
+#include "pipeline/forward_variants.generated.metal.h" // kMaterialFeatures (constant 22); shared with the material module
+#else
+#define DI_KERNEL(name) name
+#define DI_FN(name) name
+#endif
 using namespace metal;
 using namespace phosphor;
 
@@ -94,7 +112,9 @@ inline DISample diSampleLight(GPUSampledLight l, float2 uv, float3 receiver) {
 // arithmetic. No camera derivatives exist on a sampled light surface.
 inline DISample diSampleTexturedLight(GPUSampledLight l, uint lightIndex, float2 uv, float3 receiver,
                                       const device GPUEmissiveSurface* emitters,
-                                      const device GPUMaterial* materials, const device DITextureHandle* textures) {
+                                      const device GPUMaterial* materials, const device DITextureHandle* textures,
+                                      const device GPUMaterialExtRecord* extensions = nullptr, // F15.1 (ticket 22): per-slot texture transforms
+                                      GPUVertexColorPtr vertexColors = nullptr) { // F15 closure (COLOR_0): the cut-out alpha of an emitter multiplies its vertex colour's alpha
     DISample s = diSampleLight(l, uv, receiver);
     if (!s.valid || l.type != DI_LIGHT_TRIANGLE || !(l.flags & DI_LIGHT_TEXTURED_EMISSION)) return s;
     const GPUEmissiveSurface emitter = emitters[lightIndex];
@@ -105,20 +125,34 @@ inline DISample diSampleTexturedLight(GPUSampledLight l, uint lightIndex, float2
                            root * (1.0f - uv.y) * float2(emitter.uv1[0], emitter.uv1[1]) +
                            root * uv.y * float2(emitter.uv2[0], emitter.uv2[1]);
     const half3 texel = m.emissiveTex == INVALID_TEXTURE_INDEX ? half3(1) :
-                        half3(textures[m.emissiveTex].tex.sample(kDIEmitterSampler, lightUV, level(0.0f)).rgb);
+                        half3(textures[m.emissiveTex].tex.sample(kDIEmitterSampler,
+                              texXfSlotUv(extensions, m.flags, m.textureTransformIndex, TT_SLOT_EMISSIVE, lightUV), level(0.0f)).rgb);
     s.radiance = float3(m.emissive[0], m.emissive[1], m.emissive[2]) * float3(texel);
     if (m.alphaCutoff > 0) {
         const half alphaTexel = m.baseColorTex == INVALID_TEXTURE_INDEX ? half(1) :
-                                half(textures[m.baseColorTex].tex.sample(kDIEmitterSampler, lightUV, level(0.0f)).a);
-        const float alpha = m.baseColor[3] * float(alphaTexel);
+                                half(textures[m.baseColorTex].tex.sample(kDIEmitterSampler,
+                                     texXfSlotUv(extensions, m.flags, m.textureTransformIndex, TT_SLOT_BASE_COLOR, lightUV), level(0.0f)).a);
+        // F15.4 (ticket 23): an emissive layer stack cuts the emitter out by its blended layer alpha, not by its own record's.
+        const float alpha = m.baseColor[3] * float(alphaTexel) *
+                            layerCoverage<DITextureHandle, LayerAlphaLevel0>(materials[emitter.materialIndex], materials, textures, lightUV,
+                                                                             float2(0.0f), float2(0.0f), extensions);
+        float colorAlpha = 1.0f;
+        if (vertexColors != nullptr && emitter.geometryValid != 0u)
+            colorAlpha = (vertexColors[emitter.vertex0] * (1.0f - root) + vertexColors[emitter.vertex1] * (root * (1.0f - uv.y)) +
+                          vertexColors[emitter.vertex2] * (root * uv.y)).a;
         if (!isfinite(alpha)) { s.valid = false; return s; }
-        if (alpha < m.alphaCutoff) s.radiance = float3(0);
+        if (alpha * colorAlpha < m.alphaCutoff) s.radiance = float3(0);
     }
     s.valid = all(isfinite(s.radiance)) && all(s.radiance >= 0);
     return s;
 }
 
 inline float3 diIncident(DISample s) { return s.valid ? s.radiance * s.geometry : float3(0); }
+// F15 closure (--specular-ms): the Kulla-Conty lobe of a base (dielectric/metal) pixel for one light sample (cosine included).
+inline float3 diMsBase(float3 albedo, float metallic, float roughness, float nv, float nl, float3 incident) {
+    const BsdfMs ms = bsdfMsPrepare(bsdfBaseF0(albedo, metallic), 1.0f, roughness, nv, phosphor::MsLogLossAvgTable, phosphor::MsLogLostTable);
+    return bsdfMsLobe(ms, nl, phosphor::MsLogLostTable) * incident * nl;
+}
 inline float3 diBRDFWeighted(GPUDISurface surface, DISample s, float specularWeight) {
     if (!surface.valid || !s.valid) return float3(0);
     float3 n = diVec(surface.shadingNormal), v = diVec(surface.viewDirection);
@@ -130,16 +164,200 @@ inline float3 diBRDFWeighted(GPUDISurface surface, DISample s, float specularWei
     const float nh = saturate(dot(n, h)), vh = saturate(dot(v, h));
     const float metallic = saturate(surface.metallic);
     const float3 albedo = max(diVec(surface.albedo), 0.0f);
-    const float a = max(surface.roughness * surface.roughness, 0.002f), a2 = a * a;
-    const float d = nh * nh * (a2 - 1.0f) + 1.0f;
-    const float distribution = a2 / (M_PI_F * d * d);
-    const float gv = nl * sqrt(nv * nv * (1.0f - a2) + a2), gl = nv * sqrt(nl * nl * (1.0f - a2) + a2);
-    const float smith = 0.5f / max(gv + gl, 1e-5f);
-    const float3 f0 = mix(float3(0.04f), albedo, metallic);
-    const float3 fresnel = f0 + (1.0f - f0) * pow(1.0f - vh, 5.0f);
-    const float3 result = ((1.0f - fresnel) * (1.0f - metallic) * albedo / M_PI_F +
-                           specularWeight * distribution * smith * fresnel) * diIncident(s) * nl;
+    const BsdfBaseLobes lobes =
+        bsdfBaseEval(nl, nv, nh, vh, albedo, metallic, bsdfAlpha(surface.roughness), specularWeight);
+    const float3 result = (lobes.diffuse + lobes.specular) * diIncident(s) * nl;
     return result; // caller MUST record nonfinite BEFORE any safe-output sanitization
+}
+// F15 closure (--specular-ms): the base expression above, UNTOUCHED (a branch inside it changed the compiler's association of the products in a few
+// pixels, measured), plus the multiple-scattering lobe; the callers select between the two functions, so the option off keeps the old code.
+inline float3 diBRDFWeightedMs(GPUDISurface surface, DISample s, float specularWeight) {
+    const float3 base = diBRDFWeighted(surface, s, specularWeight);
+    if (!surface.valid || !s.valid) return base;
+    float3 n = diVec(surface.shadingNormal), v = diVec(surface.viewDirection);
+    if (!all(isfinite(n)) || !all(isfinite(v)) || !(dot(n, n) > 0 && dot(v, v) > 0)) return base;
+    n = normalize(n); v = normalize(v);
+    const float nl = saturate(dot(n, s.wi)), nv = max(dot(n, v), 1e-4f);
+    if (!(nl > 0) || dot(v + s.wi, v + s.wi) <= 1e-20f) return base;
+    return base + diMsBase(max(diVec(surface.albedo), 0.0f), saturate(surface.metallic), surface.roughness, nv, nl, diIncident(s));
+}
+// F15.1 (ticket 07): lobe parameters of the destination pixel read from the lobe guide.  `extended` is false for
+// base pixels and, in the base kernels (no PHOSPHOR_DI_LOBE), always: the lobe code is not compiled in, so scenes
+// without features keep the base expressions bit for bit.
+struct DILobe {
+    float ior, specularFactor;
+    float3 specularColor;
+    bool extended;
+    // F15.1 (ticket 09): KHR_materials_clearcoat.  The coat normal is the guide's (the shading normal without the base normal map).
+    bool coat;
+    float coatFactor, coatRoughness;
+    float3 coatNormal;
+    // F15.1 (ticket 10): KHR_materials_sheen (roughness already clamped to [0.07, 1] by the producer).
+    bool sheen;
+    float3 sheenColor;
+    float sheenRoughness;
+    // F15.1 (ticket 11): KHR_materials_anisotropy.  The lobe direction T' is the guide's world direction (orthogonal to N up to the
+    // oct quantisation: bsdfAnisoFrame re-orthogonalises), the bitangent B' = cross(N, T') is built where the normal is known.
+    bool aniso;
+    float3 anisoDirection;
+    float anisoStrength;
+    // F15.1 (ticket 12): KHR_materials_iridescence.  The film (strength, ior, thickness in nm) replaces the Fresnel of the specular lobe at
+    // the V.H of each light sample (target and shading alike).
+    bool irid;
+    BsdfIrid iridParams;
+    // F15.1 (ticket 16): subsurface thin mode.  Lights on the back hemisphere light the pixel through the transmitted lobe (target and
+    // shading); the visibility ray already leaves from the light's side (diEndpointVisible flips the geometric normal towards the light).
+    bool thin;
+    BsdfThin thinParams;
+    // F15.1 (ticket 13): KHR_materials_transmission.  The diffuse base is mixed by 1 - t; a thin-walled surface (no volume thickness) also takes the
+    // delta lights behind it through the glTF thin BTDF (the area emitters behind it belong to the transport's straight/refracted rays).
+    bool trans;
+    float transFactor;
+    bool transThin;
+    // F15.1 (ticket 17, RT tier): the weight of a volumetric-subsurface pixel while the walk is effective (DI_SSS_WALK), 0 otherwise.
+    float sssWalk;
+    // F15 closure (--specular-ms): the Kulla-Conty multiple-scattering lobe (DI_SPECULAR_MS), set for base and extended pixels alike.
+    bool specularMs;
+};
+inline DILobe DI_FN(diLoadLobe)(constant GPUDIParams& p, const device GPULobeGuide* guides, uint index) {
+    DILobe l{};
+    l.specularMs = (p.flags & DI_SPECULAR_MS) != 0u;
+#ifdef PHOSPHOR_DI_LOBE
+    if ((kMaterialFeatures & LOBE_GUIDE_RESOLVED_FEATURES) != 0u && (p.flags & DI_LOBE_GUIDE_VALID) != 0u) {
+        const GPULobeGuide g = guides[index];
+        if ((g.features & LOBE_GUIDE_RESOLVED_FEATURES) != 0u) {
+            const LobeParams u = unpackLobeGuide(g); // neutral values (ior 1.5, specular 1) for a clear feature
+            l.ior = u.ior; l.specularFactor = u.specularFactor;
+            l.specularColor = float3(u.specularColor[0], u.specularColor[1], u.specularColor[2]);
+            l.extended = true;
+            if ((kMaterialFeatures & MATERIAL_FEATURE_CLEARCOAT) != 0u && (g.features & MATERIAL_FEATURE_CLEARCOAT) != 0u) {
+                l.coat = true;
+                l.coatFactor = u.clearcoatFactor; l.coatRoughness = u.clearcoatRoughness;
+                l.coatNormal = float3(u.clearcoatNormal[0], u.clearcoatNormal[1], u.clearcoatNormal[2]);
+            }
+            if ((kMaterialFeatures & MATERIAL_FEATURE_SHEEN) != 0u && (g.features & MATERIAL_FEATURE_SHEEN) != 0u) {
+                l.sheen = true;
+                l.sheenColor = float3(u.sheenColor[0], u.sheenColor[1], u.sheenColor[2]);
+                l.sheenRoughness = u.sheenRoughness;
+            }
+            if ((kMaterialFeatures & MATERIAL_FEATURE_ANISOTROPY) != 0u && (g.features & MATERIAL_FEATURE_ANISOTROPY) != 0u) {
+                l.aniso = true;
+                l.anisoStrength = u.anisotropyStrength;
+                l.anisoDirection = float3(u.anisotropyDirection[0], u.anisotropyDirection[1], u.anisotropyDirection[2]);
+            }
+            if ((kMaterialFeatures & MATERIAL_FEATURE_IRIDESCENCE) != 0u && (g.features & MATERIAL_FEATURE_IRIDESCENCE) != 0u) {
+                l.iridParams.strength = u.iridescenceFactor;
+                l.iridParams.ior = u.iridescenceIor;
+                l.iridParams.thickness = u.iridescenceThickness;
+                l.irid = bsdfIridActive(l.iridParams);
+            }
+            if ((kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u && (g.features & MATERIAL_FEATURE_SUBSURFACE) != 0u &&
+                (g.features & LOBE_GUIDE_FLAG_SUBSURFACE_VOLUMETRIC) == 0u) { // ticket 17: the volumetric mode is the screen-space diffusion, not a thin lobe
+                l.thinParams.weight = u.subsurfaceWeight;
+                l.thinParams.color = float3(u.subsurfaceColor[0], u.subsurfaceColor[1], u.subsurfaceColor[2]);
+                l.thin = bsdfThinActive(l.thinParams);
+            }
+            if ((kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u && (g.features & MATERIAL_FEATURE_SUBSURFACE) != 0u &&
+                (g.features & LOBE_GUIDE_FLAG_SUBSURFACE_VOLUMETRIC) != 0u && (p.flags & DI_SSS_WALK) != 0u)
+                l.sssWalk = saturate(u.subsurfaceWeight); // F15.1 (ticket 17, RT tier)
+            if ((kMaterialFeatures & MATERIAL_FEATURE_TRANSMISSION) != 0u && (g.features & MATERIAL_FEATURE_TRANSMISSION) != 0u && u.transmissionFactor > 0.0f) {
+                l.trans = true;
+                l.transFactor = u.transmissionFactor;
+                l.transThin = !((g.features & MATERIAL_FEATURE_VOLUME) != 0u && u.volumeThickness > 0.0f);
+            }
+        }
+    }
+#endif
+    return l;
+}
+// Same clamps and conventions as diBRDFWeighted; the emitter specular weight scales the specular lobe only.
+// F15.1 (ticket 09): `coatWeight` is the emitter share of the coat lobe (diEmitterCoatWeight; 1 for punctual lights).
+inline float3 DI_FN(diBRDFLobe)(GPUDISurface surface, DISample s, float specularWeight, DILobe lobe, float coatWeight = 1.0f) {
+#ifdef PHOSPHOR_DI_LOBE
+    if ((kMaterialFeatures & LOBE_GUIDE_RESOLVED_FEATURES) != 0u && lobe.extended) {
+        if (!surface.valid || !s.valid) return float3(0);
+        float3 n = diVec(surface.shadingNormal), v = diVec(surface.viewDirection);
+        if (!all(isfinite(n)) || !all(isfinite(v)) || !(dot(n, n) > 0 && dot(v, v) > 0)) return float3(0);
+        n = normalize(n); v = normalize(v);
+        const float nl = saturate(dot(n, s.wi)), nv = max(dot(n, v), 1e-4f);
+        const float3 incident = diIncident(s);
+        float3 result = float3(0);
+        if (nl > 0 && dot(v + s.wi, v + s.wi) > 1e-20f) {
+            const float3 h = normalize(v + s.wi);
+            const float nh = saturate(dot(n, h)), vh = saturate(dot(v, h));
+            const float metallic = saturate(surface.metallic);
+            const float3 albedo = max(diVec(surface.albedo), 0.0f);
+            const BsdfDielectricSpec spec = bsdfSpecularParams(lobe.ior, lobe.specularFactor, lobe.specularColor);
+            // F15.1 (ticket 11): the anisotropic D V of the guide's direction replaces the isotropic GGX.
+            BsdfBaseLobes lobes;
+            if ((kMaterialFeatures & MATERIAL_FEATURE_IRIDESCENCE) != 0u && lobe.irid) {
+                // F15.1 (ticket 12): the thin-film Fresnel at this sample's V.H with the (anisotropic or isotropic) D V of the lobe.
+                const float a = bsdfAlpha(surface.roughness);
+                const float dv = ((kMaterialFeatures & MATERIAL_FEATURE_ANISOTROPY) != 0u && lobe.aniso)
+                    ? bsdfAnisoDV(bsdfAnisoFrame(n, lobe.anisoDirection, surface.roughness, lobe.anisoStrength), v, s.wi, h, nl, nv, nh)
+                    : bsdfDGGX(nh, a) * bsdfVSmithGGXCorrelated(nv, nl, a);
+                lobes = bsdfSpecEvalIrid(spec, lobe.iridParams, dv, vh, albedo, metallic);
+            } else
+            lobes = ((kMaterialFeatures & MATERIAL_FEATURE_ANISOTROPY) != 0u && lobe.aniso)
+                ? bsdfSpecEvalAniso(spec, bsdfAnisoFrame(n, lobe.anisoDirection, surface.roughness, lobe.anisoStrength), v, s.wi, h, nl, nv, nh, vh,
+                                    albedo, metallic)
+                : bsdfSpecEval(spec, nl, nv, nh, vh, albedo, metallic, bsdfAlpha(surface.roughness));
+            if ((kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u && lobe.thin) lobes.diffuse *= bsdfThinReflectScale(lobe.thinParams);
+            // F15.1 (ticket 17, RT tier): the walk's next-event estimation owns the diffuse of the weight share for the analytic (delta) lights.
+            if ((kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u && lobe.sssWalk > 0.0f && s.delta) lobes.diffuse *= 1.0f - lobe.sssWalk;
+            if ((kMaterialFeatures & MATERIAL_FEATURE_TRANSMISSION) != 0u && lobe.trans) lobes.diffuse *= 1.0f - lobe.transFactor; // ticket 13
+            result = (lobes.diffuse + specularWeight * lobes.specular) * incident * nl;
+            // F15.1 (ticket 10): the sheen layer between the material and the coat.  The transport does not sample sheen: the
+            // emitter share of the sheen lobe is 1 (DI owns it), the material keeps its own emitter weights; the albedo
+            // scaling is the min form of the notes.
+            if ((kMaterialFeatures & MATERIAL_FEATURE_SHEEN) != 0u && lobe.sheen) {
+                const float scale = bsdfSheenScaleLight(lobe.sheenColor, lobe.sheenRoughness, nv, nl, phosphor::SheenTable);
+                result = result * scale + bsdfSheenLobe(lobe.sheenColor, lobe.sheenRoughness, nl, nv, nh) * incident * nl;
+            }
+            // F15 closure (--specular-ms): the multiple-scattering lobe of the material under the sheen (same scaling), before the coat attenuation.
+            if (lobe.specularMs && !((kMaterialFeatures & MATERIAL_FEATURE_ANISOTROPY) != 0u && lobe.aniso)) { // anisotropic lobes carry none (ADR-0007)
+                const float msRoughness = surface.roughness;
+                const BsdfMs ms = bsdfMsPrepare(mix(spec.f0, albedo, metallic), mix(spec.f90, 1.0f, metallic), msRoughness, nv,
+                                                phosphor::MsLogLossAvgTable, phosphor::MsLogLostTable);
+                float3 msValue = bsdfMsLobe(ms, nl, phosphor::MsLogLostTable) * incident * nl;
+                if ((kMaterialFeatures & MATERIAL_FEATURE_SHEEN) != 0u && lobe.sheen)
+                    msValue *= bsdfSheenScaleLight(lobe.sheenColor, lobe.sheenRoughness, nv, nl, phosphor::SheenTable);
+                result += msValue;
+            }
+        }
+        // Ticket 16: a light behind the surface (N.L < 0) lights it through the transmitted lobe, weighted by 1 - F(V.H) and |N.L|.
+        if ((kMaterialFeatures & MATERIAL_FEATURE_SUBSURFACE) != 0u && lobe.thin) {
+            const float nls = dot(n, s.wi);
+            if (nls < 0 && dot(v + s.wi, v + s.wi) > 1e-20f)
+                result = bsdfThinTransmitted(lobe.thinParams, saturate(dot(v, normalize(v + s.wi))), saturate(surface.metallic)) * incident * (-nls);
+        }
+        // Ticket 13: a DELTA light behind a thin-walled transmissive surface lights it through the glTF thin BTDF (bsdfThinGlassTransmitted).
+        if ((kMaterialFeatures & MATERIAL_FEATURE_TRANSMISSION) != 0u && lobe.trans && lobe.transThin && s.delta && dot(n, s.wi) < 0) {
+            const BsdfDielectricSpec spec = bsdfSpecularParams(lobe.ior, lobe.specularFactor, lobe.specularColor);
+            result = bsdfThinGlassTransmitted(spec, lobe.transFactor, saturate(surface.metallic), max(diVec(surface.albedo), 0.0f), n, v, s.wi,
+                                              bsdfAlpha(surface.roughness)) * incident;
+        }
+        if ((kMaterialFeatures & MATERIAL_FEATURE_CLEARCOAT) != 0u && lobe.coat) {
+            float3 nc = lobe.coatNormal;
+            if (!all(isfinite(nc)) || !(dot(nc, nc) > 0)) return float3(0);
+            nc = normalize(nc);
+            const float fc = bsdfCoatFresnel(abs(dot(nc, v))), ncl = saturate(dot(nc, s.wi)), ncv = max(dot(nc, v), 1e-4f);
+            result *= 1.0f - lobe.coatFactor * fc; // the material under the coat (emitter weights stay inside the lobes)
+            if (ncl > 0 && dot(v + s.wi, v + s.wi) > 1e-20f) {
+                const float3 h = normalize(v + s.wi);
+                result += (coatWeight * lobe.coatFactor * fc * bsdfCoatSpecular(ncl, ncv, saturate(dot(nc, h)), bsdfAlpha(lobe.coatRoughness)) * ncl) * incident;
+            }
+            // F15 closure (--specular-ms): the coat's own dielectric multiple-scattering lobe (not attenuated by the coat, like the coat lobe).
+            if (lobe.specularMs && ncl > 0) {
+                const BsdfMs msc = bsdfMsPrepare(float3(0.04f), 1.0f, lobe.coatRoughness, ncv, phosphor::MsLogLossAvgTable, phosphor::MsLogLostTable);
+                result += lobe.coatFactor * bsdfMsLobe(msc, ncl, phosphor::MsLogLostTable) * ncl * incident;
+            }
+        }
+        return result; // caller MUST record nonfinite BEFORE any safe-output sanitization
+    }
+#endif
+    if (lobe.specularMs) return diBRDFWeightedMs(surface, s, specularWeight);
+    return diBRDFWeighted(surface, s, specularWeight);
 }
 inline float3 diBRDF(GPUDISurface surface, DISample s) { return diBRDFWeighted(surface, s, 1.0f); }
 // Share of a light's specular lobe that primary DI owns (DI_REFLECTED_EMITTER_SPECULAR).
@@ -149,9 +367,18 @@ inline float diEmitterSpecularWeight(constant GPUDIParams& p, GPUSampledLight l,
     if (!(p.flags & DI_REFLECTED_EMITTER_SPECULAR) || l.type != DI_LIGHT_TRIANGLE) return 1.0f;
     return smoothstep(p.emitterSpecularLow, p.emitterSpecularHigh, surface.roughness);
 }
-inline float diTarget(GPUDISurface surface, DISample sample, float positiveFloor) {
+// F15.1 (ticket 09): the coat lobe's share of a sampled emitter (decision 06: the coat lobe's DI/RT emitter share uses the
+// coat roughness, the same smoothstep as the base lobe on the surface roughness).
+inline float DI_FN(diEmitterCoatWeight)(constant GPUDIParams& p, GPUSampledLight l, DILobe lobe) {
+#ifdef PHOSPHOR_DI_LOBE
+    if (lobe.coat && (p.flags & DI_REFLECTED_EMITTER_SPECULAR) && l.type == DI_LIGHT_TRIANGLE)
+        return smoothstep(p.emitterSpecularLow, p.emitterSpecularHigh, lobe.coatRoughness);
+#endif
+    return 1.0f;
+}
+inline float DI_FN(diTarget)(GPUDISurface surface, DISample sample, float positiveFloor, DILobe lobe) {
     if (!sample.valid || !isfinite(positiveFloor) || !(positiveFloor > 0)) return 0;
-    const float3 value=diBRDF(surface,sample);
+    const float3 value=DI_FN(diBRDFLobe)(surface,sample,1.0f,lobe);
     if(!all(isfinite(value)))return as_type<float>(0x7fc00000u);
     return max(diLuminance(value),positiveFloor);
 }
@@ -228,10 +455,10 @@ inline bool diCompatible(GPUDISurface a, GPUDISurface b, constant GPUDIParams& p
     const float tolerance = p.depthRelativeThreshold * max(a.depth, b.depth);
     return abs(a.depth - b.depth) <= tolerance && abs(dot(bp - ap, normalize(an))) <= tolerance;
 }
-inline bool diMerge(thread GPUDIReservoir& r, GPUDIReservoir source, GPUDISurface destination,
+inline bool DI_FN(diMerge)(thread GPUDIReservoir& r, GPUDIReservoir source, GPUDISurface destination,
                      GPUSampledLight light, constant GPUDIParams& p, float random, bool advanceAge,
                      const device GPUEmissiveSurface* emitters,
-                     const device GPUMaterial* materials, const device DITextureHandle* textures) {
+                     const device GPUMaterial* materials, const device DITextureHandle* textures, DILobe lobe) {
     const bool zero = diZeroProposal(source,p);
     if (!zero && !diReusable(source, light, p)) return false;
     // Bounds the complete history chain independently of which endpoint wins.
@@ -245,8 +472,8 @@ inline bool diMerge(thread GPUDIReservoir& r, GPUDIReservoir source, GPUDISurfac
         return accepted;
     }
     const DISample sample = diSampleTexturedLight(light, source.lightIndex, float2(source.u, source.v),
-                                                 diVec(destination.position), emitters, materials, textures);
-    source.target = diTarget(destination, sample, p.targetFloor);
+                                                 diVec(destination.position), emitters, materials, textures, p.materialExtensions, p.vertexColors);
+    source.target = DI_FN(diTarget)(destination, sample, p.targetFloor, lobe);
     const bool accepted = diStream(r, source, source.target * source.normalization * float(m), m, random);
     if (accepted) r.age = mergedAge; // A fresh selection must not rejuvenate old mass.
     return accepted;

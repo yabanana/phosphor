@@ -1,9 +1,13 @@
 #include <metal_stdlib>
 #include "renderer/gpu_types.h"
 #include "renderer/shadow_dispatch.h"
+#include "renderer/shadow_math.h"
 #include "renderer/meshlet_layout.h"
 using namespace metal;
 using namespace phosphor;
+#include "texture_transform_core.h" // F15.1 (ticket 22): the base colour slot transform of the cache alpha test
+#include "renderer/layer_blend.h"   // F15.4 (ticket 23): the stack coverage of the alpha test
+#include "layer_resolve.h"
 
 // F10.5 adds buffer18 GPUShadowCacheParams, 19 CPU conservative static class,
 // 20 expected GPUShadowCacheTile[64], 21 persistent GPUShadowCacheTile[64].
@@ -29,6 +33,13 @@ static float3 cacheWorld(const device GPUInstance& i,const device GPUVertex& v) 
            float3(m[8],m[9],m[10])*v.pz+float3(m[12],m[13],m[14]);
 }
 struct CacheDepthOut { float4 position [[position]]; float2 uv; uint material [[flat]]; };
+// F15 closure (ticket 15): with a transmittance map (SHADOW_FLAG_TRANSMITTANCE_MAP) the transmissive casters leave the static and dynamic depth
+// the cache composes (they draw into the uncached transmittance map, as on the non-cache path); without it every caster stays opaque as before.
+static bool cacheTransmitCaster(constant GPUShadowParams& p,const device GPUMaterial* materials,uint materialIndex) {
+    if(!(p.flags&SHADOW_FLAG_TRANSMITTANCE_MAP) || materialIndex>=p.materialCount) return false;
+    const device GPUMaterial& m=materials[materialIndex];
+    return shadowCasterTransmissive(m.flags,m.extensionIndex,m.alphaCutoff);
+}
 static bool cacheCaster(uint slot,constant GPUShadowParams& p,constant GPUShadowCacheParams& cache,
                          const device uint* flags,const device uint* classifications) {
     if(slot>=p.slotCount || p.cascadeIndex>=4 || !(flags[slot]&(1u<<p.cascadeIndex))) return false;
@@ -41,12 +52,14 @@ static CacheDepthOut cacheVertex(const device GPUVertex& v,const device GPUInsta
 vertex CacheDepthOut shadow_cache_depth_vertex(uint vertexId [[vertex_id]],uint instance [[instance_id]],
     constant GPUShadowParams& p [[buffer(1)]],const device GPUInstance* instances [[buffer(3)]],
     const device GPUVertex* vertices [[buffer(6)]],const device uint* flags [[buffer(14)]],
-    constant GPUShadowCacheParams& cache [[buffer(18)]],const device uint* classifications [[buffer(19)]]) {
+    constant GPUShadowCacheParams& cache [[buffer(18)]],const device uint* classifications [[buffer(19)]],
+    const device GPUMaterial* materials [[buffer(16)]]) {
     CacheDepthOut invalid{};invalid.position=float4(2,2,0,1);
     const uint slot=shadowDrawSlot(p.casterSlot,instance,p.slotCount);
     if(!cacheCaster(slot,p,cache,flags,classifications)) return invalid;
     const device GPUInstance& i=instances[slot];
-    if(!(i.flags&INSTANCE_FLAG_VALID) || !(i.flags&2u) || i.meshIndex!=p.pad || i.materialIndex>=p.materialCount) return invalid;
+    if(!(i.flags&INSTANCE_FLAG_VALID) || !(i.flags&2u) || i.meshIndex!=p.pad || i.materialIndex>=p.materialCount ||
+        cacheTransmitCaster(p,materials,i.materialIndex)) return invalid;
     return cacheVertex(vertices[vertexId],i,p);
 }
 using CacheMesh=metal::mesh<CacheDepthOut,void,MESHLET_MESH_GROUP,MESHLET_MESH_GROUP,topology::triangle>;
@@ -56,14 +69,14 @@ using CacheMesh=metal::mesh<CacheDepthOut,void,MESHLET_MESH_GROUP,MESHLET_MESH_G
     const device GPUVertex* vertices [[buffer(6)]],const device GPUMeshlet* meshlets [[buffer(7)]],
     const device uint* vertexIndices [[buffer(8)]],const device uchar* triangles [[buffer(9)]],
     const device uint* flags [[buffer(14)]],constant GPUShadowCacheParams& cache [[buffer(18)]],
-    const device uint* classifications [[buffer(19)]]) {
+    const device uint* classifications [[buffer(19)]],const device GPUMaterial* materials [[buffer(16)]]) {
     const uint slot=shadowDrawSlot(p.casterSlot,group.y,p.slotCount);
     const uint meshlet=shadowDrawMeshlet(p.meshletFirst,group.x,p.meshletCount);
     bool valid=cacheCaster(slot,p,cache,flags,classifications);
     if(valid) {
         const device GPUInstance& i=instances[slot];
         valid=(i.flags&INSTANCE_FLAG_VALID) && (i.flags&2u) && i.meshIndex==p.pad &&
-              i.meshIndex<p.meshCount && i.materialIndex<p.materialCount;
+              i.meshIndex<p.meshCount && i.materialIndex<p.materialCount && !cacheTransmitCaster(p,materials,i.materialIndex);
         if(valid) { const device GPUMeshInfo& m=meshes[i.meshIndex];valid=meshlet>=m.meshletOffset && meshlet-m.meshletOffset<m.meshletCount; }
     }
     if(!valid) { if(tid==0)out.set_primitive_count(0);return; }
@@ -76,14 +89,73 @@ using CacheMesh=metal::mesh<CacheDepthOut,void,MESHLET_MESH_GROUP,MESHLET_MESH_G
 struct CacheTexture { texture2d<float> tex; };
 fragment void shadow_cache_depth_fragment(CacheDepthOut in [[stage_in]],
     const device GPUMaterial* materials [[buffer(16)]],const device CacheTexture* textures [[buffer(17)]],
-    constant GPUShadowCacheParams& cache [[buffer(18)]]) {
+    constant GPUShadowCacheParams& cache [[buffer(18)]],
+    const device GPUMaterialExtRecord* extensions [[buffer(22)]]) { // F15.1 (ticket 22): the base colour slot's transform
     const uint tile=cacheTile(uint2(in.position.xy),cache.resolution);
     if(cache.casterClass==0 && !cacheBit(cache.currentLo,cache.currentHi,tile))discard_fragment();
     const device GPUMaterial& m=materials[in.material];
     if(m.alphaCutoff>0) {
         constexpr sampler alphaSampler(filter::linear,mip_filter::linear,address::repeat);
         float alpha=m.baseColor[3];
-        if(m.baseColorTex!=INVALID_TEXTURE_INDEX)alpha*=float(half(textures[m.baseColorTex].tex.sample(alphaSampler,in.uv,level(0)).a));
+        if(m.baseColorTex!=INVALID_TEXTURE_INDEX)alpha*=float(half(textures[m.baseColorTex].tex.sample(alphaSampler,texXfSlotUv(extensions,m.flags,m.textureTransformIndex,TT_SLOT_BASE_COLOR,in.uv),level(0)).a));
+        alpha*=layerCoverage<CacheTexture,LayerAlphaLevel0>(m,materials,textures,in.uv,float2(0.0f),float2(0.0f),extensions); // F15.4 (ticket 23)
+        if(alpha<m.alphaCutoff)discard_fragment();
+    }
+}
+
+// F15 closure (COLOR_0): the vertex-colour twins of the regional cache casters (see shadows.metal).
+struct CacheDepthOutVC { float4 position [[position]]; float2 uv; uint material [[flat]]; float4 color; };
+static CacheDepthOutVC cacheVC(CacheDepthOut b,float4 color) { CacheDepthOutVC o; o.position=b.position; o.uv=b.uv; o.material=b.material; o.color=color; return o; }
+using CacheMeshVC=metal::mesh<CacheDepthOutVC,void,MESHLET_MESH_GROUP,MESHLET_MESH_GROUP,topology::triangle>;
+vertex CacheDepthOutVC shadow_cache_depth_vertex_vc(uint vertexId [[vertex_id]],uint instance [[instance_id]],
+    constant GPUShadowParams& p [[buffer(1)]],const device GPUInstance* instances [[buffer(3)]],
+    const device GPUVertex* vertices [[buffer(6)]],const device uint* flags [[buffer(14)]],
+    constant GPUShadowCacheParams& cache [[buffer(18)]],const device uint* classifications [[buffer(19)]],
+    const device GPUMaterial* materials [[buffer(16)]]) {
+    CacheDepthOutVC invalid{};invalid.position=float4(2,2,0,1);
+    const uint slot=shadowDrawSlot(p.casterSlot,instance,p.slotCount);
+    if(!cacheCaster(slot,p,cache,flags,classifications)) return invalid;
+    const device GPUInstance& i=instances[slot];
+    if(!(i.flags&INSTANCE_FLAG_VALID) || !(i.flags&2u) || i.meshIndex!=p.pad || i.materialIndex>=p.materialCount ||
+        cacheTransmitCaster(p,materials,i.materialIndex)) return invalid;
+    return cacheVC(cacheVertex(vertices[vertexId],i,p),p.vertexColors[vertexId]);
+}
+[[mesh]] void shadow_cache_depth_mesh_vc(CacheMeshVC out,uint tid [[thread_index_in_threadgroup]],
+    uint2 group [[threadgroup_position_in_grid]],constant GPUShadowParams& p [[buffer(1)]],
+    const device GPUInstance* instances [[buffer(3)]],const device GPUMeshInfo* meshes [[buffer(5)]],
+    const device GPUVertex* vertices [[buffer(6)]],const device GPUMeshlet* meshlets [[buffer(7)]],
+    const device uint* vertexIndices [[buffer(8)]],const device uchar* triangles [[buffer(9)]],
+    const device uint* flags [[buffer(14)]],constant GPUShadowCacheParams& cache [[buffer(18)]],
+    const device uint* classifications [[buffer(19)]],const device GPUMaterial* materials [[buffer(16)]]) {
+    const uint slot=shadowDrawSlot(p.casterSlot,group.y,p.slotCount);
+    const uint meshlet=shadowDrawMeshlet(p.meshletFirst,group.x,p.meshletCount);
+    bool valid=cacheCaster(slot,p,cache,flags,classifications);
+    if(valid) {
+        const device GPUInstance& i=instances[slot];
+        valid=(i.flags&INSTANCE_FLAG_VALID) && (i.flags&2u) && i.meshIndex==p.pad &&
+              i.meshIndex<p.meshCount && i.materialIndex<p.materialCount && !cacheTransmitCaster(p,materials,i.materialIndex);
+        if(valid) { const device GPUMeshInfo& m=meshes[i.meshIndex];valid=meshlet>=m.meshletOffset && meshlet-m.meshletOffset<m.meshletCount; }
+    }
+    if(!valid) { if(tid==0)out.set_primitive_count(0);return; }
+    const GPUMeshlet m=meshlets[meshlet];
+    if(m.vertexCount>MESHLET_MESH_GROUP || m.triangleCount>MESHLET_MESH_GROUP) {if(tid==0)out.set_primitive_count(0);return;}
+    if(tid==0)out.set_primitive_count(m.triangleCount);
+    if(tid<m.vertexCount)out.set_vertex(tid,cacheVC(cacheVertex(vertices[vertexIndices[m.vertexOffset+tid]],instances[slot],p),p.vertexColors[vertexIndices[m.vertexOffset+tid]]));
+    if(tid<m.triangleCount)for(uint k=0;k<3;++k)out.set_index(3u*tid+k,triangles[m.triangleOffset+3u*tid+k]);
+}
+fragment void shadow_cache_depth_fragment_vc(CacheDepthOutVC in [[stage_in]],
+    const device GPUMaterial* materials [[buffer(16)]],const device CacheTexture* textures [[buffer(17)]],
+    constant GPUShadowCacheParams& cache [[buffer(18)]],
+    const device GPUMaterialExtRecord* extensions [[buffer(22)]]) { // F15.1 (ticket 22): the base colour slot's transform
+    const uint tile=cacheTile(uint2(in.position.xy),cache.resolution);
+    if(cache.casterClass==0 && !cacheBit(cache.currentLo,cache.currentHi,tile))discard_fragment();
+    const device GPUMaterial& m=materials[in.material];
+    if(m.alphaCutoff>0) {
+        constexpr sampler alphaSampler(filter::linear,mip_filter::linear,address::repeat);
+        float alpha=m.baseColor[3];
+        if(m.baseColorTex!=INVALID_TEXTURE_INDEX)alpha*=float(half(textures[m.baseColorTex].tex.sample(alphaSampler,texXfSlotUv(extensions,m.flags,m.textureTransformIndex,TT_SLOT_BASE_COLOR,in.uv),level(0)).a));
+        alpha*=layerCoverage<CacheTexture,LayerAlphaLevel0>(m,materials,textures,in.uv,float2(0.0f),float2(0.0f),extensions); // F15.4 (ticket 23)
+        alpha*=in.color.a; // F15 closure (COLOR_0)
         if(alpha<m.alphaCutoff)discard_fragment();
     }
 }

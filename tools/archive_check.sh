@@ -6,9 +6,13 @@
 # Every scenario runs bench 1 under Metal API + shader validation with an
 # explicit --pipeline-archive, parses the app's PIPELINES line (requests,
 # archive hits / misses / unavailable, compiler calls), compares the capture
-# with the visual_check reference (0 pixels may differ: a miss or an
-# unavailable archive only changes HOW a pipeline is obtained, never the
-# image) and counts unexpected log lines (must be 0).
+# with a baseline captured in the SAME mode without any archive (0 pixels
+# may differ: a miss or an unavailable archive only changes HOW a pipeline is
+# obtained, never the image) and counts unexpected log lines (must be 0).
+# The visual_check reference (taken under shader validation) is compared
+# with that baseline for information only: shader-validation instrumentation
+# may change a few pixels by one LSB (measured F15, 2026-11-13: bench 1,
+# 12 px, max delta 1; docs/research/2026-11-13-f15-shader-validation-constant-arrays.md).
 #
 # Scenarios (all archives are built here with metal-tt from the build's
 # substituted pipelines script, $build/shaders/pipelines.mtl4-json):
@@ -55,6 +59,15 @@ for f in "$script_json" "$metallib" "$full_archive" "$ref_dir/bench1.png"; do
 done
 rm -rf "$out_dir"
 mkdir -p "$out_dir"
+# Same-mode baseline: API validation only, no archive (every pipeline compiled).  --pipeline-sync: the
+# baseline is always drawn with the final pipelines.  Without it, under machine load, the forward variant
+# could still be compiling at the capture frame and the generic fallback drew the baseline (9 px of delta 1 on
+# bench 1, the F3.3 generic-vs-variant codegen difference; F15 ticket 24, 2026-11-15).
+baseline="$out_dir/baseline-noarchive.png"
+MTL_DEBUG_LAYER=1 MTL_DEBUG_LAYER_WARNING_MODE=nslog \
+    "$app" --bench 1 --warmup "$warmup" --frames 1 --no-ui --fixed-timestep --no-pipeline-archive --pipeline-sync \
+    --capture "$baseline" >"$out_dir/baseline-noarchive.log" 2>&1 || { echo "error: baseline capture failed" >&2; exit 2; }
+echo "baseline vs visual_check reference (cross-mode, information only): $("$diff_tool" "$ref_dir/bench1.png" "$baseline" 2>&1 | tail -1)"
 # Absolute paths: metal-tt resolves the library path in the script.
 metallib=$(cd "$(dirname "$metallib")" && pwd)/$(basename "$metallib")
 
@@ -100,11 +113,24 @@ run_case() {
     # "Validation Enabled" banners is a problem.  A rejected archive may be
     # reported by the app as a warning mentioning the archive: tolerated only
     # in the scenarios that expect a rejection.
-    local ignore='^\[INFO\]|^BENCH|^SCENE|^EXIT 0$|^MESHLET |^PIPELINES|^STARTUP|^SWITCH|^GRAPH-TRANSIENTS|^ASYNC-COMPUTE|Validation Enabled'
+    local ignore='^\[INFO\]|^BENCH|^SCENE|^EXIT 0$|^MESHLET |^PIPELINES|^STARTUP|^SWITCH|^GRAPH-TRANSIENTS|^ASYNC-COMPUTE|Validation Enabled|^\[WARN\].*compiler service interrupted, retry'
     [[ $allow_warn == 1 ]] && ignore="$ignore|^\[WARN\].*[Aa]rchive"
     messages=$(grep -Ev "$ignore" "$log" | grep -c . || true)
+    # The scenario run itself is asynchronous (its counters are what is checked).  When a fallback object drew
+    # any frame (PIPELINES "fallbacks F (draws D)" with D > 0: a missed or unavailable pipeline still compiling
+    # at the capture frame), its image depends on compile timing, so the pixels are compared on a second,
+    # synchronous capture of the same scenario (archive hits still come from the archive).
+    local fallback_draws
+    fallback_draws=$(sed -nE 's/.*fallbacks [0-9]+ \(draws ([0-9]+)\).*/\1/p' <<<"$line")
+    if [[ -n "$fallback_draws" && "$fallback_draws" != 0 ]]; then
+        MTL_DEBUG_LAYER=1 MTL_DEBUG_LAYER_WARNING_MODE=nslog \
+            "$app" --bench 1 --warmup "$warmup" --frames 1 --no-ui --fixed-timestep \
+            --pipeline-archive "$archive" "$@" --pipeline-sync --capture "$out_dir/$name-sync.png" >"$out_dir/$name-sync.log" 2>&1 || status=$?
+        capture="$out_dir/$name-sync.png"
+        echo "    ($name: $fallback_draws fallback draws in the asynchronous run; pixels compared on the synchronous capture)"
+    fi
     diff_ok=1
-    pixels=$("$diff_tool" "$ref_dir/bench1.png" "$capture" --diff "$out_dir/$name-diff.png" 2>&1) || diff_ok=0
+    pixels=$("$diff_tool" "$baseline" "$capture" --diff "$out_dir/$name-diff.png" 2>&1) || diff_ok=0
 }
 
 # verdict NAME DETAILS [failure reasons...]: prints PASS/FAIL for the last run.
@@ -113,7 +139,7 @@ verdict() {
     [[ $status -eq 0 ]] || problems+=("exit status $status")
     [[ $messages -eq 0 ]] || problems+=("$messages unexpected log lines (see $out_dir/$name.log)")
     [[ $requests != '?' ]] || problems+=("no PIPELINES line in the log")
-    [[ $diff_ok -eq 1 ]] || problems+=("capture differs from the reference: $pixels")
+    [[ $diff_ok -eq 1 ]] || problems+=("capture differs from the same-mode no-archive baseline: $pixels")
     local summary="requests $requests hits $hits misses $misses unavailable $unavailable compiler calls $compiler_calls; $details"
     if [[ ${#problems[@]} -eq 0 ]]; then
         echo "$name: PASS ($summary)"
@@ -200,6 +226,10 @@ stale_dir="$out_dir/stale"
 mkdir -p "$stale_dir"
 cp "$repo_dir"/shaders/*.metal "$stale_dir/"
 cp "$repo_dir"/shaders/*.h "$stale_dir/"
+# Textual includes other than headers (F15 COLOR_0: forward_surface.inc / forward_plain.inc instantiate the forward stages twice).
+for inc in "$repo_dir"/shaders/*.inc; do [[ -e "$inc" ]] && cp "$inc" "$stale_dir/"; done
+# Shader headers in subdirectories (F15: shaders/materials/).
+for sub in "$repo_dir"/shaders/*/; do cp -R "${sub%/}" "$stale_dir/"; done
 if ! sed -i.bak 's/float3(0\.30, 0\.36, 0\.45)/float3(0.31, 0.36, 0.45)/' "$stale_dir/material_shading.h" \
     || cmp -s "$stale_dir/material_shading.h" "$repo_dir/shaders/material_shading.h"; then
     echo "d-stale: FAIL (could not modify the material constant; update this script)"
@@ -208,12 +238,18 @@ else
     rm -f "$stale_dir/material_shading.h.bak"
     target=$(sed -nE 's/^CMAKE_OSX_DEPLOYMENT_TARGET:[A-Z]+=(.*)$/\1/p' "$build_dir/CMakeCache.txt")
     airs=()
+    # Like App.cmake: the sources material_passes.metal includes (forward, visibility resolve and, since F15
+    # ticket 07, the lobe-guide DI kernels) are compiled only through it.
+    included=" $(sed -nE 's/^#include "([a-z_]+\.metal)".*/\1/p' "$stale_dir/material_passes.metal" | tr '\n' ' ')"
     for src in "$stale_dir/material_passes.metal" "$stale_dir"/*.metal; do
         name=$(basename "$src")
-        [[ $name == forward.metal || $name == visibility_resolve.metal ]] && continue
+        [[ $included == *" $name "* ]] && continue
         [[ $name == material_passes.metal && ${#airs[@]} -gt 0 ]] && continue
+        # Per-module extra flags, as App.cmake PHOSPHOR_METAL_EXTRA_FLAGS_<name> (F15.2 ticket 21: the exact-maths resolve module).
+        extra=()
+        [[ $name == material_passes_exact.metal ]] && extra=(-fmetal-math-mode=safe -DPHOSPHOR_EXACT_MODULE=1 -Wno-modules-import-nested-redundant)
         xcrun -sdk macosx metal -std=metal4.0 "-mmacosx-version-min=${target:-26.0}" \
-            -I "$repo_dir/src" -I "$build_dir/generated" -Wall -fpreserve-invariance -c "$src" -o "${src%.metal}.air" >"$src.log" 2>&1 \
+            -I "$repo_dir/src" -I "$build_dir/generated" -Wall -fpreserve-invariance ${extra[@]+"${extra[@]}"} -c "$src" -o "${src%.metal}.air" >"$src.log" 2>&1 \
             || { echo "error: compiling $src failed:" >&2; cat "$src.log" >&2; exit 2; }
         airs+=("${src%.metal}.air")
     done

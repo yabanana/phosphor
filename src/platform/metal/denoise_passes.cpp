@@ -2,6 +2,7 @@
 #include "renderer/denoise_history_layout.h"
 #include "platform/metal/lighting_dispatch.h"
 #include "platform/metal/metal_graph_executor.h"
+#include "platform/metal/feature_pipelines.h"
 #include "rendergraph/pass_context.h"
 #include "core/log.h"
 #include <array>
@@ -18,8 +19,13 @@ struct DenoisePasses::Impl {
     MetalContext& c;PipelineCache& pipelines;LaunchOptions options;DenoiseSettings settings;
     ShadowPasses::Frame frame{};u64 epoch=0,graphVersion=1;
     bool diagnosticHistory=false,diagnosticEndpoints=false,diagnosticReference=false,diagnosticGuide4Reference=false,diagnosticGeneric=false;
-    struct Kernels {pipe::PipelineHandle temporal{},atrous{},guide4{},checker{};std::array<pipe::PipelineHandle,2> tiled{};};
+    struct Kernels {pipe::PipelineHandle temporal{},atrous{},guide4{},checker{},norm{},energy{};std::array<pipe::PipelineHandle,2> tiled{};};
     std::array<Kernels,Signals> kernels{};
+    // F15.1 (ticket 08): lobe-contract variants of the specular kernels ("<name>_lobe", shaders/denoise.metal), specialised by the
+    // scene feature union (FeaturePipelines slots 214..218).  The five switch together: lobeActive is true only when all of them are
+    // served by lobe variants (history keys written by one kernel are read by the others).  Scenes without features never request them.
+    FeaturePipelines features;u32 lobeMask=0;bool lobeWanted=false,lobeActive=false,lobeLogged=false;u32 lobeDiagnostic=0;
+    struct LobeKernels {pipe::PipelineHandle temporal{},atrous{},guide4{};std::array<pipe::PipelineHandle,2> tiled{};} lobeKernels;
     pipe::PipelineHandle clear{},corrupt{},poisonNext{};
     std::array<pipe::PipelineHandle,2> diffuse4{};
     bool diagnosticUnbatched=false;
@@ -29,10 +35,10 @@ struct DenoisePasses::Impl {
     struct Age {u64 frame=~u64{0};u32 frames=0;}; // frames accumulated since the last reset, including that frame
     std::array<std::array<Age,Signals>,Views> ages{};
     struct Content {u64 scene=0,external=0,revision=0;bool operator==(const Content&)const=default;};
-    struct History {MTL::Buffer* pair[2]{};u64 capacity=0,contentEpoch=0;u32 lastWritten=0;Content content{};bool contentKnown=false;};
+    struct History {MTL::Buffer* pair[2]{};u64 capacity=0,contentEpoch=0;u32 lastWritten=0;Content content{};bool contentKnown=false;bool endpoint=false;};
     std::array<std::array<History,Signals>,Views> histories{};
     struct SlotSignal {
-        std::array<MTL4::ArgumentTable*,MaxAtrous+5> tables{};
+        std::array<MTL4::ArgumentTable*,2*MaxAtrous+5> tables{}; // [MaxAtrous+5+i]: the energy experiment's weight-sum pass of iteration i
         MTL::Buffer* check=nullptr;bool used=false;u32 expected=0;
         struct Checkpoint {
             u64 frame=0;u32 view=0,pixels=0,epoch=0,revision=0,atrousIterations=0;
@@ -45,8 +51,9 @@ struct DenoisePasses::Impl {
         u32 readSide=0,writeSide=1;
         GPUDenoiseParams params{};MTL::GPUAddress address=0;
         std::array<MTL::GPUAddress,MaxAtrous> atrousAddress{};
-        rg::BufferRef previous{},next{},counts{},surface{},metadata{};
+        rg::BufferRef previous{},next{},counts{},surface{},metadata{},lobeGuide{};
         rg::TextureRef raw{},motion{},temporalOutput{},moments{},filtered{};
+        std::array<rg::TextureRef,MaxAtrous> atrousNorm{};
         std::array<rg::TextureRef,MaxAtrous> atrousInput{},atrousOutput{};
     };
     std::array<Signal,Signals> signal{};
@@ -64,6 +71,13 @@ struct DenoisePasses::Impl {
             diagnosticReference=true;
         if(const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_DENOISE_GUIDE4_REFERENCE");value&&std::strcmp(value,"1")==0)
             diagnosticGuide4Reference=true;
+        if(const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_DENOISE_LOBE")){
+            if(std::strcmp(value,"stripes")==0)lobeDiagnostic=DENOISE_DIAGNOSTIC_LOBE_STRIPES;
+            else if(std::strcmp(value,"flip")==0)lobeDiagnostic=DENOISE_DIAGNOSTIC_LOBE_FLIP;
+            else if(std::strcmp(value,"reflect-axis")==0)lobeDiagnostic=DENOISE_DIAGNOSTIC_LOBE_REFLECT_AXIS;
+            else throw std::invalid_argument("PHOSPHOR_DIAGNOSTIC_DENOISE_LOBE must be stripes, flip or reflect-axis");
+            if(!o.debugLighting)throw std::invalid_argument("PHOSPHOR_DIAGNOSTIC_DENOISE_LOBE requires --debug-lighting N");
+        }
         LOG_INFO("F13 atrous backend: %s",diagnosticReference?"reference":diagnosticGuide4Reference?"tiled strides 1/2, reference 4+":"tiled strides 1/2, shared guides 4");
         if(o.reducedLighting||o.forceApple9){settings.atrousIterations=2;settings.maxHistory=16;}
         if(const char* value=std::getenv("PHOSPHOR_DIAGNOSTIC_DENOISE_GENERIC");value&&std::strcmp(value,"1")==0)diagnosticGeneric=true;
@@ -71,6 +85,7 @@ struct DenoisePasses::Impl {
             auto request=[&](const char* name){auto d=lighting::kernel(name);d.constant(40,pipe::ConstantType::UInt,diagnosticGeneric?0xffffffffu:sig);return p.request(d);};
             auto& k=kernels[sig];k.temporal=request("denoise_temporal");k.atrous=request("denoise_atrous");k.guide4=request("denoise_atrous_guide4");k.checker=request("denoise_check");
             for(u32 i=0;i<2;++i)k.tiled[i]=request(("denoise_atrous_tile"+std::to_string(1u<<i)).c_str());
+            if(o.lightingDenoiseEnergy){k.norm=request("denoise_atrous_norm");k.energy=request("denoise_atrous_energy");}
         }
         clear=p.request(lighting::kernel("lighting_check_clear"));
         for(const bool withDI:{false,true}) {
@@ -90,10 +105,28 @@ struct DenoisePasses::Impl {
         for(auto* table:diffuseTables)if(table)table->release();}
     void invalidate(const char* reason){for(auto& r:registries)for(u32 v=0;v<Views;++v)r.invalidate(v,reason);}
     void reserve(u32 sig){auto& h=histories.at(frame.view).at(sig);const u64 count=u64(frame.backingWidth)*frame.backingHeight;
-        if(count<=h.capacity)return;for(auto* b:h.pair)c.memory().release(b,MemoryCategory::RayTracing);
-        h.capacity=count;h.lastWritten=0;for(auto*& b:h.pair)b=lighting::buffer(c,denoiseHistoryBytes(count,sig==DENOISE_SIGNAL_SPECULAR),"F13 view signal history");
+        // F15.1 ticket 13: the specular history carries the endpoint extension only while the scene's feature union has transmission (lobe kernels wanted);
+        // a change of that union reallocates like a growth.  Every other history and every featureless scene keeps the base size.
+        const bool endpoint=sig==DENOISE_SIGNAL_SPECULAR&&lobeWanted&&(lobeMask&MATERIAL_FEATURE_TRANSMISSION)!=0u;
+        if(count<=h.capacity&&endpoint==h.endpoint)return;h.endpoint=endpoint;for(auto* b:h.pair)c.memory().release(b,MemoryCategory::RayTracing);
+        h.capacity=std::max<u64>(count,h.capacity);h.lastWritten=0;for(auto*& b:h.pair)b=lighting::buffer(c,denoiseHistoryBytes(std::max<u64>(count,h.capacity),sig==DENOISE_SIGNAL_SPECULAR,endpoint),"F13 view signal history");
         registries[sig].invalidate(frame.view,"denoise allocation growth");++graphVersion;
     }
+    // Chooses the specular kernel set of this frame (all lobe variants, or all base kernels).
+    void resolveLobe(){
+        lobeActive=false;if(!lobeMask)return;const auto& base=kernels[DENOISE_SIGNAL_SPECULAR];
+        auto serve=[&](u32 slot,pipe::PipelineHandle handle,const char* name){
+            return features.serve(pipelines,slot,handle,lobeMask,[&]{auto d=lighting::kernel(name);d.constant(40,pipe::ConstantType::UInt,diagnosticGeneric?0xffffffffu:DENOISE_SIGNAL_SPECULAR);return d;});};
+        const auto t=serve(214,base.temporal,"denoise_temporal_lobe"),a=serve(215,base.atrous,"denoise_atrous_lobe"),g=serve(216,base.guide4,"denoise_atrous_guide4_lobe"),
+            t1=serve(217,base.tiled[0],"denoise_atrous_tile1_lobe"),t2=serve(218,base.tiled[1],"denoise_atrous_tile2_lobe");
+        if(lobeWanted&&t!=base.temporal&&a!=base.atrous&&g!=base.guide4&&t1!=base.tiled[0]&&t2!=base.tiled[1]){lobeKernels={t,a,g,{t1,t2}};lobeActive=true;}
+        if(lobeActive!=lobeLogged){lobeLogged=lobeActive;LOG_INFO("F15 specular denoiser: %s kernels (feature union %u)",lobeActive?"lobe-contract":"base",lobeMask);}
+    }
+    [[nodiscard]] bool lobeFor(u32 sig)const{return sig==DENOISE_SIGNAL_SPECULAR&&lobeActive;}
+    [[nodiscard]] pipe::PipelineHandle temporalKernel(u32 sig)const{return lobeFor(sig)?lobeKernels.temporal:kernels[sig].temporal;}
+    [[nodiscard]] pipe::PipelineHandle atrousKernel(u32 sig)const{return lobeFor(sig)?lobeKernels.atrous:kernels[sig].atrous;}
+    [[nodiscard]] pipe::PipelineHandle guide4Kernel(u32 sig)const{return lobeFor(sig)?lobeKernels.guide4:kernels[sig].guide4;}
+    [[nodiscard]] pipe::PipelineHandle tiledKernel(u32 sig,u32 i)const{return lobeFor(sig)?lobeKernels.tiled[i]:kernels[sig].tiled[i];}
     void updateSignal(u32 sig){reserve(sig);auto& h=histories[frame.view][sig];auto& s=signal[sig];
         // Soft signals keep history across continuous scene changes: only their
         // own hard revision resets them; the change is then judged per pixel.
@@ -108,12 +141,14 @@ struct DenoisePasses::Impl {
         if(soft){s.params.maxHistory=options.specularMaxHistory;if(stationary)s.params.flags|=DENOISE_STATIONARY;}
         for(u32 c=0;c<4;++c)s.params.currentViewDepthRow[c]=frame.constants.view[c*4+2];
         if(diagnosticEndpoints&&sig==DENOISE_SIGNAL_SPECULAR)s.params.flags|=DENOISE_DIAGNOSTIC_ENDPOINTS;
+        if(lobeFor(sig))s.params.flags|=DENOISE_LOBE_GUIDE_VALID|lobeDiagnostic;
         s.params.frameIndex=u32(frame.index);s.address=lighting::upload(c,s.params);s.readSide=h.lastWritten;s.writeSide=1u-s.readSide;
         for(u32 i=0;i<settings.atrousIterations;++i){auto p=s.params;p.atrousStep=1u<<i;s.atrousAddress[i]=lighting::upload(c,p);}
         slots[frame.slot][sig].expected=frame.width*frame.height;
     }
     void prepare(const ShadowPasses::Frame& f,u64 signalEpoch,const std::array<u64,Signals>& currentRevisions,
                  bool useDirectLighting,u32 soft,bool change,bool still){frame=f;epoch=signalEpoch;revisions=currentRevisions;softSignals=soft;softChange=change;stationary=still&&!change;
+        resolveLobe();
         if(!f.width||!f.height||f.width>f.backingWidth||f.height>f.backingHeight||f.slot>=METAL_FRAMES_IN_FLIGHT||f.view>=Views||
             u64(f.backingWidth)*f.backingHeight>std::numeric_limits<u32>::max())throw std::invalid_argument("Invalid F13 denoise frame extent or view");
         if (!useDirectLighting && signal[DENOISE_SIGNAL_DI].defined) {
@@ -134,25 +169,26 @@ struct DenoisePasses::Impl {
     void texture(MTL4::ArgumentTable* t,rg::PassContext& ctx,rg::TextureRef r,u32 index){
         t->setTexture(static_cast<MTL::Texture*>(ctx.texture(r))->gpuResourceID(),index);
     }
-    rg::TextureRef add(rg::RenderGraph& g,u32 sig,rg::TextureRef raw,rg::TextureRef motion,rg::BufferRef surfaces,rg::BufferRef metadata,bool deferFinal=false){
+    rg::TextureRef add(rg::RenderGraph& g,u32 sig,rg::TextureRef raw,rg::TextureRef motion,rg::BufferRef surfaces,rg::BufferRef metadata,bool deferFinal=false,rg::BufferRef lobeGuide={}){
         using namespace rg;if(sig>=Signals||!raw.valid()||!motion.valid()||!surfaces.valid())throw std::invalid_argument("invalid denoise signal graph inputs");
         if(sig==DENOISE_SIGNAL_SPECULAR&&!metadata.valid())throw std::invalid_argument("specular denoise requires hit metadata");
         reserve(sig);auto& h=histories.at(frame.view).at(sig);auto& s=signal[sig];auto& state=slots[frame.slot][sig];state.used=true;state.expected=frame.width*frame.height;
         s.defined=true;updateSignal(sig);
-        s.raw=raw;s.motion=motion;s.surface=surfaces;s.metadata=metadata;
+        if(lobeFor(sig)&&!lobeGuide.valid())throw std::logic_error("lobe denoiser kernels need the lobe guide");
+        s.raw=raw;s.motion=motion;s.surface=surfaces;s.metadata=metadata;s.lobeGuide=sig==DENOISE_SIGNAL_SPECULAR?lobeGuide:rg::BufferRef{}; // declared whenever it exists: the graph does not depend on which kernels serve
         const std::string label="F13 denoise "+std::to_string(sig);
         // Both imports stay persistent even though pair sides are rebound.
         // The temporal pass reads AND writes them at Dispatch; the graph emits
         // its cross-frame queue barrier before either physical side is used.
-        s.previous=g.importBuffer(label+" previous history",{denoiseHistoryBytes(h.capacity,sig==DENOISE_SIGNAL_SPECULAR)},ImportContentsDefined);
-        s.next=g.importBuffer(label+" next history",{denoiseHistoryBytes(h.capacity,sig==DENOISE_SIGNAL_SPECULAR)},ImportOutput);
+        s.previous=g.importBuffer(label+" previous history",{denoiseHistoryBytes(h.capacity,sig==DENOISE_SIGNAL_SPECULAR,h.endpoint)},ImportContentsDefined);
+        s.next=g.importBuffer(label+" next history",{denoiseHistoryBytes(h.capacity,sig==DENOISE_SIGNAL_SPECULAR,h.endpoint)},ImportOutput);
         if(options.debugHistoryCorrupt)g.addPass(label+" negative view",PassType::Compute,[this,sig](PassBuilder& b){
             auto& s=signal[sig];b.read(s.previous,Usage::ShaderRead,StageDispatch);s.previous=b.write(s.previous,Usage::ShaderWrite,StageDispatch);
         },[this,sig](PassContext& ctx){auto& s=signal[sig];auto& h=histories[frame.view][sig];auto* t=slots[frame.slot][sig].tables[MaxAtrous+3];
             t->setAddress(s.address,0);t->setAddress(h.pair[s.readSide]->gpuAddress(),1);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,corrupt,t,frame.width*frame.height);});
         g.addPass(label+" temporal",PassType::Compute,[this,sig](PassBuilder& b){auto& s=signal[sig];
             b.read(s.raw,Usage::ShaderRead,StageDispatch);b.read(s.motion,Usage::ShaderRead,StageDispatch);b.read(s.surface,Usage::ShaderRead,StageDispatch);b.read(s.previous,Usage::ShaderRead,StageDispatch);
-            if(s.metadata.valid())b.read(s.metadata,Usage::ShaderRead,StageDispatch);s.next=b.write(s.next,Usage::ShaderWrite,StageDispatch);
+            if(s.metadata.valid())b.read(s.metadata,Usage::ShaderRead,StageDispatch);if(s.lobeGuide.valid())b.read(s.lobeGuide,Usage::ShaderRead,StageDispatch);s.next=b.write(s.next,Usage::ShaderWrite,StageDispatch);
             s.temporalOutput=b.createTexture("F13 temporal signal "+std::to_string(sig),{Format::RGBA32Float,frame.width,frame.height});s.temporalOutput=b.write(s.temporalOutput,Usage::ShaderWrite,StageDispatch);
             s.moments=b.createTexture("F13 moments variance "+std::to_string(sig),{Format::RGBA32Float,frame.width,frame.height});s.moments=b.write(s.moments,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("denoise_temporal");
         },[this,sig](PassContext& ctx){auto& s=signal[sig];auto& h=histories[frame.view][sig];auto* t=slots[frame.slot][sig].tables[0];
@@ -163,8 +199,10 @@ struct DenoisePasses::Impl {
             const bool specularSignal=sig==DENOISE_SIGNAL_SPECULAR;
             for(const auto& [side,header,records,extension]:{std::array<u32,4>{s.readSide,5,2,7},std::array<u32,4>{s.writeSide,6,4,8}}){const auto base=h.pair[side]->gpuAddress();
                 t->setAddress(base,header);t->setAddress(base+denoiseHistoryRecordsOffset(),records);t->setAddress(specularSignal?base+denoiseHistorySpecularOffset(h.capacity):base,extension);}
+            if(s.lobeGuide.valid())t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(s.lobeGuide))->gpuAddress(),9);
+            for(const auto& [side,index]:{std::array<u32,2>{s.readSide,10},std::array<u32,2>{s.writeSide,11}}){const auto base=h.pair[side]->gpuAddress();t->setAddress(specularSignal&&h.endpoint?base+denoiseHistoryEndpointOffset(h.capacity):base,index);}
             texture(t,ctx,s.raw,0);texture(t,ctx,s.motion,1);texture(t,ctx,s.temporalOutput,2);texture(t,ctx,s.moments,3);
-            lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[sig].temporal,t,frame.width*frame.height);
+            lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,temporalKernel(sig),t,frame.width*frame.height);
             // Encoding is not GPU completion. Persistent imports/order preserve
             // retirement; registry records the submission identity only.
             registries[sig].read(frame.view,frame.index+1);registries[sig].write(frame.view,frame.index+1,frame.unjitteredVP);h.lastWritten=s.writeSide;
@@ -175,26 +213,50 @@ struct DenoisePasses::Impl {
         const u32 iterations=sig==DENOISE_SIGNAL_SPECULAR?std::min(settings.atrousIterations,options.specularAtrousIterations):
             sig==DENOISE_SIGNAL_AO?std::min(settings.atrousIterations,options.aoAtrousIterations):settings.atrousIterations;
         for(u32 iteration=0;iteration<iterations-(deferFinal?1u:0u);++iteration){s.atrousInput[iteration]=s.filtered;
+            if(options.lightingDenoiseEnergy&&sig!=DENOISE_SIGNAL_AO&&!lobeFor(sig)){addEnergyIteration(g,sig,iteration,label);s.filtered=s.atrousOutput[iteration];continue;}
             g.addPass(label+" atrous "+std::to_string(iteration),PassType::Compute,[this,sig,iteration](PassBuilder& b){auto& s=signal[sig];
                 b.read(s.atrousInput[iteration],Usage::ShaderRead,StageDispatch);b.read(s.moments,Usage::ShaderRead,StageDispatch);b.read(s.surface,Usage::ShaderRead,StageDispatch);
-                if(s.metadata.valid())b.read(s.metadata,Usage::ShaderRead,StageDispatch);s.atrousOutput[iteration]=b.createTexture("F13 filtered signal "+std::to_string(sig)+" "+std::to_string(iteration),{Format::RGBA32Float,frame.width,frame.height});
+                if(s.metadata.valid())b.read(s.metadata,Usage::ShaderRead,StageDispatch);if(s.lobeGuide.valid())b.read(s.lobeGuide,Usage::ShaderRead,StageDispatch);s.atrousOutput[iteration]=b.createTexture("F13 filtered signal "+std::to_string(sig)+" "+std::to_string(iteration),{Format::RGBA32Float,frame.width,frame.height});
                 s.atrousOutput[iteration]=b.write(s.atrousOutput[iteration],Usage::ShaderWrite,StageDispatch);b.setProfileShaders(iteration<2&&!diagnosticReference?("denoise_atrous_tile"+std::to_string(1u<<iteration)).c_str():iteration==2&&!diagnosticReference&&!diagnosticGuide4Reference?"denoise_atrous_guide4":"denoise_atrous");
             },[this,sig,iteration](PassContext& ctx){auto& s=signal[sig];auto* t=slots[frame.slot][sig].tables[1+iteration];t->setAddress(s.atrousAddress[iteration],0);
                 t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(s.surface))->gpuAddress(),1);t->setAddress(s.metadata.valid()?static_cast<MTL::Buffer*>(ctx.buffer(s.metadata))->gpuAddress():histories[frame.view][sig].pair[s.readSide]->gpuAddress(),3);
+                if(s.lobeGuide.valid())t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(s.lobeGuide))->gpuAddress(),4);
                 texture(t,ctx,s.atrousInput[iteration],0);texture(t,ctx,s.moments,1);texture(t,ctx,s.atrousOutput[iteration],2);
                 if(iteration<2&&!diagnosticReference) {
                     auto* encoder=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());
-                    encoder->setComputePipelineState(pipelines.compute(kernels[sig].tiled[iteration]));encoder->setArgumentTable(t);
+                    encoder->setComputePipelineState(pipelines.compute(tiledKernel(sig,iteration)));encoder->setArgumentTable(t);
                     encoder->dispatchThreadgroups(MTL::Size::Make((frame.width+15)/16,(frame.height+7)/8,1),MTL::Size::Make(16,8,1));
                 } else if(iteration==2&&!diagnosticReference&&!diagnosticGuide4Reference) {
                     auto* encoder=static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder());
-                    encoder->setComputePipelineState(pipelines.compute(kernels[sig].guide4));encoder->setArgumentTable(t);
+                    encoder->setComputePipelineState(pipelines.compute(guide4Kernel(sig)));encoder->setArgumentTable(t);
                     encoder->dispatchThreadgroups(MTL::Size::Make((frame.width+7)/8,(frame.height+7)/8,1),MTL::Size::Make(8,8,1));
-                } else lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[sig].atrous,t,frame.width*frame.height);});s.filtered=s.atrousOutput[iteration];}
+                } else lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,atrousKernel(sig),t,frame.width*frame.height);});s.filtered=s.atrousOutput[iteration];}
         // Independent state checks are a --debug-lighting diagnostic (the F13/F14
         // runner always passes it); product frames do not pay for them.
         if(!deferFinal&&options.debugLighting)addChecks(g,sig);
         return s.filtered;
+    }
+    // F13.4 experiment: energy-preserving a-trous iteration (denoise.metal denoise_atrous_norm + denoise_atrous_energy), base kernels only.
+    void addEnergyIteration(rg::RenderGraph& g,u32 sig,u32 iteration,const std::string& label){
+        using namespace rg;const std::string suffix=std::to_string(sig)+" "+std::to_string(iteration);
+        g.addPass(label+" atrous weight sums "+std::to_string(iteration),PassType::Compute,[this,sig,iteration,suffix](PassBuilder& b){auto& s=signal[sig];
+            b.read(s.atrousInput[iteration],Usage::ShaderRead,StageDispatch);b.read(s.moments,Usage::ShaderRead,StageDispatch);b.read(s.surface,Usage::ShaderRead,StageDispatch);
+            if(s.metadata.valid())b.read(s.metadata,Usage::ShaderRead,StageDispatch);
+            s.atrousNorm[iteration]=b.createTexture("F13 energy weight sums "+suffix,{Format::RGBA32Float,frame.width,frame.height});
+            s.atrousNorm[iteration]=b.write(s.atrousNorm[iteration],Usage::ShaderWrite,StageDispatch);b.setProfileShaders("denoise_atrous_norm");
+        },[this,sig,iteration](PassContext& ctx){auto& s=signal[sig];auto* t=slots[frame.slot][sig].tables[MaxAtrous+5+iteration];t->setAddress(s.atrousAddress[iteration],0);
+            t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(s.surface))->gpuAddress(),1);t->setAddress(s.metadata.valid()?static_cast<MTL::Buffer*>(ctx.buffer(s.metadata))->gpuAddress():histories[frame.view][sig].pair[s.readSide]->gpuAddress(),3);
+            texture(t,ctx,s.atrousInput[iteration],0);texture(t,ctx,s.moments,1);texture(t,ctx,s.atrousNorm[iteration],2);
+            lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[sig].norm,t,frame.width*frame.height);});
+        g.addPass(label+" atrous energy "+std::to_string(iteration),PassType::Compute,[this,sig,iteration,suffix](PassBuilder& b){auto& s=signal[sig];
+            b.read(s.atrousInput[iteration],Usage::ShaderRead,StageDispatch);b.read(s.moments,Usage::ShaderRead,StageDispatch);b.read(s.surface,Usage::ShaderRead,StageDispatch);
+            b.read(s.atrousNorm[iteration],Usage::ShaderRead,StageDispatch);if(s.metadata.valid())b.read(s.metadata,Usage::ShaderRead,StageDispatch);
+            s.atrousOutput[iteration]=b.createTexture("F13 filtered signal "+suffix,{Format::RGBA32Float,frame.width,frame.height});
+            s.atrousOutput[iteration]=b.write(s.atrousOutput[iteration],Usage::ShaderWrite,StageDispatch);b.setProfileShaders("denoise_atrous_energy");
+        },[this,sig,iteration](PassContext& ctx){auto& s=signal[sig];auto* t=slots[frame.slot][sig].tables[1+iteration];t->setAddress(s.atrousAddress[iteration],0);
+            t->setAddress(static_cast<MTL::Buffer*>(ctx.buffer(s.surface))->gpuAddress(),1);t->setAddress(s.metadata.valid()?static_cast<MTL::Buffer*>(ctx.buffer(s.metadata))->gpuAddress():histories[frame.view][sig].pair[s.readSide]->gpuAddress(),3);
+            texture(t,ctx,s.atrousInput[iteration],0);texture(t,ctx,s.moments,1);texture(t,ctx,s.atrousOutput[iteration],2);texture(t,ctx,s.atrousNorm[iteration],3);
+            lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[sig].energy,t,frame.width*frame.height);});
     }
     void addChecks(rg::RenderGraph& g,u32 sig){using namespace rg;auto& s=signal[sig];const std::string label="F13 denoise "+std::to_string(sig);
         if(options.debugReflectionCorrupt==1)g.addPass(label+" negative NEXT foreign view",PassType::Compute,[this,sig](PassBuilder& b){auto& s=signal[sig];
@@ -212,7 +274,7 @@ struct DenoisePasses::Impl {
     }
     std::array<rg::TextureRef,3> addDiffuse(rg::RenderGraph& g,std::array<rg::TextureRef,3> raw,rg::TextureRef motion,rg::BufferRef surfaces,bool withDI){
         using namespace rg;constexpr std::array<u32,3> signals{DENOISE_SIGNAL_DI,DENOISE_SIGNAL_GI,DENOISE_SIGNAL_AO};
-        const bool batch=settings.atrousIterations==3&&options.aoAtrousIterations>=3&&!diagnosticUnbatched&&!diagnosticReference&&!diagnosticGuide4Reference;
+        const bool batch=settings.atrousIterations==3&&!options.lightingDenoiseEnergy&&options.aoAtrousIterations>=3&&!diagnosticUnbatched&&!diagnosticReference&&!diagnosticGuide4Reference;
         const u32 first=withDI?0u:1u;
         for(u32 i=first;i<3;++i)raw[i]=add(g,signals[i],raw[i],motion,surfaces,{},batch);
         if(batch){
@@ -242,7 +304,9 @@ DenoisePasses::~DenoisePasses()=default;
 void DenoisePasses::prepareFrame(const ShadowPasses::Frame& f,u64 epoch,const std::array<u64,4>& revisions,
                                 bool useDirectLighting,u32 softSignals,bool softChange,bool stationary){impl_->prepare(f,epoch,revisions,useDirectLighting,softSignals,softChange,stationary);}
 void DenoisePasses::invalidateAll(const char* reason){impl_->invalidate(reason);}
-rg::TextureRef DenoisePasses::addSignal(rg::RenderGraph& g,u32 s,rg::TextureRef r,rg::TextureRef m,rg::BufferRef b,rg::BufferRef metadata){return impl_->add(g,s,r,m,b,metadata);}
+rg::TextureRef DenoisePasses::addSignal(rg::RenderGraph& g,u32 s,rg::TextureRef r,rg::TextureRef m,rg::BufferRef b,rg::BufferRef metadata,rg::BufferRef lobeGuide){return impl_->add(g,s,r,m,b,metadata,false,lobeGuide);}
+void DenoisePasses::configureLobe(u32 featureMask,bool enable){impl_->lobeMask=featureMask;impl_->lobeWanted=enable;}
+bool DenoisePasses::lobeKernelsActive()const{return impl_->lobeActive;}
 std::array<rg::TextureRef,3> DenoisePasses::addDiffuseSignals(rg::RenderGraph& g,std::array<rg::TextureRef,3> r,rg::TextureRef m,rg::BufferRef b,bool withDI){return impl_->addDiffuse(g,r,m,b,withDI);}
 void DenoisePasses::bindFrame(MetalGraphExecutor& e){impl_->bind(e);}u64 DenoisePasses::version()const{return impl_->graphVersion;}
 bool DenoisePasses::check(u32 slot)const{if(!impl_->options.debugLighting)return true; // checks not encoded
@@ -274,6 +338,7 @@ u32 DenoisePasses::historyFrames(u32 sig)const{
 bool DenoisePasses::ready()const{
     for(const auto& k:impl_->kernels){
         for(auto h:{k.temporal,k.atrous,k.guide4,k.checker,k.tiled[0],k.tiled[1]})if(!impl_->pipelines.compute(h))return false;
+        if(impl_->options.lightingDenoiseEnergy&&(!impl_->pipelines.compute(k.norm)||!impl_->pipelines.compute(k.energy)))return false;
     }
     return impl_->pipelines.compute(impl_->clear)&&impl_->pipelines.compute(impl_->diffuse4[0])&&impl_->pipelines.compute(impl_->diffuse4[1])&&(!impl_->options.debugHistoryCorrupt||impl_->pipelines.compute(impl_->corrupt))&&
         (impl_->options.debugReflectionCorrupt!=1||impl_->pipelines.compute(impl_->poisonNext));

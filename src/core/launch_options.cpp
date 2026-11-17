@@ -1,6 +1,12 @@
 #include "core/launch_options.h"
 #include "renderer/gpu_types.h"
 #include "testbench/lighting_validation.h"
+#include "testbench/material_validation.h"
+#include "testbench/transmission_validation.h"
+#include "testbench/transmissive_shadow_validation.h"
+#include "testbench/glass_receiver_validation.h"
+#include "testbench/chess_fixture.h"
+#include "testbench/terrain_fixture.h"
 #include "testbench/reflection_validation.h"
 
 #include <charconv>
@@ -250,6 +256,13 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.debugFlexiblePipelines = true;
         } else if (arg == "--debug-pipeline-fallback") {
             out.debugPipelineFallback = true;
+        } else if (arg == "--debug-material-module") {
+            std::string v;
+            if (!needString(v) || (v != "exact" && v != "fast" && v != "exact-all")) return false;
+            out.debugMaterialModuleFast = v == "fast";
+            out.debugMaterialModuleAll  = v == "exact-all";
+        } else if (arg == "--debug-pipeline-xpc-fail") {
+            if (!needCount(out.debugPipelineXpcFail)) return false;
         } else if (arg == "--debug-compile-storm") {
             out.debugCompileStorm = true;
         } else if (arg == "--frame-trace") {
@@ -400,8 +413,9 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             else if (*value == "plane") out.debugGpuSceneCorrupt = SceneCorruption::Plane;
             else if (*value == "command") out.debugGpuSceneCorrupt = SceneCorruption::Command;
             else if (*value == "touch") out.debugGpuSceneCorrupt = SceneCorruption::Touch;
+            else if (*value == "extension") out.debugGpuSceneCorrupt = SceneCorruption::Extension;
             else {
-                error = "--debug-gpu-scene-corrupt: expected delta, plane, command or touch, got '" +
+                error = "--debug-gpu-scene-corrupt: expected delta, plane, command, touch or extension, got '" +
                         std::string(*value) + "'";
                 return false;
             }
@@ -461,6 +475,45 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if (*value == "on") out.rtEnabled = true;
             else if (*value == "off") out.rtEnabled = false;
             else { error = "--rt: expected off or on"; return false; }
+        } else if (arg == "--subsurface-mode") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "diffusion") out.subsurfaceMode = LaunchOptions::SubsurfaceMode::Diffusion;
+            else if (*value == "rt-walk") out.subsurfaceMode = LaunchOptions::SubsurfaceMode::RtWalk;
+            else { error = "--subsurface-mode: expected diffusion or rt-walk"; return false; }
+        } else if (arg == "--subsurface-samples" || arg == "--subsurface-steps") {
+            u32 count = 0;
+            if (!needCount(count)) return false;
+            if (count == 0 || count > 4096) { error = std::string(arg) + ": expected 1..4096"; return false; }
+            if (arg == "--subsurface-samples") out.subsurfaceSamples = count; else out.subsurfaceSteps = count;
+        } else if (arg == "--material-motion") {
+            out.materialMotion = true;
+        } else if (arg == "--debug-subsurface-history") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value != "reject-never" && *value != "normal") { error = "--debug-subsurface-history: expected reject-never or normal"; return false; }
+            out.debugSubsurfaceHistoryNoReject = *value == "reject-never";
+        } else if (arg == "--subsurface-accumulate") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value != "on" && *value != "off") { error = "--subsurface-accumulate: expected on or off"; return false; }
+            out.subsurfaceAccumulate = *value == "on";
+        } else if (arg == "--subsurface-history") {
+            u32 count = 0;
+            if (!needCount(count)) return false;
+            if (count == 0 || count > 255) { error = "--subsurface-history: expected 1..255"; return false; }
+            out.subsurfaceHistory = count;
+        } else if (arg == "--debug-subsurface-di-diffuse") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value != "keep" && *value != "drop") { error = "--debug-subsurface-di-diffuse: expected keep or drop"; return false; }
+            out.debugSubsurfaceDiDiffuse = *value == "keep";
+        } else if (arg == "--subsurface-walk-shadows" || arg == "--debug-subsurface-walk-lights") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value != "on" && *value != "off") { error = std::string(arg) + ": expected on or off"; return false; }
+            if (arg == "--subsurface-walk-shadows") out.subsurfaceWalkShadows = *value == "on" ? 1 : 0;
+            else out.debugSubsurfaceWalkLights = *value == "on";
         } else if (arg == "--atmosphere" || arg == "--fog" || arg == "--clouds") {
             auto v=needValue();if(!v)return false;if(*v!="on"&&*v!="off"){error=std::string(arg)+": expected on or off";return false;}
             if(arg=="--atmosphere")out.atmosphere=*v=="on";else if(arg=="--fog")out.fog=*v=="on";else out.clouds=*v=="on";
@@ -517,8 +570,14 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if(*v=="off")out.lightingDenoise=LightingDenoiseMode::Off;else if(*v=="custom")out.lightingDenoise=LightingDenoiseMode::Custom;
             else if(*v=="metalfx")out.lightingDenoise=LightingDenoiseMode::MetalFX;
             else{error="--lighting-denoise: expected off, custom or metalfx";return false;}
+        } else if (arg == "--lighting-denoise-energy") {
+            auto v=needValue();if(!v)return false;
+            if(*v=="on")out.lightingDenoiseEnergy=true;else if(*v=="off")out.lightingDenoiseEnergy=false;
+            else{error="--lighting-denoise-energy: expected on or off";return false;}
         } else if (arg == "--ao-radius") {
             if(!needFloat(out.aoRadius)||out.aoRadius<=0||out.aoRadius>100){error="--ao-radius: expected world metres in (0,100]";return false;}
+        } else if (arg == "--reflection-bounces") {
+            if(!needCount(out.reflectionBounces)||out.reflectionBounces>3){error="--reflection-bounces: expected 0..3";return false;}
         } else if (arg == "--reflection-samples") {
             if(!needCount(out.reflectionSamples)||out.reflectionSamples<1||out.reflectionSamples>8){error="--reflection-samples: expected1..8";return false;}
         } else if (arg == "--reflection-probe") {
@@ -560,6 +619,11 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.reducedLighting = *v == "reduced";
         } else if (arg == "--shadow-map-size") {
             if (!needCount(out.shadowMapResolution)) return false;
+        } else if (arg == "--shadow-transmittance-divisor") {
+            if (!needCount(out.shadowTransmittanceDivisor)) return false;
+            if (out.shadowTransmittanceDivisor != 1 && out.shadowTransmittanceDivisor != 2 && out.shadowTransmittanceDivisor != 4) {
+                error = "--shadow-transmittance-divisor: expected 1, 2 or 4"; return false;
+            }
         } else if (arg == "--lighting-seed") {
             if (!needCount(out.lightingSeed)) return false;
         } else if (arg == "--lighting-candidates") {
@@ -580,6 +644,27 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if (!needCount(out.giRays)) return false;
         } else if (arg == "--reflection-scene") {
             auto v=needValue();if(!v)return false;if(!ReflectionValidation::validScenario(*v)){error="--reflection-scene: unknown scenario";return false;}out.reflectionScene=*v;
+        } else if (arg == "--material-scenario") {
+            auto v=needValue();if(!v)return false;
+            if(!MaterialValidation::validScenario(*v)&&!TransmissionValidation::validScenario(*v)&&!TransmissiveShadowValidation::validScenario(*v)&&!GlassReceiverValidation::validScenario(*v)&&!ChessFixture::validScenario(*v)&&!TerrainFixture::validScenario(*v)){error="--material-scenario: unknown scenario";return false;}out.materialScene=*v;
+        } else if (arg == "--transmission-motion") {
+            out.transmissionMotion = true;
+        } else if (arg == "--resolve-features") {
+            const auto v = needValue();
+            if (!v) return false;
+            if (*v == "all") out.resolveFeaturesAll = true;
+            else if (*v == "union") out.resolveFeaturesAll = false;
+            else { error = "--resolve-features: expected union or all"; return false; }
+        } else if (arg == "--debug-class-drop-lobes") {
+            if (!needCount(out.debugClassDropLobes)) return false;
+            if (out.debugClassDropLobes > 0x1FFu) { error = "--debug-class-drop-lobes: expected a lobe mask up to 511"; return false; }
+        } else if (arg == "--debug-class-budget") {
+            if (!needCount(out.debugClassBudget)) return false;
+            if (out.debugClassBudget < 1 || out.debugClassBudget > 16) { error = "--debug-class-budget: expected 1..16"; return false; }
+        } else if (arg == "--export-class-manifest") {
+            if (!needString(out.exportClassManifest)) return false;
+        } else if (arg == "--material-toggle-every") {
+            if (!needCount(out.materialToggleEvery)) return false;
         } else if (arg == "--lighting-scene") {
             auto v=needValue();if(!v)return false;
             if(!LightingValidation::validScenario(*v)){error="--lighting-scene: unknown analytic scenario";return false;}out.lightingScene=*v;
@@ -593,6 +678,8 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             if(!needCount(out.denoisedFixturePrewarmMs)||!out.denoisedFixturePrewarmMs||out.denoisedFixturePrewarmMs>120000){error="--denoised-fixture-prewarm-ms: expected 1..120000";return false;}
         } else if (arg == "--denoised-fixture-pre-exposed") {
             out.denoisedFixturePreExposed=true;
+        } else if (arg == "--legacy-environment") {
+            out.legacyEnvironment=true;
         } else if (arg == "--debug-probe-no-parallax") {
             out.debugProbeNoParallax=true;
         } else if (arg == "--metalfx-native-diagnostic") {
@@ -658,11 +745,15 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             else if(*v=="specular")out.captureLinearSignal=6;else if(*v=="ao")out.captureLinearSignal=7;
             else if(*v=="indirect-diffuse-filtered")out.captureLinearSignal=8;else if(*v=="ao-filtered")out.captureLinearSignal=9;else if(*v=="specular-filtered")out.captureLinearSignal=10;
             else if(*v=="cloud-transmittance")out.captureLinearSignal=11;
-            else{error="--capture-linear-signal: expected hdr, indirect-diffuse, indirect-diffuse-filtered, direct, shadow, shadow-position, shadow-normal, specular, specular-filtered, ao or ao-filtered";return false;}
+            else if(*v=="reactive")out.captureLinearSignal=12;
+            else{error="--capture-linear-signal: expected hdr, indirect-diffuse, indirect-diffuse-filtered, direct, shadow, shadow-position, shadow-normal, specular, specular-filtered, ao, ao-filtered or reactive";return false;}
         } else if (arg == "--export-reference-frame") {
             if(!needCount(out.exportReferenceFrame))return false;
         } else if (arg == "--capture-linear-frame") {
             if(!needCount(out.captureLinearFrame))return false;
+        } else if (arg == "--capture-linear-accumulate") {
+            if(!needCount(out.captureLinearAccumulate))return false;
+            if(out.captureLinearAccumulate==0){error="--capture-linear-accumulate: expected a positive frame count";return false;}
         } else if (arg == "--export-reference") {
             auto v = needValue(); if (!v || v->empty() || v->starts_with("--")) {
                 error = "--export-reference: expected output directory"; return false;
@@ -670,8 +761,44 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             out.exportReference = *v;
         } else if (arg == "--debug-lighting") {
             if (!needCount(out.debugLighting)) return false;
+        } else if (arg == "--debug-lobe-guide") {
+            if (!needCount(out.debugLobeGuide)) return false;
+        } else if (arg == "--debug-transmission-both-branches") {
+            out.debugTransmissionBothBranches = true;
+        } else if (arg == "--debug-lobe-guide-corrupt") {
+            out.debugLobeGuideCorrupt = true;
+        } else if (arg == "--debug-lobe-guide-no-rog") {
+            out.debugLobeGuideNoRog = true;
+        } else if (arg == "--debug-lobe-guide-delay") {
+            out.debugLobeGuideDelay = true;
+        } else if (arg == "--debug-lobe-guide-dump") {
+            auto v = needValue();
+            if (!v || v->empty() || v->starts_with("--")) { error = "--debug-lobe-guide-dump: expected a file path"; return false; }
+            out.debugLobeGuideDump = std::string(*v);
         } else if (arg == "--debug-gi-no-visibility") {
             out.debugGiNoVisibility=true;
+        } else if (arg == "--debug-transmittance-inject") {
+            out.debugTransmittanceInject = true;
+        } else if (arg == "--debug-transmittance-dedup") {
+            auto v = needValue(); if (!v) return false;
+            if (*v == "on") out.debugTransmittanceDedup = true;
+            else if (*v == "off") out.debugTransmittanceDedup = false;
+            else { error = "--debug-transmittance-dedup: expected on or off"; return false; }
+        } else if (arg == "--debug-transmittance-map") {
+            auto v = needValue(); if (!v) return false;
+            if (*v == "on") out.debugTransmittanceMap = true;
+            else if (*v == "off") out.debugTransmittanceMap = false;
+            else { error = "--debug-transmittance-map: expected on or off"; return false; }
+        } else if (arg == "--debug-glass-tint") {
+            auto v = needValue(); if (!v) return false;
+            if (*v == "entry") out.debugGlassTintCameraOnly = false;
+            else if (*v == "camera") out.debugGlassTintCameraOnly = true;
+            else { error = "--debug-glass-tint: expected entry or camera"; return false; }
+        } else if (arg == "--debug-receiver-own") {
+            auto v = needValue(); if (!v) return false;
+            if (*v == "on") out.debugReceiverOwn = true;
+            else if (*v == "off") out.debugReceiverOwn = false;
+            else { error = "--debug-receiver-own: expected on or off"; return false; }
         } else if (arg == "--debug-gi-corrupt") {
             auto v=needValue();if(!v)return false;
             if(*v=="cache")out.debugGiCorrupt=1;else if(*v=="probe")out.debugGiCorrupt=2;else if(*v=="pdf")out.debugGiCorrupt=3;
@@ -704,6 +831,44 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
             }
             out.rtProxyManifestPath = *value;
             rtSettingsSpecified = true;
+        } else if (arg == "--material-overrides") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (value->empty() || value->starts_with("--")) {
+                error = "--material-overrides requires a non-empty file path";
+                return false;
+            }
+            // F15.1 (ticket 05): the scene viewer applies the file after the glTF loads,
+            // before the scene store mirrors the library (records reach the GPU as deltas).
+            out.materialOverridesPath = std::string(*value);
+        } else if (arg == "--terrain-textures") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (value->empty() || value->starts_with("--")) {
+                error = "--terrain-textures requires a directory";
+                return false;
+            }
+            out.terrainTexturesPath = std::string(*value);
+        } else if (arg == "--corpus-rig") {
+            // F15.3 (ticket 22): the declared Phosphor rig of the Khronos corpus run, camera yaw,pitch in degrees around the model bounds.
+            const auto value = needValue();
+            if (!value) return false;
+            const size_t comma = value->find(',');
+            const std::string text(*value);
+            char* end = nullptr;
+            const float yaw = std::strtof(text.c_str(), &end);
+            if (comma == std::string_view::npos || end != text.c_str() + comma) {
+                error = "--corpus-rig: expected YAW,PITCH in degrees";
+                return false;
+            }
+            const float pitch = std::strtof(text.c_str() + comma + 1, &end);
+            if (*end != 0 || !std::isfinite(yaw) || !std::isfinite(pitch) || std::abs(yaw) > 360 || std::abs(pitch) > 85) {
+                error = "--corpus-rig: expected YAW,PITCH with |yaw| <= 360 and |pitch| <= 85 degrees";
+                return false;
+            }
+            out.corpusRig = true;
+            out.corpusYaw = yaw;
+            out.corpusPitch = pitch;
         } else if (arg == "--debug-rt") {
             if (!needCount(out.debugRt)) return false;
             rtSettingsSpecified = true;
@@ -1052,6 +1217,24 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
                 error = "--meshlet-triangle-cull: expected on or off, got '" + std::string(*value) + "'";
                 return false;
             }
+        } else if (arg == "--specular-ms") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "on") out.specularMs = true;
+            else if (*value == "off") out.specularMs = false;
+            else {
+                error = "--specular-ms: expected on or off, got '" + std::string(*value) + "'";
+                return false;
+            }
+        } else if (arg == "--thin-gi-back") {
+            const auto value = needValue();
+            if (!value) return false;
+            if (*value == "on") out.thinGiBack = true;
+            else if (*value == "off") out.thinGiBack = false;
+            else {
+                error = "--thin-gi-back: expected on or off, got '" + std::string(*value) + "'";
+                return false;
+            }
         } else if (arg == "--meshlet-object") {
             const auto value = needValue();
             if (!value) return false;
@@ -1183,21 +1366,38 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
     if(out.metalfxNativeDiagnostic&&(out.lightingDenoise!=LightingDenoiseMode::MetalFX||!out.denoisedFixture.empty()||!out.benchmark())){
         error="--metalfx-native-diagnostic requires --lighting-denoise metalfx, a benchmark run and no SDK fixture";return false;}
     if((!out.reflectionProbePath.empty() || out.reflectionCaptureProbe) && out.reflections==ReflectionMode::Off){error="Probe controls require --reflections";return false;}
+    if(out.legacyEnvironment&&(out.materialScene.empty()||out.reflections!=ReflectionMode::Off||out.lightingDenoise!=LightingDenoiseMode::Off||out.ao!=AoMode::Off)){error="--legacy-environment requires --material-scenario, --reflections off, --ao off and --lighting-denoise off (a reflection composite would own the declared environment)";return false;}
     if(out.debugProbeNoParallax&&(out.reflectionProbePath.empty()&&!out.reflectionCaptureProbe)){error="--debug-probe-no-parallax requires a captured or cooked probe";return false;}
     if ((out.shadows == ShadowMode::RT || out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off) && !out.rtEnabled) {
         error = "RT sun, local visibility and GI require --rt on"; return false;
     }
     if(!out.reflectionScene.empty() && (!out.bench||*out.bench!=5||!out.lightingScene.empty())){error="--reflection-scene requires --bench 6 and exclusive scene fixture";return false;}
+    if(out.lightingDenoiseEnergy&&out.lightingDenoise!=LightingDenoiseMode::Custom){error="--lighting-denoise-energy on requires --lighting-denoise custom";return false;}
     if(out.captureLinearSignal==9&&(out.ao==AoMode::Off||out.lightingDenoise!=LightingDenoiseMode::Custom)){error="Filtered AO capture requires AO and --lighting-denoise custom";return false;}
     if(out.captureLinearSignal==10&&(out.reflections==ReflectionMode::Off||out.lightingDenoise!=LightingDenoiseMode::Custom)){error="Filtered specular capture requires reflections and --lighting-denoise custom";return false;}
     if(out.reflectionScene=="ao-temporal-wall"&&(out.ao!=AoMode::RTAO||out.aoRadius!=2||out.gi!=GiMode::Off||out.reflections!=ReflectionMode::Off||out.directLighting!=DirectLightingMode::Legacy||out.temporalUpscale||out.renderScale!=1||out.dynamicResolution||out.temporalViews!=1||out.resolutionScript||out.referenceScale!=1)){error="Physical AO control requires RTAO radius2, fixed native geometry, one view and exclusive AO";return false;}
     if(out.captureLinearSignal==8&&(out.gi==GiMode::Off||out.lightingDenoise!=LightingDenoiseMode::Custom)){error="Filtered indirect capture requires GI and --lighting-denoise custom";return false;}
     if(out.captureLinearSignal==6 && out.reflections==ReflectionMode::Off){error="Specular capture requires --reflections";return false;}
     if(out.captureLinearSignal==7 && out.ao==AoMode::Off){error="AO capture requires --ao";return false;}
+    if(out.corpusRig && (!out.bench||*out.bench!=3||out.scenePath.empty()||out.scenePath=="procedural")){error="--corpus-rig requires --bench 4 and a glTF --scene";return false;}
+    if(!out.materialOverridesPath.empty() && (!out.bench||(*out.bench!=3&&!(*out.bench==1&&ChessFixture::validScenario(out.materialScene)))||out.scenePath.empty()||out.scenePath=="procedural")){error="--material-overrides requires --bench 4 (or --bench 2 with a chess --material-scenario) and a glTF --scene (the overrides name its materials)";return false;}
+    if(out.transmissionMotion && (out.materialScene.empty()||!TransmissionValidation::validScenario(out.materialScene))){error="--transmission-motion requires a transmission --material-scenario";return false;}
+    if(out.materialToggleEvery>0 && (out.materialScene.empty()||!MaterialValidation::validScenario(out.materialScene)||!MaterialValidation::spec(out.materialScene).hasSpecularGrid())){error="--material-toggle-every requires a specular grid --material-scenario";return false;}
+    if(!out.materialScene.empty() && (!out.bench||*out.bench!=1||!out.lightingScene.empty()||!out.reflectionScene.empty())){error="--material-scenario requires --bench 2 and exclusive scene fixture";return false;}
+    // F15.3: the declared environment reaches the image through the reflection transport (--reflections ssr, rt or
+    // probes: no captured probe, so the environment weight; F15.1 ticket 08) or, with reflections off, through the
+    // resolve's own deterministic environment terms.  A scenario without environment (sun/point lights only) has nothing the plain resolve would miss: it runs with
+    // --reflections off --lighting-denoise off (F15.1 ticket 08: --adaptive-shading compares two plain-resolve renders).
+    if(!out.legacyEnvironment && !out.materialScene.empty() && out.reflections==ReflectionMode::Off && out.lightingDenoise==LightingDenoiseMode::Off && MaterialValidation::environmentRadiance(out.materialScene)>0.0f){error="--material-scenario with --reflections off requires --lighting-denoise custom (lit resolve)";return false;}
     if(!out.lightingScene.empty() && (!out.bench || *out.bench!=5)){error="--lighting-scene requires --bench 6";return false;}
     if(!out.captureLinear.empty() && !out.captureLinearSequence.empty()){error="Choose single linear capture or linear sequence";return false;}
+    if(out.captureLinearAccumulate>0 && (out.captureLinear.empty() || out.captureLinearFrame+1<out.captureLinearAccumulate)){
+        error="--capture-linear-accumulate requires --capture-linear and N <= --capture-linear-frame + 1 (the averaged frames end at the capture frame)";return false;}
     if((!out.captureLinear.empty() || !out.captureLinearSequence.empty()) && (!out.visibility || !out.benchmark())){error="Linear capture requires --render-path visibility and --frames";return false;}
     if((out.giProbeAnchor||out.giSpacing||out.giGrid[0])&&out.gi==GiMode::Off){error="GI volume controls require --gi";return false;}
+    if(!out.debugTransmittanceMap && out.shadows!=ShadowMode::CSM){error="--debug-transmittance-map off requires --shadows csm";return false;}
+    if(!out.debugReceiverOwn && out.shadows!=ShadowMode::CSM){error="--debug-receiver-own off requires --shadows csm";return false;}
+    if((!out.debugTransmittanceDedup || out.debugTransmittanceInject) && !out.rtEnabled){error="--debug-transmittance-dedup off / --debug-transmittance-inject require --rt on";return false;}
     if(out.debugGiNoVisibility && (!out.debugLighting || out.gi==GiMode::Off || out.debugGiCorrupt)) {
         error="--debug-gi-no-visibility requires GI, --debug-lighting N>0 and no GI state corruption";return false;
     }
@@ -1231,6 +1431,21 @@ bool parseLaunchOptions(int argc, const char* const* argv, int benchCount,
         error = "Lighting corruption requires an enabled lighting path and --debug-lighting N"; return false;
     }
     if (out.debugLighting && !lighting) { error = "--debug-lighting requires F10-F12 lighting"; return false; }
+    // F15.1: the lobe guide is produced by the direct-lighting passes (visibility + mesh path).
+    if (out.debugTransmissionBothBranches && (!out.debugLighting || out.reflections != ReflectionMode::RT || out.materialScene.empty() || !TransmissionValidation::validScenario(out.materialScene))) {
+        error = "--debug-transmission-both-branches requires --debug-lighting, --reflections rt and a transmission --material-scenario"; return false;
+    }
+    if ((out.debugLobeGuideCorrupt || out.debugLobeGuideNoRog || out.debugLobeGuideDelay || !out.debugLobeGuideDump.empty()) && !out.debugLobeGuide) {
+        error = "--debug-lobe-guide-corrupt / --debug-lobe-guide-no-rog / --debug-lobe-guide-delay / --debug-lobe-guide-dump require --debug-lobe-guide N"; return false;
+    }
+    if (out.debugLobeGuide &&
+        (!out.visibility || out.geometryPath != GeometryPath::Mesh ||
+         !(out.directLighting != DirectLightingMode::Legacy || out.gi != GiMode::Off || out.reflections != ReflectionMode::Off ||
+           out.ao != AoMode::Off || out.lightingDenoise != LightingDenoiseMode::Off || out.fog))) {
+        error = "--debug-lobe-guide requires --render-path visibility, --geometry-path mesh and a lighting path with "
+                "direct-lighting passes (--lighting not legacy, or GI, reflections, AO, denoise or fog)";
+        return false;
+    }
     // F9: diagnostics must never appear accepted when their graph is absent.
     if (!out.rtEnabled && (rtSettingsSpecified || out.rtProxyManifest || out.debugView == MeshletDebugView::RT)) {
         error = "RT settings / --debug-view rt require --rt on";

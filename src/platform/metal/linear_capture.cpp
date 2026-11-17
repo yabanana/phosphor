@@ -76,7 +76,10 @@ void LinearCapture::prepareFrame(u32 index, u64 frameIndex, u32 width, u32 heigh
     auto& slot = slots_.at(index);
     if (slot.pending) throw std::logic_error("Consume completed linear capture before reusing its frame slot");
     if (frameIndex == std::numeric_limits<u64>::max()) throw std::overflow_error("Linear capture completion overflow");
-    const bool single = !config_.path.empty() && !singleWritten_ && frameIndex == config_.frame;
+    // accumulate N: the N frames ending at config_.frame (frames count from 0; the options validate N <= frame + 1).
+    const bool inWindow = config_.accumulate > 0 ? (frameIndex <= config_.frame && frameIndex + config_.accumulate > config_.frame)
+                                                 : frameIndex == config_.frame;
+    const bool single = !config_.path.empty() && !singleWritten_ && inWindow;
     const bool sequence = !config_.sequence.empty() && frameIndex % config_.every == 0;
     const bool enabled = single || sequence;
     if (enabled && (!width || !height)) throw std::invalid_argument("Linear capture source extent is empty");
@@ -131,7 +134,7 @@ void LinearCapture::addToGraph(rg::RenderGraph& graph, rg::TextureRef linearHdr)
             auto* source = static_cast<MTL::Texture*>(context.texture(linearHdr));
             if (!source || source->width() < slot.width || source->height() < slot.height ||
                 (source->pixelFormat() != MTL::PixelFormatRGBA16Float && source->pixelFormat() != MTL::PixelFormatRGBA32Float &&
-                 !(config_.scalar && (source->pixelFormat() == MTL::PixelFormatR16Float || source->pixelFormat() == MTL::PixelFormatR32Float))))
+                 !(config_.scalar && (source->pixelFormat() == MTL::PixelFormatR16Float || source->pixelFormat() == MTL::PixelFormatR32Float || source->pixelFormat() == MTL::PixelFormatR8Unorm))))
                 throw std::invalid_argument("Linear capture format does not match the declared RGB/scalar source");
             auto* pipeline = pipelines_.compute(pipeline_);
             if (!pipeline) throw std::runtime_error("Linear capture pipeline is not ready");
@@ -170,7 +173,25 @@ bool LinearCapture::consume(u32 index) {
         if(std::filesystem::exists(sidecar))throw std::runtime_error("Refuse completed capture metadata overwrite");
         std::ofstream file(sidecar);file<<document.dump(2)<<'\n';if(!file)throw std::runtime_error("Cannot publish completed capture metadata");
     };
-    if (slot.single){writeCapture(config_.path, slot.width, slot.height, slot.rgb, slot.index);publishMetadata(config_.path);}
+    bool singleDone = slot.single;
+    if (slot.single && config_.accumulate > 0) {
+        // Frames are consumed in submission order (the slot ring); a gap or a size change would corrupt the mean.
+        if (accumulated_ > 0 && (slot.index != lastAccumulated_ + 1 || sum_.size() != slot.rgb.size()))
+            throw std::logic_error("Linear capture accumulation saw a frame gap or an extent change");
+        if (accumulated_ == 0) sum_.assign(slot.rgb.size(), 0.0);
+        for (size_t k = 0; k < slot.rgb.size(); ++k) sum_[k] += double(slot.rgb[k]);
+        ++accumulated_;
+        lastAccumulated_ = slot.index;
+        singleDone = slot.index == config_.frame;
+        if (singleDone) {
+            if (accumulated_ != config_.accumulate) throw std::logic_error("Linear capture accumulation missed frames of its window");
+            for (size_t k = 0; k < slot.rgb.size(); ++k) slot.rgb[k] = float(sum_[k] / double(accumulated_));
+            sum_.clear();
+            LOG_INFO("Linear HDR capture accumulated %llu frames ending at frame %llu", static_cast<unsigned long long>(accumulated_),
+                     static_cast<unsigned long long>(slot.index));
+        }
+    }
+    if (slot.single && singleDone){writeCapture(config_.path, slot.width, slot.height, slot.rgb, slot.index);publishMetadata(config_.path);}
     if (slot.sequence) {
         std::ostringstream name;
         name << "frame-" << std::setfill('0') << std::setw(6) << slot.index << ".pfm";
@@ -178,7 +199,7 @@ bool LinearCapture::consume(u32 index) {
         writeCapture(capturePath, slot.width, slot.height, slot.rgb, slot.index);
         publishMetadata(capturePath);
     }
-    if (slot.single) singleWritten_ = true;
+    if (slot.single && singleDone) singleWritten_ = true;
     slot.pending = false;
     return true;
 }

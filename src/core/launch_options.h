@@ -61,6 +61,17 @@ namespace phosphor {
 //                      specialised variants and draws with the generic
 //                      pipeline, the fallback a new variant uses while it
 //                      compiles (F3.2/F3.3 check: same pixels as before F3)
+//   --debug-material-module exact|fast|exact-all  DEBUG: exact (default) = scenes with
+//                      material features use the exact-maths resolve module;
+//                      fast = they keep the base fast-maths kernels (A/B of the
+//                      module's cost inside one binary; needs --pipeline-sync);
+//                      exact-all = TEST: scenes without material features use
+//                      the exact module too (layer-equal comparisons, F15.4)
+//   --debug-pipeline-xpc-fail N  the first N pipeline compile attempts of
+//                      the run fail with a synthetic "interrupted connection"
+//                      error (XPC_ERROR_CONNECTION_INTERRUPTED), injected
+//                      before the real compile call: N up to 3 is absorbed
+//                      by the bounded retry, a larger N must fail (control)
 //   --debug-mode N     start in debug view N (0 lit, 1 normals, 2 base colour;
 //                      the F1-F3 keys, for benchmark/capture runs)
 //   --force-variant N  the forward pass always draws with variant N of the
@@ -142,6 +153,22 @@ namespace phosphor {
 //   --debug-gpu-scene-corrupt KIND  negative control of the check above:
 //                      delta, plane, command or touch (one deliberate
 //                      corruption that the check must report)
+//   --debug-lobe-guide N  F15.1 self-check: every N frames the per-pixel lobe
+//                      guide and the DI surfaces are read back and the guide is
+//                      compared bit for bit with the CPU reconstruction (prints
+//                      a LOBE-GUIDE line, exit code 1 on FAIL; 0 = off; needs
+//                      the visibility + mesh path with direct-lighting passes)
+//   --debug-lobe-guide-corrupt  negative control of the check above
+//   --debug-lobe-guide-no-rog  overflow receivers without the raster order group on the guide (negative control of the coplanar fixture)
+//   --debug-lobe-guide-delay  bounded per-fragment delay before the guide write (lets overlapping fragments finish out of order)
+//   --debug-lobe-guide-dump FILE  raw guide bytes of the last checked frame
+//   --debug-transmittance-dedup on|off  F15.1 (ticket 14): off removes the
+//                      per-primitive duplicate filter of the shadow-ray
+//                      transmittance accumulation (negative control; needs
+//                      --rt on; default on)
+//   --debug-transmittance-inject  F15.1 (ticket 14): every transmissive
+//                      triangle accumulates twice (spike control of the
+//                      duplicate filter; needs --rt on)
 //   --geometry-path indexed|mesh  F6.3: the scene is drawn with indexed draws
 //                      (the F5 reference, default) or with object + mesh
 //                      shaders over meshlets (needs --gpu-driven on)
@@ -180,15 +207,34 @@ namespace phosphor {
 //   --meshlet-triangle-cull on|off  F6.3 option: the mesh shader also drops
 //                      back/front-facing triangles and compacts the rest
 //                      (default off: measured slower on M5 Max)
+//   --specular-ms on|off  F15 closure (ADR-0007): Kulla-Conty multiple-scattering energy compensation of the GGX
+//                      specular lobes (lights, sun, DI/ReSTIR/clustered, environment, GI-fed ambient); default ON (owner
+//                      decision 2026-11-15, a declared deviation from glTF Appendix B); off = the Appendix B model of
+//                      ADR-0006, bit-identical to the tree before the option existed
+//   --thin-gi-back on|off  F15.1 (ticket 19): thin-walled subsurface pixels read the DDGI probe
+//                      irradiance at -N for the transmitted GI term (default on; off = the
+//                      pixel's own GI irradiance at N stands for it: the control)
 //   --meshlet-object off  spike S2: mesh-only pipeline without object stage
 //                      (needs --meshlet-cull off; a measurement variant)
 //   --history-reset-every N  F6.5: invalidate the Hi-Z history every N
 //                      frames (camera-cut path; 0 = only on real cuts)
 //
 //   --rt off|on        F9 BLAS/TLAS infrastructure (default off)
+//   --subsurface-mode diffusion|rt-walk  F15.1 (ticket 17/18): the volumetric-subsurface technique: the screen-space Burley diffusion
+//                      (default) or the optional ray-traced random walk (needs --rt on; otherwise the diffusion serves, logged)
+//   --subsurface-samples N  walks per pixel and frame of rt-walk (default 16)
+//   --subsurface-accumulate on|off  temporal accumulation (reprojection, depth / material rejection) + 9x9 edge-aware prefilter of the walk (default on)
+//   --subsurface-history N  bound of the accumulated history length (default 64)
+//   --subsurface-steps N    hard bound of the events of one walk (default 512)
+//   --subsurface-walk-shadows on|off  occlude the lights at the exits of the walk by a shadow ray (default: on with --shadows other than off)
+//   --debug-subsurface-walk-lights off  negative control: the walk lights nothing
+//   --debug-subsurface-di-diffuse keep  negative control: DI keeps the diffuse of walk pixels (double counted)
 //   --rt-tlas-rebuild-every N  periodic TLAS rebuild, 0 = structural changes only
 //   --rt-proxy off|manifest    RT geometry source (default full geometry)
 //   --rt-proxy-manifest PATH   explicit measured manifest (needs manifest mode)
+//   --material-overrides FILE  F15.1: name-keyed phosphor-material-overrides JSON applied over the loaded glTF
+//                      (needs --bench 4 and --scene FILE; unknown names or invalid values abort the load)
+//   --terrain-textures DIR  F15.4: the unpacked CC0 terrain sets (tools/fetch_terrain_materials.py) for a terrain --material-scenario
 //   --debug-view rt    RT primary-hit diagnostic, also on the indexed path
 //   --debug-rt N       CPU reference comparison every N frames (0 = disabled)
 //   --debug-rt-deform  deform mesh 0 for BLAS lifecycle diagnostics; requires
@@ -208,7 +254,7 @@ namespace phosphor {
 /// F5.3 submission of the scene's draws (--gpu-driven).
 enum class GpuDrivenMode : u8 { Off, On };
 /// F5 self-check negative controls (--debug-gpu-scene-corrupt).
-enum class SceneCorruption : u8 { None, Delta, Plane, Command, Touch };
+enum class SceneCorruption : u8 { None, Delta, Plane, Command, Touch, Extension };
 
 /// F6 geometry submission and meshlet culling.
 enum class GeometryPath : u8 { Indexed, Mesh };
@@ -278,6 +324,9 @@ struct LaunchOptions {
     std::string frameTracePath;
     bool        debugCompileStorm  = false;
     bool        debugPipelineFallback = false;
+    bool        debugMaterialModuleFast = false; // --debug-material-module fast
+    bool        debugMaterialModuleAll  = false; // --debug-material-module exact-all
+    u32         debugPipelineXpcFail  = 0;    // --debug-pipeline-xpc-fail N (0 = off)
     bool        debugFlexiblePipelines = false;
     u32         debugMode      = 0;
     std::optional<u32> forceVariant;
@@ -334,9 +383,23 @@ struct LaunchOptions {
     u32          meshletMaxTriangles = 0; // 0 = default (124)
     // F9: RT infrastructure is opt-in until a lighting consumer needs it.
     bool         rtEnabled = false;           // --rt off|on
+    // F15.1 (ticket 17/18): the volumetric-subsurface technique (SubsurfaceMode::RtWalk needs rtEnabled).
+    enum class SubsurfaceMode : u8 { Diffusion, RtWalk };
+    SubsurfaceMode subsurfaceMode = SubsurfaceMode::Diffusion;
+    u32          subsurfaceSamples = 16;       // walks per pixel and frame (accumulated over frames: the product default)
+    bool         subsurfaceAccumulate = true;  // --subsurface-accumulate on|off: temporal accumulation + spatial prefilter of the walk signal
+    u32          subsurfaceHistory = 64;       // --subsurface-history N: bound of the accumulated history length (frames, <= 255)
+    u32          subsurfaceSteps = 512;
+    int          subsurfaceWalkShadows = -1;  // -1 = follows --shadows, 0 off, 1 on
+    bool         debugSubsurfaceDiDiffuse = false; // --debug-subsurface-di-diffuse keep: negative control, DI keeps its full diffuse on top of the walk
+    bool         debugSubsurfaceWalkLights = true; // false = negative control: the walk lights nothing
     u32          rtTlasRebuildEvery = 0;        // 0 = structural changes only; cadence needs engine measurements
     bool         rtProxyManifest = false;      // --rt-proxy off|manifest
     std::string  rtProxyManifestPath;          // empty = scene's default manifest, missing = full geometry
+    std::string  terrainTexturesPath;          // F15.4 --terrain-textures DIR (empty = procedural stand-ins)
+    std::string  materialOverridesPath;        // F15.1 --material-overrides FILE (empty = none), applied by the scene viewer
+    bool         corpusRig = false;            // F15.3 ticket 22 --corpus-rig YAW,PITCH: declared light rig + bounds framing (testbench/corpus_rig.h)
+    float        corpusYaw = 0, corpusPitch = 0;
     u32          debugRt = 0;                  // --debug-rt N: readback/check cadence, 0 = off
     bool         debugRtDeform = false;       // diagnostic mesh-0 deformation; raster bounds are unchanged
     RtProxyTransition debugRtProxyTransition = RtProxyTransition::None;
@@ -389,11 +452,13 @@ struct LaunchOptions {
     // diagnostic domain (measurement only, never production qualification).
     bool metalfxNativeDiagnostic=false;
     bool debugProbeNoParallax=false; // F13.5 negative control: direction-only probe lookup
+    bool legacyEnvironment=false;    // F15.3 (ticket 11): a material scenario shades with the legacy two-colour hemisphere environment instead of its declared constant one (requires --reflections off, --ao off, --lighting-denoise off)
     std::string denoisedFixture,denoisedFixtureOutput;bool denoisedFixturePreExposed=false,denoisedFixtureAutoExposure=false,denoisedFixtureManualExposureControl=false;u32 denoisedFixturePrewarmMs=120000;
     ReflectionMode reflections=ReflectionMode::Off;
     AoMode ao=AoMode::Off;
     LightingDenoiseMode lightingDenoise=LightingDenoiseMode::Off;
-    float aoRadius=1.0f;u32 reflectionSamples=1,debugReflectionCorrupt=0;
+    bool lightingDenoiseEnergy=false; // F13.4 experiment: energy-preserving (sender-normalised, symmetric-weight) a-trous; default off = the row-normalised filter
+    float aoRadius=1.0f;u32 reflectionSamples=1,debugReflectionCorrupt=0;u32 reflectionBounces=3; // --reflection-bounces 0..3: extra ideal-mirror bounces of a reflection ray through metal-like mirror hits (3 = ticket 22 C22-A1, the default; 0 = the F13 single bounce)
     bool reflectionCaptureProbe=false;
     std::string reflectionProbePath;
     ShadowMode shadows = ShadowMode::Off;
@@ -403,17 +468,63 @@ struct LaunchOptions {
     u32 localLightCount = 1024;
     bool areaLights = false, stationaryLights = false;
     u32 shadowMapResolution = 2048, lightingSeed = 1;
+    // F15.1 (ticket 15): --shadow-transmittance-divisor 1|2|4: the CSM transmittance map has (--shadow-map-size / divisor)^2 texels.
+    // Default 2 (measured, F15.1 ticket 15: the three @csm gates are identical at 1, 2 and 4; 64.25 / 16.06 / 4.2 MiB per cascade at 2048^2).
+    u32 shadowTransmittanceDivisor = 2;
     u32 lightingCandidates = 8, lightingSpatialSamples = 4, giRays = 64;
     u32 debugLighting = 0, debugLightingCorrupt = 0, debugGiCorrupt=0;
+    // F15.1 (ticket 06): --debug-lobe-guide N reads back the lobe guide and the DI surfaces every N frames and
+    // compares the guide with its CPU reconstruction (LOBE-GUIDE line, exit 1 on FAIL); --debug-lobe-guide-corrupt
+    // is its negative control (producers add 0.25 to the ior of extended pixels); --debug-lobe-guide-dump FILE writes
+    // the raw guide bytes of the last checked frame.
+    u32 debugLobeGuide = 0;
+    bool debugLobeGuideCorrupt = false;
+    // F15 closure (ticket 06): --debug-lobe-guide-no-rog runs the overflow receivers with the entry point whose guide buffer is NOT a
+    // raster order group (negative control of the coplanar-overlap fixture, tools/f15_lobe_guide_coplanar_check.sh).
+    bool debugLobeGuideNoRog = false;
+    // --debug-lobe-guide-delay: the guide-writing receivers wait a data-dependent bounded time before the write (see DI_LOBE_GUIDE_DELAY).
+    bool debugLobeGuideDelay = false;
+    bool debugTransmissionBothBranches = false; // --debug-transmission-both-branches (verification only; needs --debug-lighting): both Fresnel branches at the visible glass interface
+    std::string debugLobeGuideDump;
     bool debugGiNoVisibility=false; // Physical quality negative; invariant checks stay enabled.
-    std::string exportReference, captureLinear, captureLinearSequence, lightingScene,reflectionScene;
+    // F15.1 (ticket 14): --debug-transmittance-dedup on|off.  off removes the per-primitive duplicate filter of the transmittance accumulation
+    // (negative control: if hardware invokes the intersection function twice for a triangle the surface factor is applied twice).
+    bool debugTransmittanceDedup=true;
+    // --debug-transmittance-inject: every transmissive triangle invokes the accumulation twice (a deliberate duplicate: with the filter on the
+    // image is unchanged, with --debug-transmittance-dedup off every surface factor is applied twice).
+    bool debugTransmittanceInject=false;
+    // F15.1 (ticket 15): --debug-transmittance-map on|off (--shadows csm).  off: the receiver ignores the CSM transmittance map, so transmissive
+    // casters cast no shadow at all (negative control of the map).
+    bool debugTransmittanceMap=true;
+    // F15 closure (ticket 15): --debug-receiver-own on|off (--shadows csm).  off: a transmissive RECEIVER keeps its own surface in the transmittance
+    // map sum (the behaviour before the fix: a pane behind another pane is attenuated by its own Fresnel pass and tint again); the negative control.
+    bool debugReceiverOwn=true;
+    // F15 closure (ticket 13): --debug-glass-tint entry|camera.  camera: the refraction walk tints only the camera-visible surface (the behaviour before the
+    // tint rule; the negative control of the tint fixtures); entry (default): once per closed solid at its entering interface and at every thin-walled surface.
+    bool debugGlassTintCameraOnly=false;
+    std::string exportReference, captureLinear, captureLinearSequence, lightingScene,reflectionScene,materialScene;
+    // F15.3 (ticket 13): --capture-linear-accumulate N averages the last N frames (ending at --capture-linear-frame) of the
+    // linear signal on the CPU (test infrastructure for the one-stochastic-sample-per-pixel transport; 0 = the single frame).
+    u32 captureLinearAccumulate = 0;
+    bool materialMotion = false;  // --material-motion: scripted camera strafe on a material scenario (walk clip)
+    bool debugSubsurfaceHistoryNoReject = false; // --debug-subsurface-history reject-never: negative control of the walk accumulation
+    bool transmissionMotion = false; // --transmission-motion: scripted camera orbit + moving emissive panel on a transmission fixture (F15.1 ticket 13 clip)
+    u32 materialToggleEvery = 0; // --material-toggle-every N: specular grids edit/toggle their extension every N frames
     bool giProbeAnchor=false;
     float giAnchor[3]{},giSpacing=0;
     u32 giGrid[3]{};
-    u32 exportReferenceFrame=0, captureLinearFrame=0, captureLinearSignal=0; // 0 HDR, 1 indirect diffuse, 2 direct; tester reserves 3 shadow, 4 world position, 5 world normal; 6 specular, 7 AO, 8 filtered indirect diffuse Lo, 9 filtered AO visibility, 10 filtered specular Lo, 11 composed cloud transmittance
+    u32 exportReferenceFrame=0, captureLinearFrame=0, captureLinearSignal=0; // 0 HDR, 1 indirect diffuse, 2 direct; tester reserves 3 shadow, 4 world position, 5 world normal; 6 specular, 7 AO, 8 filtered indirect diffuse Lo, 9 filtered AO visibility, 10 filtered specular Lo, 11 composed cloud transmittance, 12 MetalFX reactive mask (R8Unorm, F15.1 ticket 13)
     // F7/F8 renderer, temporal reconstruction, capture and bounded diagnostics.
     std::string scenePath;
     bool visibility = false, materialBinning = false; // measured baseline; specialization stays opt-in
+    // F15.2 (ticket 21): --resolve-features all serves the visibility resolve of a scene with material features by the
+    // all-lobes pipeline (the exact-equivalence reference of the class pipelines; union = the default, the scene's union);
+    // --debug-class-drop-lobes MASK compiles every class bin pipeline without those lobes (negative control, must differ);
+    // --export-class-manifest FILE writes the feature-class manifest of the scene the app loaded (renderer/material_class_manifest.h).
+    bool resolveFeaturesAll = false;
+    u32 debugClassDropLobes = 0;
+    u32 debugClassBudget = 16; // --debug-class-budget N: the class table keeps N classes (1..16), the rest takes the overflow bin
+    std::string exportClassManifest;
     bool tileResolve = false;
     bool adaptiveShading = false;
     bool debugAdaptiveNoHistory = false;
@@ -442,6 +553,8 @@ struct LaunchOptions {
     bool         meshletObjectStage = true; // --meshlet-object off: spike S2 mesh-only pipeline
     float        meshletMinPixels   = 0.0f; // --meshlet-min-pixels P (approximate size cull, 0 = off)
     bool         meshletTriangleCull = false; // --meshlet-triangle-cull on
+    bool         specularMs = true; // --specular-ms on|off (F15 closure, ADR-0007: default on)
+    bool         thinGiBack = true; // --thin-gi-back on|off (F15.1 ticket 19)
 
     [[nodiscard]] bool benchmark() const { return frames > 0; }
 };

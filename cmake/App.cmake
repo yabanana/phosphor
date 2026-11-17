@@ -56,49 +56,36 @@ file(GLOB PHOSPHOR_METAL_SHADERS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*
 list(REMOVE_ITEM PHOSPHOR_METAL_SHADERS
     ${CMAKE_SOURCE_DIR}/shaders/forward.metal
     ${CMAKE_SOURCE_DIR}/shaders/visibility_resolve.metal
-    ${CMAKE_SOURCE_DIR}/shaders/material_passes.metal)
+    ${CMAKE_SOURCE_DIR}/shaders/material_passes.metal
+    ${CMAKE_SOURCE_DIR}/shaders/restir_di_lobe.metal
+    ${CMAKE_SOURCE_DIR}/shaders/light_cluster_lobe.metal
+    ${CMAKE_SOURCE_DIR}/shaders/reflection_lobe.metal
+    ${CMAKE_SOURCE_DIR}/shaders/denoise_lobe.metal)
+list(REMOVE_ITEM PHOSPHOR_METAL_SHADERS ${CMAKE_SOURCE_DIR}/shaders/material_passes_exact.metal)
+list(PREPEND PHOSPHOR_METAL_SHADERS ${CMAKE_SOURCE_DIR}/shaders/material_passes_exact.metal)
 list(PREPEND PHOSPHOR_METAL_SHADERS ${CMAKE_SOURCE_DIR}/shaders/material_passes.metal)
-# Headers the shaders include (C++/MSL shared): an edit recompiles every shader.
-set(PHOSPHOR_SHADER_HEADERS
+# Headers the shaders include (C++/MSL shared): an edit recompiles every shader.  F15: the list was hand-kept and
+# missed new headers (renderer/dfg_table.h, lobe_guide_pack.h, sheen_table.h, lobe_select.h, transmission_math.h,
+# shaders/reflection_lobe.h ...), so a header-only edit left a stale metallib.  Every header a shader can include is
+# now globbed (over-inclusion only costs rebuilds), plus the .metal sources that other shaders #include.
+file(GLOB_RECURSE PHOSPHOR_SHADER_HEADERS CONFIGURE_DEPENDS
+    ${CMAKE_SOURCE_DIR}/shaders/*.h
+    ${CMAKE_SOURCE_DIR}/src/renderer/*.h
+    ${CMAKE_SOURCE_DIR}/src/diagnostics/*.h
+    ${CMAKE_SOURCE_DIR}/src/platform/metal/*_check.h)
+list(APPEND PHOSPHOR_SHADER_HEADERS
+    ${CMAKE_SOURCE_DIR}/shaders/restir_di.metal
+    ${CMAKE_SOURCE_DIR}/shaders/light_cluster.metal
+    ${CMAKE_SOURCE_DIR}/shaders/restir_di_lobe.metal
+    ${CMAKE_SOURCE_DIR}/shaders/light_cluster_lobe.metal
+    ${CMAKE_SOURCE_DIR}/shaders/reflection_lobe.metal
+    ${CMAKE_SOURCE_DIR}/shaders/denoise_lobe.metal
+    ${CMAKE_SOURCE_DIR}/shaders/denoise.metal
+    ${CMAKE_SOURCE_DIR}/shaders/reflections.metal
+    ${CMAKE_SOURCE_DIR}/shaders/reflection_probes.metal
+    ${CMAKE_SOURCE_DIR}/shaders/reflection_composite.metal
     ${CMAKE_SOURCE_DIR}/shaders/forward.metal
-    ${CMAKE_SOURCE_DIR}/shaders/visibility_resolve.metal
-    ${CMAKE_SOURCE_DIR}/shaders/material_shading.h
-    ${CMAKE_SOURCE_DIR}/shaders/surface_geometry.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/normal_transform.h
-    ${CMAKE_SOURCE_DIR}/shaders/temporal_motion.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/temporal_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/post_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/visibility_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/visibility_math.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/gpu_types.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/denoise_history_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/metalfx_denoise_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/metalfx_denoise_fixture_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/visibility_layout.h
-    ${CMAKE_SOURCE_DIR}/shaders/reflection_common.h
-    ${CMAKE_SOURCE_DIR}/shaders/reflection_reduce.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/reflection_probe_storage.h
-    ${CMAKE_SOURCE_DIR}/shaders/atmosphere_common.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/atmosphere_bindings.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/volume_noise.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/volume_math.h
-    ${CMAKE_SOURCE_DIR}/shaders/gi_common.h
-    ${CMAKE_SOURCE_DIR}/shaders/gi_cache_common.h
-    ${CMAKE_SOURCE_DIR}/shaders/restir_common.h
-    ${CMAKE_SOURCE_DIR}/shaders/light_visibility.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/shadow_math.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/shadow_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/shadow_dispatch.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/rt_geometry.h
-    ${CMAKE_SOURCE_DIR}/shaders/rt_common.h
-    ${CMAKE_SOURCE_DIR}/src/platform/metal/rt_visibility_check.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/gpu_scene_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/gpu_queue.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/cull_math.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/transform_math.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/meshlet_layout.h
-    ${CMAKE_SOURCE_DIR}/src/renderer/meshlet_cull_math.h
-    ${CMAKE_SOURCE_DIR}/src/diagnostics/overlay_math.h)
+    ${CMAKE_SOURCE_DIR}/shaders/visibility_resolve.metal)
 set(PHOSPHOR_SHADER_OUT ${CMAKE_BINARY_DIR}/shaders)
 set(PHOSPHOR_METALLIB ${PHOSPHOR_SHADER_OUT}/phosphor.metallib)
 set(PHOSPHOR_METAL_FLAGS -std=metal4.0 -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}
@@ -114,6 +101,8 @@ if(PHOSPHOR_SHADER_DEBUG_INFO AND CMAKE_BUILD_TYPE MATCHES "Debug|RelWithDebInfo
     set(PHOSPHOR_SHADER_HAS_DEBUG_INFO ON)
 endif()
 
+# F15.2 (ticket 21): the exact-maths copy of the resolve kernels (shaders/material_passes_exact.metal) is its own module, linked second.
+set(PHOSPHOR_METAL_EXTRA_FLAGS_material_passes_exact -fmetal-math-mode=safe -DPHOSPHOR_EXACT_MODULE=1 -Wno-modules-import-nested-redundant)
 set(PHOSPHOR_AIR_FILES)
 foreach(shader IN LISTS PHOSPHOR_METAL_SHADERS)
     get_filename_component(name ${shader} NAME_WE)
@@ -121,7 +110,7 @@ foreach(shader IN LISTS PHOSPHOR_METAL_SHADERS)
     add_custom_command(
         OUTPUT ${air}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${PHOSPHOR_SHADER_OUT}
-        COMMAND ${PHOSPHOR_METAL_COMMAND} ${PHOSPHOR_METAL_FLAGS} -c ${shader} -o ${air}
+        COMMAND ${PHOSPHOR_METAL_COMMAND} ${PHOSPHOR_METAL_FLAGS} ${PHOSPHOR_METAL_EXTRA_FLAGS_${name}} -c ${shader} -o ${air}
         DEPENDS ${shader} ${PHOSPHOR_SHADER_HEADERS}
                 ${PHOSPHOR_VARIANTS_MSL_HEADER} phosphor_variants
         COMMENT "Compiling Metal shader ${name}.metal"
@@ -162,7 +151,7 @@ foreach(shader IN LISTS PHOSPHOR_METAL_SHADERS)
     add_custom_command(
         OUTPUT ${air}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${PHOSPHOR_PROBE_OUT}
-        COMMAND ${PHOSPHOR_METAL_COMMAND} ${PHOSPHOR_METAL_FLAGS} -DPHOSPHOR_HOT_RELOAD_PROBE=1 -c ${shader} -o ${air}
+        COMMAND ${PHOSPHOR_METAL_COMMAND} ${PHOSPHOR_METAL_FLAGS} ${PHOSPHOR_METAL_EXTRA_FLAGS_${name}} -DPHOSPHOR_HOT_RELOAD_PROBE=1 -c ${shader} -o ${air}
         DEPENDS ${shader} ${PHOSPHOR_SHADER_OUT}/${name}.air
         COMMENT "Compiling hot-reload probe shader ${name}.metal"
         VERBATIM
@@ -284,6 +273,13 @@ add_executable(timestamp_spike
 )
 target_link_libraries(timestamp_spike PRIVATE metal_cpp)
 target_compile_features(timestamp_spike PRIVATE cxx_std_20)
+
+# --- F3.2/F15 AGX linked-intersection compile stress (measurement tool, not engine code) ---
+# Concurrent compiles of compute pipelines linking rt_alpha_generic; driven by
+# tools/agx_link_stress.py (each batch in a child process).
+add_executable(agx_link_stress bench/agx_link_stress/agx_link_stress.cpp)
+target_link_libraries(agx_link_stress PRIVATE metal_cpp)
+target_compile_features(agx_link_stress PRIVATE cxx_std_20)
 
 # --- OPT-0.1 SoC characterisation suite (measurement tool, not engine code) ---
 # bench/soc: one file per benchmark group, registered with SOC_BENCH; MSL in

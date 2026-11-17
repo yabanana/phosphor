@@ -223,6 +223,7 @@ private:
     std::vector<FrameSample> samples_;
     u64                      allocationsAtStart_ = 0;
     u64 commandRebuildsAtStart_ = 0;
+    pipe::PipelineStats pipelineStatsAtStart_{}; // F15.2: pipeline counters when the measured frames start (report pipelines.measured)
     u64                      heapBlocksAtStart_  = 0;
     u64                      heapBytesAtStart_   = 0;
     // CPU time spent blocked in beginFrame() (slot + drawable waits).
@@ -281,6 +282,7 @@ private:
     u32                         requestsBeforeFrame_ = 0;
     double                      requestMsBeforeFrame_ = 0.0;
     double                      rtCompileMsBeforeFrame_ = 0.0;
+    bool                        classManifestExported_ = false; // --export-class-manifest (F15.2): written once, after the first scene sync
     std::chrono::steady_clock::time_point launch_;
     float eventPumpMs_ = 0.0f;
     bool                        firstFrameLogged_ = false;
@@ -309,6 +311,7 @@ private:
         u64 reflectionResources=0,denoiseResources=0,atmosphereResources=0;
         bool reflectionReady=false;
         u64 fixtureResources=0;bool fixtureReady=false;
+        u32 subsurface=0; // F15.1 (ticket 17/18): 0 none, 1 diffuse-irradiance target + diffusion pass, 2 target + RT walk pass
         bool operator==(const GraphKey&) const = default;
     };
     rg::RenderGraph frameGraph_;

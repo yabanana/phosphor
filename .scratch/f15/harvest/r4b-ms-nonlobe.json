@@ -1,0 +1,39 @@
+{
+  "function_descriptors": {
+    "library_function_descriptors": [
+      {
+        "label": "405D652C96EB64FB2BEF828673A2E57AB0A3C7E3CCCB9D0168400AEBACEDD57F",
+        "library": "92C28E2C9E81D1BDC980D6E173D5EAEDA4135C67C8B06B4EF1EEB4C624BA3FF2",
+        "name": "reflection_probe_only_ms"
+      }
+    ],
+    "specialized_function_descriptors": []
+  },
+  "generator": "MetalFramework",
+  "libraries": [
+    {
+      "label": "92C28E2C9E81D1BDC980D6E173D5EAEDA4135C67C8B06B4EF1EEB4C624BA3FF2",
+      "path": "@PHOSPHOR_METALLIB@"
+    }
+  ],
+  "pipeline_descriptors": {
+    "compute_pipeline_descriptors": [
+      {
+        "compute_function_descriptor": "fnd:405D652C96EB64FB2BEF828673A2E57AB0A3C7E3CCCB9D0168400AEBACEDD57F",
+        "required_threads_per_threadgroup": [
+          0,
+          0,
+          0
+        ]
+      }
+    ],
+    "mesh_render_pipeline_descriptors": [],
+    "render_pipeline_descriptors": [],
+    "tile_render_pipeline_descriptors": []
+  },
+  "version": {
+    "major": 0,
+    "minor": 1,
+    "sub_minor": 0
+  }
+}

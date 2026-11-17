@@ -224,6 +224,22 @@ TEST_CASE("tbdr: distinct slots fuse into one group with several attachments") {
     CHECK(c.renderGroups[0].attachments[1].slot == 1);
 }
 
+TEST_CASE("tbdr: a standalone pass never shares a render group (F15.1 ticket 15)") {
+    // Distinct slots would fuse (previous test); a standalone member closes the group to the previous AND to the next pass.
+    for (int standalonePass : {0, 1, 2}) {
+        RenderGraph g;
+        TextureRef a = g.importTexture("a", colorDesc(), ImportOutput);
+        TextureRef b2 = g.importTexture("b", colorDesc(), ImportOutput);
+        TextureRef c2 = g.importTexture("c", colorDesc(), ImportOutput);
+        g.addPass("P1", PassType::Raster, [&](PassBuilder& b) { a = b.writeColor(a, 0, LoadIntent::Clear); if (standalonePass == 0) b.setStandalone(); }, nullptr);
+        g.addPass("P2", PassType::Raster, [&](PassBuilder& b) { b2 = b.writeColor(b2, 1, LoadIntent::Clear); if (standalonePass == 1) b.setStandalone(); }, nullptr);
+        g.addPass("P3", PassType::Raster, [&](PassBuilder& b) { c2 = b.writeColor(c2, 2, LoadIntent::Clear); if (standalonePass == 2) b.setStandalone(); }, nullptr);
+        const CompiledGraph c = build(g);
+        // 0: {P1} {P2 P3}; 1: {P1} {P2} {P3}; 2: {P1 P2} {P3}
+        CHECK(c.renderGroups.size() == (standalonePass == 1 ? 3u : 2u));
+    }
+}
+
 TEST_CASE("tbdr: same resource in a different slot gives two groups") {
     RenderGraph g;
     TextureRef a = g.importTexture("a", colorDesc(), ImportOutput);

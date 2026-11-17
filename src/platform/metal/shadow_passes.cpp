@@ -1,20 +1,25 @@
 #include "platform/metal/shadow_passes.h"
 #include "platform/metal/lighting_dispatch.h"
+#include "platform/metal/feature_pipelines.h"
 #include "platform/metal/acceleration_structures.h"
 #include "platform/metal/scene_renderer.h"
 #include "platform/metal/mesh_renderer.h"
 #include "platform/metal/visibility_renderer.h"
 #include "platform/metal/metal_graph_executor.h"
+#include "platform/metal/render_state_tracker.h"
 #include "renderer/scene_store.h"
 #include "renderer/gpu_scene.h"
 #include "renderer/shadow_layout.h"
 #include "renderer/shadow_dispatch.h"
 #include "renderer/shadow_math.h"
 #include "renderer/cull_math.h"
+#include "core/log.h"
 #include "renderer/transform_math.h"
 #include "rendergraph/pass_context.h"
 #include <glm/gtc/type_ptr.hpp>
 #include <bit>
+#include <array>
+#include "pipeline/forward_variants.h"
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -28,6 +33,19 @@ struct ShadowPasses::Impl {
     std::unique_ptr<RtConsumer> sunConsumer;
     Frame frame{}; GPUShadowParams params{}; MTL::GPUAddress paramsAddress=0;
     std::array<pipe::PipelineHandle,PassCount> kernels{};
+    pipe::PipelineHandle transmitIndexed, transmitMesh;
+    // F15.1 (ticket 22): the overflow receiver prepass alpha-tests the base colour slot through its texture transform; a scene with
+    // per-slot transforms uses receiverTT (requested on first use), every other scene keeps `receiver`.
+    pipe::PipelineDesc receiverDesc(bool textureTransform=false) const {
+        pipe::PipelineDesc d;d.kind=pipe::PipelineKind::Render;d.label=textureTransform?"Indexed overflow shadow receivers (texture transform)":"Indexed overflow shadow receivers";
+        d.functions={"forward_surface_vs",textureTransform?"forward_shadow_receiver_tt_fs":"forward_shadow_receiver_fs",""};d.indirectCommandBuffers=true;
+        d.output(0,rg::Format::RGBA32Float).output(1,rg::Format::RGBA16Float).output(2,rg::Format::RGBA32Uint);
+        return d;
+    }
+    pipe::PipelineHandle receiverTT=pipe::INVALID_PIPELINE, receiverServed=pipe::INVALID_PIPELINE;
+    std::array<pipe::PipelineHandle,4> receiverVariants{pipe::INVALID_PIPELINE,pipe::INVALID_PIPELINE,pipe::INVALID_PIPELINE,pipe::INVALID_PIPELINE}; // F15 closure (COLOR_0): [tt | vc << 1]
+    // F15 closure (COLOR_0): the casters of a scene with a colour stream use the _vc twins (alpha test x vertex colour alpha), requested on first use.
+    std::array<pipe::PipelineDesc,4> casterDescs; std::array<pipe::PipelineHandle,4> casterVC{pipe::INVALID_PIPELINE,pipe::INVALID_PIPELINE,pipe::INVALID_PIPELINE,pipe::INVALID_PIPELINE}; bool casterColors=false;
     pipe::PipelineHandle indexed, meshDepth, receiver, cacheIndexed, cacheMesh, cacheInitialize, cachePublish, cacheValidate, cacheComposite;
     MTL::DepthStencilState* depthState=nullptr;
     MTL::DepthStencilState* receiverDepthState=nullptr;
@@ -80,11 +98,19 @@ struct ShadowPasses::Impl {
     rg::TextureRef visibilityRef{},depthRef{},pointRef{},normalRef{},keyRef{},maskRef{},zeroRef{};
     rg::TextureRef rawMask{},temporalOutput{},filterOutput{},contactOutput{};
     std::array<rg::TextureRef,4> maps{},cacheRefs{},currentStaticRefs{},dynamicRefs{};
+    // F15.1 (ticket 15): the per-cascade transmittance maps (RGBA32Float: summed ln RGB transmittance + nearest transmissive depth in alpha),
+    // present in the graph only while the scene has transmissive casters (hasTransmissive); a 1x1 zero texture stands in otherwise.
+    std::array<rg::TextureRef,4> transmitMaps{};
+    rg::TextureRef dummyTransmitRef{},receiverOwnRef{};
+    MTL::Texture* dummyTransmit=nullptr;
+    bool hasTransmissive=false, dummyTransmitZeroed=false, hasFeatureCasters=false; // F15.1 (ticket 16): a caster with a material extension record exists
+    // F15 ticket 24: kernels[Sun] is the lite RT pipeline; sunServed is what the scene's feature union selects (full while it has transmission).
+    TransmissionPipelines transmitPipes; pipe::PipelineHandle sunServed{},temporalServed{}; bool temporalGlass=false;
     std::array<rg::BufferRef,4> tileRefs{},expectedRefs{};
     rg::BufferRef classificationRef{};
     Impl(MetalContext& context,PipelineCache& p,SceneRenderer& s,MeshRenderer& m,VisibilityRenderer& v,
          AccelerationStructures* a,const LaunchOptions& o):c(context),pipelines(p),scene(s),mesh(m),visibility(v),rt(a),options(o) {
-        settings.mapResolution=o.shadowMapResolution; settings.contact=o.contactShadows; settings.staticCache=o.shadowCache;
+        settings.mapResolution=o.shadowMapResolution; settings.transmittanceDivisor=o.shadowTransmittanceDivisor; settings.contact=o.contactShadows; settings.staticCache=o.shadowCache;
         settings.mode=o.shadows==ShadowMode::RT?ShadowTechnique::RayTraced:
                       o.shadows==ShadowMode::CSM?ShadowTechnique::Cascaded:ShadowTechnique::Off;
         validateShadowSettings(settings);
@@ -94,21 +120,23 @@ struct ShadowPasses::Impl {
                              "shadow_csm_pcss","shadow_sun_rt","shadow_temporal","shadow_filter","shadow_contact"};
         for (u32 i=0;i<PassCount;++i) {
             if (i==Sun && o.shadows!=ShadowMode::RT) continue;
-            kernels[i]=p.request(lighting::kernel(names[i],i==Sun));
+            kernels[i]=p.request(i==Sun?lighting::kernel("shadow_sun_rt_lite",true,true):i==Temporal?lighting::kernel("shadow_temporal_scalar"):lighting::kernel(names[i]));
         }
         pipe::PipelineDesc d; d.kind=pipe::PipelineKind::Render;d.label="CSM indexed casters";
-        d.functions={"shadow_depth_vertex","shadow_depth_fragment",""}; indexed=p.request(d);
+        d.functions={"shadow_depth_vertex","shadow_depth_fragment",""}; indexed=p.request(d);casterDescs[0]=d;
         d.kind=pipe::PipelineKind::Mesh;d.label="CSM mesh casters";
-        d.functions={"","shadow_depth_mesh","shadow_depth_fragment"};d.mesh.meshThreads=128; meshDepth=p.request(d);
-        d=pipe::PipelineDesc{};d.kind=pipe::PipelineKind::Render;d.label="Indexed overflow shadow receivers";
-        d.functions={"forward_surface_vs","forward_shadow_receiver_fs",""};d.indirectCommandBuffers=true;
-        d.output(0,rg::Format::RGBA32Float).output(1,rg::Format::RGBA16Float).output(2,rg::Format::RGBA32Uint);
-        receiver=p.request(d);
+        d.functions={"","shadow_depth_mesh","shadow_depth_fragment"};d.mesh.meshThreads=128; meshDepth=p.request(d);casterDescs[1]=d;
+        // F15 closure (ticket 15): the transmittance map pipelines are requested by requestTransmitPipelines() when the scene first has a
+        // transmissive caster (a scene without glass keeps the pipeline set it had before ticket 15).
+        // The PCSS pass (also present with --shadows off, where it writes a fully lit mask) always binds the four transmittance maps: a 1x1 zero
+        // texture stands in while the scene has no transmissive casters .
+        dummyTransmit=lighting::texture(c,1,1,MTL::PixelFormatRGBA32Float,"CSM transmittance disabled zero"); // also bound as the receiver-own texture of the guide producers while the map is off
+        receiver=p.request(receiverDesc());
         if(settings.staticCache) {
             d=pipe::PipelineDesc{};d.kind=pipe::PipelineKind::Render;d.label="Regional static/dynamic CSM indexed";
-            d.functions={"shadow_cache_depth_vertex","shadow_cache_depth_fragment",""};cacheIndexed=p.request(d);
+            d.functions={"shadow_cache_depth_vertex","shadow_cache_depth_fragment",""};cacheIndexed=p.request(d);casterDescs[2]=d;
             d.kind=pipe::PipelineKind::Mesh;d.label="Regional static/dynamic CSM mesh";
-            d.functions={"","shadow_cache_depth_mesh","shadow_cache_depth_fragment"};d.mesh.meshThreads=128;cacheMesh=p.request(d);
+            d.functions={"","shadow_cache_depth_mesh","shadow_cache_depth_fragment"};d.mesh.meshThreads=128;cacheMesh=p.request(d);casterDescs[3]=d;
             cachePublish=p.request(lighting::kernel("shadow_cache_publish"));
             cacheInitialize=p.request(lighting::kernel("shadow_cache_initialize"));
             cacheValidate=p.request(lighting::kernel("shadow_cache_validate"));
@@ -134,11 +162,13 @@ struct ShadowPasses::Impl {
             for(auto* t:f.initializeTables)if(t)t->release();for(auto* t:f.publishTables)if(t)t->release();for(auto* t:f.validateTables)if(t)t->release();for(auto* t:f.compositeTables)if(t)t->release();
         }
         for(auto& v:views) {c.memory().release(v.previous,MemoryCategory::RayTracing);c.memory().release(v.next,MemoryCategory::RayTracing);for(auto* t:v.cached)c.memory().release(t,MemoryCategory::RayTracing);for(auto* b:v.cacheTiles)c.memory().release(b,MemoryCategory::RayTracing);}
+        c.memory().release(dummyTransmit,MemoryCategory::RayTracing);
         if(depthState)depthState->release();if(receiverDepthState)receiverDepthState->release();if(compositeDepthState)compositeDepthState->release();
     }
     void prepareCasterDraws(Slot& slot,const SceneStore& store) {
         planShadowCasterDraws(store.buckets(),geometry,store.slotCapacity(),!options.forceApple9,slot.casterDraws);
-        const size_t required=4u*(settings.staticCache?2u:1u)*slot.casterDraws.size();
+        // F15.1 (ticket 15): a second set of tables for the transmittance pass of every cascade while the scene has transmissive casters.
+        const size_t required=4u*(settings.staticCache?2u:1u)*slot.casterDraws.size()*(hasTransmissive?2u:1u);
         const size_t old=slot.rasterTables.size();
         // This slot has completed before prepareFrame. Never rewrite another
         // frame's argument tables, and keep a distinct table per recorded draw.
@@ -150,6 +180,11 @@ struct ShadowPasses::Impl {
     }
     void load(const GpuScene& g,const SceneStore& store) {
         c.waitIdle();geometry.assign(g.meshInfos().begin(),g.meshInfos().end());
+        if(dummyTransmit && !dummyTransmitZeroed) {
+            auto zero=c.stagingAllocate(16);std::memset(zero.cpu,0,16);auto* target=dummyTransmit;
+            c.enqueueUpload([zero,target](MTL4::ComputeCommandEncoder* e){e->copyFromBuffer(zero.buffer,zero.offset,16,16,MTL::Size::Make(1,1,1),target,0,0,MTL::Origin::Make(0,0,0));});
+            c.flushUploads();dummyTransmitZeroed=true;
+        }
         for(auto& f:slots) {
             for(auto* t:f.rasterTables)if(t)t->release(); f.rasterTables.clear();
             f.drawParams.clear();f.casterDraws.clear();
@@ -218,8 +253,14 @@ struct ShadowPasses::Impl {
             std::memcpy(worldMatrices.data()+size_t(slot)*16,matrix,64);
         }
         casterBounds.clear();changedBounds.clear();
+        bool transmissive=false,featured=false;const auto materials=store.materials();
         for(u32 slot=0;slot<count;++slot) {
             const auto& instance=instances[slot];const bool casts=(instance.flags&INSTANCE_FLAG_VALID) && (instance.flags&2u) && instance.meshIndex<geometry.size();
+            if(casts && !featured && instance.materialIndex<materials.size())featured=materials[instance.materialIndex].extensionIndex!=MATERIAL_EXTENSION_INVALID;
+            if(casts && !transmissive && instance.materialIndex<materials.size()) {
+                const auto& material=materials[instance.materialIndex];
+                transmissive=shadowCasterTransmissive(material.flags,material.extensionIndex,material.alphaCutoff);
+            }
             const bool isStatic=casts && (instance.flags&4u) && !movingSlots[slot] && store.nodes()[slot].depth==0;
             staticClasses[slot]=isStatic?1u:0u;
             ShadowBounds bounds{};
@@ -238,6 +279,14 @@ struct ShadowPasses::Impl {
         }
         for(size_t slot=count;slot<oldStatic.size();++slot)if(oldStatic[slot].valid){changedBounds.push_back(oldStatic[slot].bounds);oldStatic[slot].valid=false;}
         if(!changedBounds.empty())++staticCasterRevision;
+        // F15.1 (ticket 15): the transmittance map exists only for the cascaded path and only while a transmissive caster exists: the passes
+        // are then absent from the graph (no empty encoders, no cost) and the graph is rebuilt when the answer changes.  F15 closure (ticket 15):
+        // also with the static cache: the map is never cached (transmissive casters draw into it every frame) and the cache composes the opaque
+        // casters only, so the static depth is invalidated (material revision) when the answer changes.
+        hasFeatureCasters=featured;
+        bool wantTransmissive=transmissive && settings.mode==ShadowTechnique::Cascaded;
+        if(wantTransmissive){requestTransmitPipelines();wantTransmissive=transmitReady()&&(pipelines.isFinal(transmitMesh)||pipelines.available(transmitMesh));} // until both are visible the glass casters stay opaque (the flag and the passes follow hasTransmissive)
+        if(wantTransmissive!=hasTransmissive){hasTransmissive=wantTransmissive;++graphVersion;++materialRevision;}
         // Update every view's tile revisions against its last projection, so
         // a view that was dormant during the change cannot reuse old depth.
         if(settings.staticCache)for(auto& view:views)for(u32 cascade=0;cascade<4;++cascade) {
@@ -251,6 +300,18 @@ struct ShadowPasses::Impl {
             for(u32 tile=0;tile<64;++tile)if(dirty&(u64(1)<<tile))view.desired[cascade][tile].caster=staticCasterRevision;
         }
     }
+    // F15 closure (ticket 15): the two transmittance map pipelines (one RGBA32Float target: RGB sum, alpha maximum), requested once, on the first
+    // frame whose scene has a transmissive caster on the cascaded path without the static cache.
+    bool transmitRequested=false;
+    void requestTransmitPipelines() {
+        if(transmitRequested)return;transmitRequested=true;
+        pipe::PipelineDesc d=pipe::PipelineDesc{};d.kind=pipe::PipelineKind::Render;d.label="CSM transmittance indexed casters";
+        d.functions={"shadow_transmit_vertex","shadow_transmit_fragment",""};
+        d.output(0,rg::Format::RGBA32Float,pipe::ColorOutput::Blend::TransmittanceMap);transmitIndexed=pipelines.request(d);
+        d.kind=pipe::PipelineKind::Mesh;d.label="CSM transmittance mesh casters";
+        d.functions={"","shadow_transmit_mesh","shadow_transmit_fragment"};d.mesh.meshThreads=128;transmitMesh=pipelines.request(d);
+    }
+    bool transmitReady()const{return pipelines.isFinal(transmitIndexed)||pipelines.available(transmitIndexed);}
     void planCache() {
         auto& view=views[frame.view];auto& slot=slots[frame.slot];
         auto classification=c.frameUploads().allocate(std::max<u64>(1,params.slotCount)*sizeof(u32));
@@ -295,7 +356,7 @@ struct ShadowPasses::Impl {
     void prepare(const SceneStore& store,std::span<const GPULight> lights,const Frame& f) {
         frame=f;reserve(store.slotCapacity(),f.backingWidth,f.backingHeight);
         if(store.stats().structure || store.stats().fullInstances || !store.instanceDeltas().empty() || !store.motionSlots().empty() || !store.dirtyRoots().empty())++casterRevision;
-        if(store.stats().fullMaterials || !store.materialDeltas().empty())++materialRevision;
+        if(store.materialsChanged())++materialRevision;
         if(cachedPipelineGeneration!=pipelines.generation()) {
             cachedPipelineGeneration=pipelines.generation();++materialRevision; // alpha shader hot reload also invalidates static depth
         }
@@ -305,8 +366,23 @@ struct ShadowPasses::Impl {
         if(hash!=previousLightHash){++lightRevision;previousLightHash=hash;}
         const Signal signal{f.scene,casterRevision,materialRevision,lightRevision,rt?rt->geometryRevision():0};
         if(!(signal==lastSignal)){++signalEpoch;lastSignal=signal;}const u64 signalRevision=signalEpoch;
+        // F15 ticket 24: the temporal kernel and its history record layout follow the feature union (see shadows.metal); a change of layout
+        // (a material edit that adds or removes glass) restarts every history, whatever the kernel that serves the transition frame.
+        receiverServed=receiver;
+        casterColors=store.vertexColorInUse();
+        if(casterColors)for(u32 k=0;k<4;++k)if(casterVC[k]==pipe::INVALID_PIPELINE&&(!casterDescs[k].functions[0].empty()||!casterDescs[k].functions[1].empty()))casterVC[k]=pipelines.request(pipe::forward::withVertexColor(casterDescs[k]));
+        if(store.textureTransformInUse()||store.vertexColorInUse()){
+            // F15 closure (COLOR_0): a scene with a colour stream compiles the vertex colour into the receiver prepass (alpha test, vertex stage emits it).
+            const u32 k=(store.textureTransformInUse()?1u:0u)|(store.vertexColorInUse()?2u:0u);
+            if(receiverVariants[k]==pipe::INVALID_PIPELINE){auto d=receiverDesc(store.textureTransformInUse());if(store.vertexColorInUse())d=pipe::forward::withVertexColor(d);receiverVariants[k]=pipelines.request(d);}
+            if(pipelines.isFinal(receiverVariants[k]))receiverServed=receiverVariants[k];else pipelines.noteFallbackUse();
+        }
+        const bool glassScene=(store.featureUnion()&MATERIAL_FEATURE_TRANSMISSION)!=0u;
+        temporalServed=transmitPipes.serve(pipelines,1,kernels[Temporal],glassScene,[&]{return lighting::kernel("shadow_temporal");});
+        const bool glassServed=temporalServed!=kernels[Temporal];
+        if(glassServed!=temporalGlass){temporalGlass=glassServed;for(u32 v=0;v<views.size();++v)history.invalidate(v,"history layout");}
         auto decision=history.begin(f.view,{f.width,f.height,f.backingWidth,f.backingHeight},signalRevision,f.cut,f.reset);
-        params={};
+        params={};params.vertexColors=scene.vertexColorsAddress(); // F15 closure (COLOR_0): 0 without a colour stream
         const auto inverse=glm::inverse(glm::make_mat4(f.constants.viewProjection));
         std::memcpy(params.inverseViewProjection,glm::value_ptr(inverse),64);std::memcpy(params.viewProjection,f.constants.viewProjection,64);
         std::memcpy(params.previousViewProjection,history.get(f.view).previousViewProjection.data(),64);
@@ -321,7 +397,9 @@ struct ShadowPasses::Impl {
         params.candidateCapacity=mesh.capacity();params.materialCount=store.materials().size();params.frameIndex=f.index;
         params.flags=(options.shadows==ShadowMode::CSM?SHADOW_FLAG_CSM:options.shadows==ShadowMode::RT?SHADOW_FLAG_RT:0u) |
                      (!decision.reset?SHADOW_FLAG_HISTORY_VALID:0u) | (settings.contact?SHADOW_FLAG_CONTACT:0u) |
-                     (selectedSun!=~0u?SHADOW_FLAG_LIGHT_VALID:0u);
+                     (selectedSun!=~0u?SHADOW_FLAG_LIGHT_VALID:0u) | (hasTransmissive?SHADOW_FLAG_TRANSMITTANCE_MAP:0u) |
+                     (hasTransmissive && !options.debugTransmittanceMap?SHADOW_FLAG_TRANSMITTANCE_IGNORED:0u) |
+                     (hasTransmissive && !options.debugReceiverOwn?SHADOW_FLAG_RECEIVER_OWN_IGNORED:0u) | (hasFeatureCasters?SHADOW_FLAG_RECEIVER_PLANE_BIAS:0u);
         params.mapResolution=settings.mapResolution;params.pcssSearchSamples=settings.blockerSamples;params.pcssFilterSamples=settings.filterSamples;
         params.historyMaxSamples=settings.historySamples;params.viewID=f.view;params.lightID=selectedSun;params.lightRevision=lightRevision;params.sceneRevision=signalRevision;
         params.temporalNormalThreshold=settings.temporalNormalThreshold;params.temporalPositionThreshold=settings.temporalPositionThreshold;
@@ -355,7 +433,10 @@ struct ShadowPasses::Impl {
             }
         }
         if(settings.staticCache)planCache();
-        if(sunConsumer)sunConsumer->prepare(f.slot,kernels[Sun]);
+        if(sunConsumer){
+            sunServed=transmitPipes.serve(pipelines,0,kernels[Sun],(store.featureUnion()&MATERIAL_FEATURE_TRANSMISSION)!=0u,[&]{return lighting::kernel("shadow_sun_rt",true);});
+            sunConsumer->prepare(f.slot,sunServed);
+        }
     }
     void common(MTL4::ArgumentTable* t,rg::PassContext& ctx) {
         auto& f=slots[frame.slot];t->setAddress(paramsAddress,SB_PARAMS);t->setAddress(f.surfaces->gpuAddress(),SB_SURFACE);
@@ -366,28 +447,44 @@ struct ShadowPasses::Impl {
         t->setAddress(f.flags->gpuAddress(),SB_CASTER_FLAGS);t->setAddress(f.counters->gpuAddress(),SB_COUNTERS);
         t->setAddress(scene.buffers().materials()->gpuAddress(),SB_MATERIALS);t->setAddress(scene.textureTableAddress(),SB_TEXTURES);
     }
+    void extensionsBind(MTL4::ArgumentTable* t) { // F15 closure (ticket 15): the material extension records (the receiver's own transmittance)
+        const auto extensions=scene.materialExtensionsAddress();t->setAddress(extensions?extensions:scene.buffers().materials()->gpuAddress(),SB_EXTENSIONS);
+    }
     void texture(MTL4::ArgumentTable* t,rg::PassContext& ctx,rg::TextureRef ref,u32 binding) {
         t->setTexture(static_cast<MTL::Texture*>(ctx.texture(ref))->gpuResourceID(),binding);
     }
-    void drawCascade(rg::PassContext& ctx,u32 cascade,u32 cls,bool cached) {
+    // The colour twin of a depth caster when the scene has a colour stream and the twin is final (index 0..3 = indexed, mesh, cache indexed, cache mesh; 9 = a
+    // transmit pipeline, which has none: the plain pipeline keeps serving it).
+    pipe::PipelineHandle casterPipeline(pipe::PipelineHandle plain,u32 index) {
+        if(!casterColors||index>3u||casterVC[index]==pipe::INVALID_PIPELINE||!pipelines.isFinal(casterVC[index]))return plain;
+        return casterVC[index];
+    }
+    void drawCascade(rg::PassContext& ctx,u32 cascade,u32 cls,bool cached,bool transmit=false) {
         auto* e=static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder());auto& slot=slots[frame.slot];
-        e->setDepthStencilState(depthState);
+        // The transmittance pass has no depth attachment (a standalone render group): additive/maximum blending of every transmissive fragment.
+        if(!transmit)metal_state::setDepthStencil(e,depthState);
+        else e->setCullMode(MTL::CullModeNone); // both faces of a closed volume: the entry and the exit surface (explicit, the encoder is standalone)
         const size_t base=(cascade*(settings.staticCache?2u:1u)+cls)*slot.casterDraws.size();
+        MTL::RenderPipelineState* current=nullptr;
+        const size_t tableBase=base+(transmit?4u*(settings.staticCache?2u:1u)*slot.casterDraws.size():0u);
         // Shadow depth remains conservatively two-sided, as before this change.
         // Mesh/cull-class buckets stay separate; mirrored transforms and MASK
         // materials keep the exact same vertex/fragment handling.
         for(size_t i=0;i<slot.casterDraws.size();++i) {
             const auto& range=slot.casterDraws[i];
-            auto* t=slot.rasterTables[base+i];common(t,ctx);t->setAddress(slot.drawParams[base+i],SB_PARAMS);
+            auto* t=slot.rasterTables[tableBase+i];common(t,ctx);t->setAddress(slot.drawParams[base+i],SB_PARAMS);
+            {const auto extensions=scene.materialExtensionsAddress();t->setAddress(extensions?extensions:scene.buffers().materials()->gpuAddress(),SB_EXTENSIONS);} // transmittance tint, F15.1 ticket 22: the alpha tests too
             if(cached){t->setAddress(cls==0?slot.staticParams[cascade]:slot.dynamicParams[cascade],18);t->setAddress(slot.classificationAddress,19);}
             if(range.meshShader) {
-                e->setRenderPipelineState(pipelines.render(cached?cacheMesh:meshDepth));
+                auto* state=pipelines.render(casterPipeline(cached?cacheMesh:transmit?transmitMesh:meshDepth,cached?3u:transmit?9u:1u));
+                if(!transmit || state!=current){e->setRenderPipelineState(state);current=state;} // the transmit pass skips the redundant per-draw sets
                 e->setArgumentTable(t,MTL::RenderStageMesh|MTL::RenderStageFragment);
                 e->drawMeshThreadgroups(MTL::Size::Make(range.meshletCount,range.slotCount,1),
                     MTL::Size::Make(1,1,1),MTL::Size::Make(128,1,1));
             } else {
                 const auto& info=geometry[range.mesh];
-                e->setRenderPipelineState(pipelines.render(cached?cacheIndexed:indexed));
+                auto* state=pipelines.render(casterPipeline(cached?cacheIndexed:transmit?transmitIndexed:indexed,cached?2u:transmit?9u:0u));
+                if(!transmit || state!=current){e->setRenderPipelineState(state);current=state;}
                 e->setArgumentTable(t,MTL::RenderStageVertex|MTL::RenderStageFragment);
                 // instance_id starts at zero. Shader adds range.firstSlot,
                 // explicitly, so the offset cannot be applied twice.
@@ -396,7 +493,7 @@ struct ShadowPasses::Impl {
                     range.slotCount,info.vertexOffset,0);
             }
         }
-        e->setDepthStencilState(scene.depthState());
+        if(!transmit)metal_state::setDepthStencil(e,scene.depthState());
     }
     void addCacheGraph(rg::RenderGraph& g) {
         using namespace rg;
@@ -461,9 +558,9 @@ struct ShadowPasses::Impl {
                 auto& slot=slots[frame.slot];auto* t=slot.compositeTables[cascade];t->setAddress(slot.staticParams[cascade],18);
                 t->setAddress(slot.expectedAddress[cascade],20);t->setAddress(views[frame.view].cacheTiles[cascade]->gpuAddress(),21);t->setAddress(slot.counters->gpuAddress(),15);
                 texture(t,ctx,cacheRefs[cascade],0);texture(t,ctx,currentStaticRefs[cascade],1);texture(t,ctx,dynamicRefs[cascade],2);
-                auto* e=static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder());e->setDepthStencilState(compositeDepthState);
+                auto* e=static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder());metal_state::setDepthStencil(e,compositeDepthState);
                 e->setRenderPipelineState(pipelines.render(cacheComposite));e->setArgumentTable(t,MTL::RenderStageVertex|MTL::RenderStageFragment);
-                e->drawPrimitives(MTL::PrimitiveTypeTriangle,0,3);e->setDepthStencilState(scene.depthState());
+                e->drawPrimitives(MTL::PrimitiveTypeTriangle,0,3);metal_state::setDepthStencil(e,scene.depthState());
             });
         }
     }
@@ -478,6 +575,7 @@ struct ShadowPasses::Impl {
         surfaceRef=g.importBuffer("Pre-resolve shadow surface",{capacity*sizeof(GPUShadowSurface)},ImportPerFrame);
         flagsRef=g.importBuffer("Independent CSM caster flags",{std::max<u64>(1,casterCapacity)*4},ImportPerFrame);
         counterRef=g.importBuffer("Shadow counters",{sizeof(GPUShadowCounters)},ImportPerFrame|ImportOutput);
+        if(dummyTransmit)dummyTransmitRef=g.importTexture("CSM transmittance disabled",{Format::RGBA32Float,1,1},ImportContentsDefined);
         g.addPass("Shadow receiver clear",PassType::Compute,[&](PassBuilder& b){
             counterRef=b.write(counterRef,Usage::ShaderWrite,StageDispatch);keyRef=b.createTexture("Indexed receiver keys",{Format::RGBA32Uint,receiverDepth.width,receiverDepth.height});
             keyRef=b.write(keyRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("shadow_receiver_clear");
@@ -488,24 +586,28 @@ struct ShadowPasses::Impl {
             surfaceRef=b.write(surfaceRef,Usage::ShaderWrite,StageDispatch);
             pointRef=b.createTexture("Receiver world position",{Format::RGBA32Float,receiverDepth.width,receiverDepth.height});pointRef=b.write(pointRef,Usage::ShaderWrite,StageDispatch);
             normalRef=b.createTexture("Receiver geometric normal",{Format::RGBA16Float,receiverDepth.width,receiverDepth.height});normalRef=b.write(normalRef,Usage::ShaderWrite,StageDispatch);
+            // F15 closure (ticket 15): the receiver's own transmissive surface (ln RGB), only while the transmittance map exists.
+            if(hasTransmissive){receiverOwnRef=b.createTexture("Receiver own transmittance ln",{Format::RGBA16Float,receiverDepth.width,receiverDepth.height});receiverOwnRef=b.write(receiverOwnRef,Usage::ShaderWrite,StageDispatch);}
+            else {receiverOwnRef=dummyTransmitRef;b.read(dummyTransmitRef,Usage::ShaderRead,StageDispatch);}
             b.setProfileShaders("shadow_surface_guides");
-        },[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Guide];common(t,ctx);texture(t,ctx,visibilityRef,ST_VISIBILITY);texture(t,ctx,depthRef,ST_DEPTH);texture(t,ctx,pointRef,ST_WORLD_POSITION);texture(t,ctx,normalRef,ST_GEOMETRIC_NORMAL);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[Guide],t,frame.width,frame.height);});
+        },[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Guide];common(t,ctx);texture(t,ctx,visibilityRef,ST_VISIBILITY);texture(t,ctx,depthRef,ST_DEPTH);texture(t,ctx,pointRef,ST_WORLD_POSITION);texture(t,ctx,normalRef,ST_GEOMETRIC_NORMAL);texture(t,ctx,receiverOwnRef,ST_RECEIVER_OWN);extensionsBind(t);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[Guide],t,frame.width,frame.height);});
         g.addPass("Indexed overflow receiver prepass",PassType::Raster,[&](PassBuilder& b){
             pointRef=b.writeColor(pointRef,0,LoadIntent::Preserve);normalRef=b.writeColor(normalRef,1,LoadIntent::Preserve);keyRef=b.writeColor(keyRef,2,LoadIntent::Preserve);
             depthRef=b.writeDepth(depthRef,LoadIntent::Preserve);scene.declareDrawReads(b);b.read(poseRef,Usage::ShaderRead,StageVertex);b.setProfileShaders("forward_surface_vs,forward_shadow_receiver_fs");
-        },[this](PassContext& ctx){scene.encodeOverlay(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()),receiver,true,receiverDepthState);});
+        },[this](PassContext& ctx){scene.encodeOverlay(static_cast<MTL4::RenderCommandEncoder*>(ctx.encoder()),receiverServed,true,receiverDepthState);});
         g.addPass("Indexed receiver pack",PassType::Compute,[&](PassBuilder& b){
             for(auto r:{pointRef,normalRef,keyRef,depthRef})b.read(r,Usage::ShaderRead,StageDispatch);b.read(surfaceRef,Usage::ShaderRead,StageDispatch);surfaceRef=b.write(surfaceRef,Usage::ShaderWrite,StageDispatch);
             // scene.dataRef also versions vertex updates; preserve untouched
             // V-buffer pixels while publishing canonical indexed guides.
             b.read(scene.dataRef(),Usage::ShaderRead,StageDispatch);
             pointRef=b.write(pointRef,Usage::ShaderWrite,StageDispatch);normalRef=b.write(normalRef,Usage::ShaderWrite,StageDispatch);
+            if(hasTransmissive)receiverOwnRef=b.write(receiverOwnRef,Usage::ShaderWrite,StageDispatch);
             b.read(counterRef,Usage::ShaderRead,StageDispatch);counterRef=b.write(counterRef,Usage::ShaderWrite,StageDispatch);
             b.setProfileShaders("shadow_receiver_pack");
         },[this](PassContext& ctx){auto* t=slots[frame.slot].tables[Pack];common(t,ctx);
             // Entry-local buffer18: original mesh-local index stream. Slots
             //3/5/6/15 are instances/meshes/vertices/counters from common().
-            t->setAddress(scene.indexBuffer()->gpuAddress(),18);texture(t,ctx,pointRef,5);texture(t,ctx,normalRef,6);texture(t,ctx,keyRef,10);texture(t,ctx,depthRef,0);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[Pack],t,frame.width,frame.height);});
+            t->setAddress(scene.indexBuffer()->gpuAddress(),18);texture(t,ctx,pointRef,5);texture(t,ctx,normalRef,6);texture(t,ctx,keyRef,10);texture(t,ctx,depthRef,0);texture(t,ctx,receiverOwnRef,ST_RECEIVER_OWN);extensionsBind(t);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[Pack],t,frame.width,frame.height);});
         g.addPass("CSM caster selection",PassType::Compute,[&](PassBuilder& b){
             b.read(scene.dataRef(),Usage::ShaderRead,StageDispatch);flagsRef=b.write(flagsRef,Usage::ShaderWrite,StageDispatch);
             b.read(counterRef,Usage::ShaderRead,StageDispatch);counterRef=b.write(counterRef,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("shadow_caster_flags");
@@ -515,19 +617,29 @@ struct ShadowPasses::Impl {
             ClearValue clear;clear.depth=0;maps[cascade]=b.createTexture("CSM depth "+std::to_string(cascade),{Format::Depth32Float,settings.mapResolution,settings.mapResolution});maps[cascade]=b.writeDepth(maps[cascade],LoadIntent::Clear,clear);
             b.read(scene.dataRef(),Usage::ShaderRead,StageVertex|StageMesh|StageFragment);b.read(flagsRef,Usage::ShaderRead,StageVertex|StageMesh);b.setProfileShaders("shadow_depth_mesh,shadow_depth_vertex,shadow_depth_fragment");
         },[this,cascade](PassContext& ctx){drawCascade(ctx,cascade,0,false);});
+        if(hasTransmissive)for(u32 cascade=0;cascade<4;++cascade)g.addPass("CSM transmittance "+std::to_string(cascade),PassType::Raster,[&,cascade](PassBuilder& b){
+            transmitMaps[cascade]=b.createTexture("CSM transmittance "+std::to_string(cascade),{Format::RGBA32Float,settings.mapResolution/settings.transmittanceDivisor,settings.mapResolution/settings.transmittanceDivisor});
+            transmitMaps[cascade]=b.writeColor(transmitMaps[cascade],0,LoadIntent::Clear,ClearValue{}); // sum 0 (transmittance 1), nearest depth 0 (none)
+            b.read(scene.dataRef(),Usage::ShaderRead,StageVertex|StageMesh|StageFragment);b.read(flagsRef,Usage::ShaderRead,StageVertex|StageMesh);
+            // Its own render encoder: the opaque cascade pipelines have no colour output and must not run in an encoder with a colour attachment
+            // (validation), nor may these draws inherit the depth state of a neighbouring cascade pass.
+            b.setStandalone();
+            b.setProfileShaders("shadow_transmit_mesh,shadow_transmit_vertex,shadow_transmit_fragment");
+        },[this,cascade](PassContext& ctx){drawCascade(ctx,cascade,0,false,true);});
         const bool ray=options.shadows==ShadowMode::RT;
         g.addPass(ray?"Solar RT visibility":"CSM PCSS visibility",PassType::Compute,[&](PassBuilder& b){
-            b.read(surfaceRef,Usage::ShaderRead,StageDispatch);if(ray)rt->declareTraceReads(b);else for(auto r:maps)b.read(r,Usage::ShaderRead,StageDispatch);
+            b.read(surfaceRef,Usage::ShaderRead,StageDispatch);if(ray)rt->declareTraceReads(b);else {for(auto r:maps)b.read(r,Usage::ShaderRead,StageDispatch);
+                if(hasTransmissive){for(auto r:transmitMaps)b.read(r,Usage::ShaderRead,StageDispatch);b.read(receiverOwnRef,Usage::ShaderRead,StageDispatch);}else b.read(dummyTransmitRef,Usage::ShaderRead,StageDispatch);}
             b.read(counterRef,Usage::ShaderRead,StageDispatch);counterRef=b.write(counterRef,Usage::ShaderWrite,StageDispatch);
-            rawMask=b.createTexture("Sun visibility raw",{Format::R16Float,frame.width,frame.height});rawMask=b.write(rawMask,Usage::ShaderWrite,StageDispatch);
+            rawMask=b.createTexture("Sun visibility raw",{Format::RGBA16Float,frame.width,frame.height});rawMask=b.write(rawMask,Usage::ShaderWrite,StageDispatch);
             b.setProfileShaders(ray?"shadow_sun_rt":"shadow_csm_pcss");
-        },[this,ray](PassContext& ctx){auto* t=slots[frame.slot].tables[ray?Sun:Pcss];common(t,ctx);texture(t,ctx,rawMask,4);if(ray)sunConsumer->bind(t,0,4);else for(u32 i=0;i<4;++i)texture(t,ctx,maps[i],i?6+i:2);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[ray?Sun:Pcss],t,frame.width,frame.height);});
+        },[this,ray](PassContext& ctx){auto* t=slots[frame.slot].tables[ray?Sun:Pcss];common(t,ctx);texture(t,ctx,rawMask,4);if(ray)sunConsumer->bind(t,0,4);else for(u32 i=0;i<4;++i){texture(t,ctx,maps[i],i?6+i:2);texture(t,ctx,hasTransmissive?transmitMaps[i]:dummyTransmitRef,ST_TRANSMIT+i);texture(t,ctx,receiverOwnRef,ST_RECEIVER_OWN);}lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,ray?sunServed:kernels[Pcss],t,frame.width,frame.height);});
         previousRef=g.importBuffer("Solar history previous per view",{capacity*sizeof(GPUShadowHistory)},ImportContentsDefined|ImportOutput);
         nextRef=g.importBuffer("Solar history next per view",{capacity*sizeof(GPUShadowHistory)},ImportOutput);
         auto raw=rawMask;
         g.addPass("Solar temporal moments",PassType::Compute,[&](PassBuilder& b){b.read(surfaceRef,Usage::ShaderRead,StageDispatch);b.read(raw,Usage::ShaderRead,StageDispatch);b.read(previousRef,Usage::ShaderRead,StageDispatch);nextRef=b.write(nextRef,Usage::ShaderWrite,StageDispatch);
             b.read(counterRef,Usage::ShaderRead,StageDispatch);counterRef=b.write(counterRef,Usage::ShaderWrite,StageDispatch);temporalOutput=b.createTexture("Sun temporal visibility",{Format::RGBA16Float,frame.width,frame.height});temporalOutput=b.write(temporalOutput,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("shadow_temporal");
-        },[this,raw](PassContext& ctx){auto* t=slots[frame.slot].tables[Temporal];common(t,ctx);auto& view=views[frame.view];t->setAddress(view.previous->gpuAddress(),12);t->setAddress(view.next->gpuAddress(),13);texture(t,ctx,raw,3);texture(t,ctx,temporalOutput,4);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[Temporal],t,frame.width,frame.height);history.read(frame.view,frame.index+1);history.write(frame.view,frame.index+1,params.viewProjection);});
+        },[this,raw](PassContext& ctx){auto* t=slots[frame.slot].tables[Temporal];common(t,ctx);auto& view=views[frame.view];t->setAddress(view.previous->gpuAddress(),12);t->setAddress(view.next->gpuAddress(),13);texture(t,ctx,raw,3);texture(t,ctx,temporalOutput,4);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,temporalServed,t,frame.width,frame.height);history.read(frame.view,frame.index+1);history.write(frame.view,frame.index+1,params.viewProjection);});
         auto temporalMask=temporalOutput;
         g.addPass("Solar spatial filter",PassType::Compute,[&](PassBuilder& b){b.read(surfaceRef,Usage::ShaderRead,StageDispatch);b.read(temporalMask,Usage::ShaderRead,StageDispatch);b.read(nextRef,Usage::ShaderRead,StageDispatch);filterOutput=b.createTexture("Sun filtered visibility",{Format::RGBA16Float,frame.width,frame.height});filterOutput=b.write(filterOutput,Usage::ShaderWrite,StageDispatch);b.setProfileShaders("shadow_filter");
         },[this,temporalMask](PassContext& ctx){auto* t=slots[frame.slot].tables[Filter];common(t,ctx);t->setAddress(views[frame.view].next->gpuAddress(),13);texture(t,ctx,temporalMask,3);texture(t,ctx,filterOutput,4);lighting::dispatch(static_cast<MTL4::ComputeCommandEncoder*>(ctx.encoder()),pipelines,kernels[Filter],t,frame.width,frame.height);});
@@ -540,6 +652,7 @@ struct ShadowPasses::Impl {
     void bind(MetalGraphExecutor& e) {
         auto& f=slots[frame.slot];auto& v=views[frame.view];
         if(settings.staticCache){e.bindBuffer(classificationRef,f.classificationBuffer);for(u32 i=0;i<4;++i){e.bindTexture(cacheRefs[i],v.cached[i]);e.bindBuffer(tileRefs[i],v.cacheTiles[i]);e.bindBuffer(expectedRefs[i],f.expectedBuffer[i]);}}
+        if(dummyTransmit)e.bindTexture(dummyTransmitRef,dummyTransmit);
         e.bindBuffer(surfaceRef,f.surfaces);e.bindBuffer(flagsRef,f.flags);e.bindBuffer(counterRef,f.counters);e.bindBuffer(previousRef,v.previous);e.bindBuffer(nextRef,v.next);
     }
 };

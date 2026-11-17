@@ -259,6 +259,7 @@ TEST_CASE("F12 offline snapshot PFM remains linear and full world/material value
     const auto dir=std::filesystem::temp_directory_path()/"phosphor_f12_reference_unit";
     std::filesystem::remove_all(dir);std::filesystem::remove_all(dir.string()+".partial");
     std::array<GPUVertex,3> v{};v[1].px=1;v[2].py=1;
+    v[1].ty=1;v[1].tw=-1; // F15.3 (ticket 11): a tangent and a handedness the snapshot must carry
     const std::array<u32,3> ids{0,1,2};GPUMeshInfo m{};m.indexCount=3;
     GPUMaterial material{};material.baseColor[0]=0.2f;material.baseColor[3]=1;material.emissive[0]=8;
     material.baseColorTex=material.normalTex=material.metallicRoughnessTex=material.occlusionTex=material.emissiveTex=INVALID_TEXTURE_INDEX;
@@ -290,6 +291,22 @@ TEST_CASE("F12 offline snapshot PFM remains linear and full world/material value
     CHECK(manifest.find("\"emissive\":[8,0,0]")!=std::string::npos);
     CHECK(manifest.find("\"world\":[1,0,0,0,0,1,0,0,0,0,1,0,5,0,0,1]")!=std::string::npos);
     CHECK(contents(dir/"mesh_0.ply").find("element face 1")!=std::string::npos);
+    // F15.3 (ticket 11, mesh version 2): the tangent attribute of GPUVertex follows u,v in every PLY vertex.
+    CHECK(manifest.find("\"mesh_version\":2")!=std::string::npos);
+    {
+        const auto ply=contents(dir/"mesh_0.ply");
+        const std::string endHeader="end_header\n";
+        const auto header=ply.substr(0,ply.find(endHeader));
+        CHECK(header.find("property float tangent_x\nproperty float tangent_y\nproperty float tangent_z\n"
+                          "property float handedness_x\n")!=std::string::npos);
+        const auto first=ply.find(endHeader)+endHeader.size();
+        auto word=[&](size_t vertex,size_t index){
+            u32 bits=0;for(size_t byte=0;byte<4;++byte)
+                bits|=u32(static_cast<unsigned char>(ply[first+vertex*48+index*4+byte]))<<(8*byte);
+            return std::bit_cast<float>(bits);};
+        CHECK(word(1,8)==0.0f);  CHECK(word(1,9)==1.0f);  CHECK(word(1,10)==0.0f);  CHECK(word(1,11)==-1.0f);
+        CHECK(word(0,6)==0.0f);  CHECK(word(0,7)==0.0f);  // u, v keep their place before the tangent
+    }
     CHECK_FALSE(exportOfflineReference(s,dir).ok); // no overwrite reference
     const std::array<float,3> rgb{8,2,0.5f};std::string error;
     REQUIRE(writeLinearPfm(dir/"linear.pfm",1,1,rgb,error));
@@ -378,10 +395,10 @@ TEST_CASE("F12 exact same-support IID expiry is independent of endpoint selectio
 
 
 TEST_CASE("F12 probe parameter ABI has zero-default explicit physical diagnostic flags") {
-    CHECK(sizeof(GPUProbeGridParams)==176);
+    CHECK(sizeof(GPUProbeGridParams)==184);
     ProbeGrid grid(ProbeGridConfig{});const auto params=grid.parameters(17,2);
     CHECK(params.debugFlags==0);
-    for (u32 word : params.debugPadding) CHECK(word==0);
+    CHECK(params.debugPadding0==0); CHECK(params.materialExtensions==0);
     CHECK((GI_DEBUG_NO_VISIBILITY & (GI_DEBUG_NO_VISIBILITY-1u))==0);
 }
 

@@ -165,9 +165,14 @@ struct MeshletReport {
 
 struct RenderingReport {
     bool present = false, materialBinning = false, post = false, autoExposure = false, edr = false, offscreen = false;
+    bool specularMs = false; // --specular-ms (F15 closure): Kulla-Conty multiple-scattering compensation of the specular lobes
     std::string path, asset, upscaler, tonemap;
     u32 inputWidth = 0, inputHeight = 0, views = 1, framesInFlight = 3, gpuFailures = 0;
     u64 temporalFrames = 0, nativeFrames = 0, historyResets = 0, binnedFrames = 0, genericFrames = 0;
+    // F15.2 (ticket 21): frames resolved through per-class feature bins, and the class table of the scene (bins in use, classes beyond
+    // the budget served by the all-lobes overflow bin).
+    u64 featureBinnedFrames = 0;
+    u32 classBins = 0, classOverflow = 0;
     u32 guideChecks = 0, guideFailures = 0;
     u32 shadedPixels = 0, reusedPixels = 0;
     u64 deviceAllocatedBytes = 0, engineResourceBytes = 0;
@@ -211,7 +216,7 @@ struct LightingReport {
     u64 historyResets=0;
     u32 checks=0, failures=0;
 };
-constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 10;
+constexpr u32 BENCH_REPORT_SCHEMA_VERSION = 12; // 12: F15 `materials` support report v2 (base / features / encodings; 11 had one mixed list)
 
 struct BenchReport {
     std::string   bench;
@@ -247,6 +252,8 @@ struct BenchReport {
     RtReport rt;                 // F9 (schema 9)
     LightingReport lighting;     // F10-F12 (schema 10)
     std::string denoisedFixtureJson; // actual native fixture evidence, never phase acceptance
+    std::string materialsJson;       // F15 (schema 12): support report object (supportToJson), empty = omitted
+    std::string subsurfaceJson;      // F15.1 (ticket 17/18): volumetric subsurface technique requested/effective, empty = omitted
 };
 
 /// Nearest-rank statistics of `values` (empty input gives all zeros).

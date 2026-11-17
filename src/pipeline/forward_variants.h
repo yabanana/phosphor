@@ -64,6 +64,46 @@ struct Variant {
 /// Reserved function-constant index of the salt (uint).
 [[nodiscard]] u16 saltConstantIndex();
 
+/// F15.1: reserved constant MATERIAL_FEATURES (uint, index 22; shaders/variants.def,
+/// NOT an axis).  MSL semantics: undefined => 0 (no extension lobes), so a
+/// descriptor without it is today's pipeline and keeps its key and archive entry.
+[[nodiscard]] u16 materialFeaturesConstantIndex();
+
+/// `desc` specialised with the feature union of a scene (bit n = MaterialFeature n).
+/// mask == 0 returns `desc` unchanged (byte-identical descriptor and key: scenes without
+/// features request exactly the pre-F15 pipelines).  Any other mask appends constant 22 (an
+/// existing constant 22 is replaced).
+[[nodiscard]] PipelineDesc withMaterialFeatures(const PipelineDesc& desc, u32 mask);
+/// F15.2 (ticket 21): the visibility resolve kernels of a scene with material features come from the exact-maths copy of the module
+/// (shaders/material_passes_exact.metal, namespace phx_exact): "visibility_resolve" -> "phx_exact::visibility_resolve", likewise the lit
+/// kernel; any other name is returned unchanged.  Both the class pipelines and the all-lobes pipeline use it, so they are bit-identical.
+/// DEBUG ONLY (--debug-material-module exact|fast): false makes exactModuleKernel the identity, so scenes with material features keep the base
+/// fast-maths resolve kernels.  Default true (the product).  Process-wide, set once before the first pipeline request; the fast kernels with a
+/// feature mask are not in the archive and compile at run time (use --pipeline-sync).
+void setExactMaterialModule(bool exact);
+[[nodiscard]] bool exactMaterialModule();
+[[nodiscard]] std::string exactModuleKernel(const std::string& name);
+/// `desc` with its first function mapped through exactModuleKernel.
+[[nodiscard]] PipelineDesc inExactModule(const PipelineDesc& desc);
+/// TEST ONLY (--debug-material-module exact-all, F15 closure round 4, owner decision 2026-11-17): the BASE resolve pipelines a scene without
+/// material features uses (generic + legacy classes) also come from the exact-maths module, so a layer stack (exact module) and its
+/// featureless single-material pair are compared in one maths mode.  Default false (the product: featureless scenes keep the fast module).
+void setExactModuleAllScenes(bool all);
+[[nodiscard]] bool exactModuleAllScenes();
+/// `desc` through inExactModule when exactModuleAllScenes(), else unchanged (byte-identical descriptor and archive key).
+[[nodiscard]] PipelineDesc inExactModuleIfAllScenes(const PipelineDesc& desc);
+/// F15.1 (ticket 22): reserved constant TEXTURE_TRANSFORM (uint, index 26): 1 = per-slot KHR_texture_transform compiled in.
+[[nodiscard]] u16 textureTransformConstantIndex();
+/// `desc` with TEXTURE_TRANSFORM = 1 (an existing constant is replaced).
+[[nodiscard]] PipelineDesc withTextureTransform(const PipelineDesc& desc);
+/// F15 closure (COLOR_0): reserved constant VERTEX_COLOR (uint, index 27) = 1: the per-vertex colour stream is read and multiplied into the base colour.
+[[nodiscard]] u16 vertexColorConstantIndex();
+[[nodiscard]] PipelineDesc withVertexColor(const PipelineDesc& desc);
+
+/// The reference / compile-fallback pipeline: constant 22 = every feature bit.  Distinct from
+/// `desc` itself, which (undefined => 0) has no extension lobes.
+[[nodiscard]] PipelineDesc withAllLobes(const PipelineDesc& desc);
+
 /// Descriptor of the forward pipeline for `v` (constants set) and of the
 /// generic one (no constants), drawing into one colour attachment `color`.
 /// `salt` != 0 adds the salt constant to the specialised descriptor.

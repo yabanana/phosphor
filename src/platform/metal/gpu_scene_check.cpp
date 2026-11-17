@@ -8,7 +8,7 @@
 namespace phosphor {
 
 GpuSceneChecker::~GpuSceneChecker() {
-    for (MTL::Buffer* b : {instances_, materials_, prefix_, visible_}) context_.memory().release(b, MemoryCategory::Other);
+    for (MTL::Buffer* b : {instances_, materials_, extensions_, prefix_, visible_}) context_.memory().release(b, MemoryCategory::Other);
 }
 
 MTL::Buffer* GpuSceneChecker::readback(MTL::Buffer*& cache, u64 size, const char* label) {
@@ -28,9 +28,11 @@ SceneCheckResult GpuSceneChecker::check(const SceneRenderer& renderer, const Sce
     const u64 slots = store.slotCapacity();
     const u64 instanceBytes = slots * sizeof(GPUInstance);
     const u64 materialBytes = store.materials().size() * sizeof(GPUMaterial);
+    const u64 extensionBytes = b.extensions() ? store.extensions().size() * sizeof(GPUMaterialExtRecord) : 0;
     const u64 prefixBytes   = (slots + 1) * sizeof(u32);
     MTL::Buffer* instances = readback(instances_, instanceBytes, "Scene check instances");
     MTL::Buffer* materials = readback(materials_, materialBytes, "Scene check materials");
+    MTL::Buffer* extensions = readback(extensions_, extensionBytes, "Scene check extensions");
     MTL::Buffer* prefix    = readback(prefix_, prefixBytes, "Scene check prefix");
     MTL::Buffer* visible   = readback(visible_, slots * sizeof(u32), "Scene check visible");
     context_.commitResidency();
@@ -38,6 +40,7 @@ SceneCheckResult GpuSceneChecker::check(const SceneRenderer& renderer, const Sce
     context_.enqueueUpload([&](MTL4::ComputeCommandEncoder* enc) {
         if (instanceBytes) enc->copyFromBuffer(b.instances(), 0, instances, 0, instanceBytes);
         if (materialBytes) enc->copyFromBuffer(b.materials(), 0, materials, 0, materialBytes);
+        if (extensionBytes) enc->copyFromBuffer(b.extensions(), 0, extensions, 0, extensionBytes);
         if (on) {
             enc->copyFromBuffer(fs.prefix, 0, prefix, 0, prefixBytes);
             if (slots) enc->copyFromBuffer(fs.visible, 0, visible, 0, slots * sizeof(u32));
@@ -48,6 +51,8 @@ SceneCheckResult GpuSceneChecker::check(const SceneRenderer& renderer, const Sce
     SceneReadback gpu;
     gpu.instances = {static_cast<const GPUInstance*>(instances->contents()), static_cast<size_t>(slots)};
     gpu.materials = {static_cast<const GPUMaterial*>(materials->contents()), store.materials().size()};
+    if (extensionBytes)
+        gpu.extensions = {static_cast<const GPUMaterialExtRecord*>(extensions->contents()), store.extensions().size()};
     if (on) {
         gpu.prefix   = {static_cast<const u32*>(prefix->contents()), static_cast<size_t>(slots + 1)};
         gpu.visible  = {static_cast<const u32*>(visible->contents()), static_cast<size_t>(slots)};

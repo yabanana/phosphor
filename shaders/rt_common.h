@@ -3,6 +3,7 @@
 #include <metal_raytracing>
 #include "renderer/gpu_types.h"
 #include "renderer/rt_geometry.h"
+#include "renderer/transmission_math.h"
 
 using namespace metal;
 using namespace raytracing;
@@ -22,12 +23,43 @@ static_assert(sizeof(GPURtRay) == 48 && sizeof(GPURtHit) == 32, "RT ray/hit ABI"
 
 // Payload is local to traversal, not a host ABI. Counters are accumulated per
 // ray, then reduced by SIMD-group; alpha tests do not atomically contend.
+// F15.1 (ticket 14): RT_PROBE_SHADOW_TRANSMITTED rays also carry the log-space RGB transmittance accumulated by the intersection function
+// (zero = transmittance 1), the bounded list of the (slot, primitive) pairs already accounted (the duplicate filter, see rt_intersections.metal)
+//.  Plain `RtPayload payload{}` stays valid for every other ray type.
+constant constexpr uint kRtTransmitList = 8u;
 struct RtPayload {
     float coneWidth;
     uint type;
     uint alphaTests;
     uint opaqueAlphaTests;
+    float lnTransmittance[3];
+    float openSigma[3];                 // net open sigma_t of the media entered and not left (ticket 14 closure: a segment that ends inside a volume)
+    uint listCount;
+    uint2 listed[kRtTransmitList];      // (slot, primitive)
+    float direction[3];                 // the world ray direction (set by rtTrace for the intersection function)
 };
+// F15 ticket 24 / closure: the Apple GPU compiler (MetalToolchain 27.2.47) fails with an internal compiler error on reflection_rt_lobe with
+// rt_alpha_generic linked (constant 22 = 1) at 132 and 136 bytes (the trigger is not a simple alignment rule); 144 and 128 bytes compile.  The payload
+// SIZE is a per-ray cost of every pipeline that links it (chess back-light, docs/opt-log.md 2026-11-16: 144 -> 128 bytes = -3.7 ms in
+// `Local clustered RT shading`), so the layout is the 128-byte one (the three spike counters and the pad word removed).  Validated: metal-tt archive
+// translation in the build AND the runtime JIT of reflection_rt_lobe (--no-pipeline-archive, specular-grid-sun, PIPELINES failures 0).  A change here
+// must be re-validated the same way, then this pin updated.
+static_assert(sizeof(RtPayload) == 128, "RtPayload layout changed: re-validate metal-tt + runtime JIT of reflection_rt_lobe (Apple GPU compiler ICE), then update this pin");
+
+// F15 ticket 24: the payload of a kernel that never needs the transmittance of a ray (no transmittance, no dedup list, no direction): the
+// pre-ticket-14 16 bytes.  The payload size alone slows every traversal of the pipeline (RTAO +0.43 ms on Sponza D2, docs/opt-log.md), so a
+// kernel that traces such rays with RtPayloadLite links `rt_alpha_lite` (the same alpha test) instead of `rt_alpha_generic`; the payload type
+// is part of the intersection function's signature, so ALL traces of one pipeline use the same one.  A RT_PROBE_SHADOW_TRANSMITTED ray traced
+// with it is a plain any-hit shadow ray (transmittance 1: exact for a scene without transmissive materials).
+struct RtPayloadLite {
+    float coneWidth;
+    uint type;
+    uint alphaTests;
+    uint opaqueAlphaTests;
+};
+inline void rtSetPayloadDirection(thread RtPayload& payload, float3 d) { payload.direction[0] = d.x; payload.direction[1] = d.y; payload.direction[2] = d.z; }
+inline void rtSetPayloadDirection(thread RtPayloadLite&, float3) {}
+inline float3 rtShadowTransmittance(thread const RtPayloadLite&, float = 0.0f) { return float3(1.0f); }
 
 inline float3 rtPosition(const device GPUVertex& v) { return float3(v.px, v.py, v.pz); }
 inline float3 rtWorldPoint(const device GPUInstance& i, float3 p) {
@@ -79,10 +111,11 @@ constexpr sampler kRtAlphaSampler(filter::linear, mip_filter::linear, address::r
 // All triangles use the generic alpha function at IFT slot 0. Hardware opacity
 // on an instance bypasses it entirely. Explicit instance Opaque/NonOpaque
 // overrides allow a mesh to be shared by opaque and MASK materials dynamically.
+template<typename Payload>
 inline GPURtHit rtTrace(const GPURtRay r, instance_acceleration_structure as,
                         intersection_function_table<triangle_data, instancing> ift,
                         const device GPUInstance* instances, uint slotCount,
-                        thread RtPayload& payload) {
+                        thread Payload& payload) {
     if (!(r.tmax >= r.tmin && r.tmin >= 0.0f) || r.mask == 0u) return rtMiss(-2.0f);
     const float3 origin(r.ox, r.oy, r.oz), direction(r.dx, r.dy, r.dz);
     if (!all(isfinite(origin)) || !all(isfinite(direction)) || dot(direction, direction) <= 0.0f)
@@ -90,9 +123,10 @@ inline GPURtHit rtTrace(const GPURtRay r, instance_acceleration_structure as,
     intersector<triangle_data, instancing> traversal;
     traversal.assume_geometry_type(geometry_type::triangle);
     if (r.type == RT_PROBE_PRIMARY) traversal.set_triangle_cull_mode(triangle_cull_mode::back);
-    if (r.type == RT_PROBE_SHADOW) traversal.accept_any_intersection(true);
+    if (r.type == RT_PROBE_SHADOW || r.type == RT_PROBE_SHADOW_TRANSMITTED) traversal.accept_any_intersection(true);
     payload.coneWidth = r.coneWidth;
     payload.type = r.type;
+    rtSetPayloadDirection(payload, direction);
     const auto result = traversal.intersect(ray(origin, direction, r.tmin, r.tmax), as, r.mask, ift, payload);
     if (result.type != intersection_type::triangle || result.user_instance_id >= slotCount) return rtMiss();
     GPURtHit hit{};
@@ -111,12 +145,23 @@ inline GPURtHit rtTrace(const GPURtRay r, instance_acceleration_structure as,
     return hit;
 }
 
+// F15.1 (ticket 14): the RGB transmittance accumulated along a RT_PROBE_SHADOW_TRANSMITTED ray (1 for a ray that crossed no transmissive
+// surface; the caller multiplies it only when the ray ended without an opaque hit).
+// `endDistance` = the length of the segment (a local endpoint): a medium entered and not left before it is attenuated over the rest of the
+// segment (transmissionShadowOpenLn).  0 for the sun, whose ray never ends inside a medium (no open correction, the pre-closure behaviour).
+inline float3 rtShadowTransmittance(thread const RtPayload& payload, float endDistance = 0.0f) {
+    const float3 open(transmissionShadowOpenLn(payload.openSigma[0], endDistance), transmissionShadowOpenLn(payload.openSigma[1], endDistance),
+                      transmissionShadowOpenLn(payload.openSigma[2], endDistance));
+    const float3 ln = min(float3(payload.lnTransmittance[0], payload.lnTransmittance[1], payload.lnTransmittance[2]) + open, 0.0f);
+    return exp(ln);
+}
+
 // Refine a returned surface hit in ray-relative world coordinates. Hardware
 // still owns traversal/face/alpha selection; visibility-only rays keep its fast path.
 inline GPURtHit rtRefineSurfaceHit(const GPURtRay r,GPURtHit hit,
     const device GPUInstance* instances,uint slotCount,
     const device GPURtMesh* meshes,const device GPUVertex* vertices,const device uint* indices,uint meshCount) {
-    if(!hit.hit||hit.slot>=slotCount||r.type==RT_PROBE_SHADOW)return hit;
+    if(!hit.hit||hit.slot>=slotCount||r.type==RT_PROBE_SHADOW||r.type==RT_PROBE_SHADOW_TRANSMITTED)return hit;
     const device GPUInstance& instance=instances[hit.slot];
     if(instance.meshIndex>=meshCount||instance.generation!=hit.generation)return hit;
     const GPURtMesh mesh=meshes[instance.meshIndex];
@@ -155,9 +200,10 @@ inline GPURtHit rtRefineSurfaceHit(const GPURtRay r,GPURtHit hit,
     return hit;
 }
 
+template<typename Payload>
 inline GPURtHit rtTraceSurface(const GPURtRay r, instance_acceleration_structure as,
     intersection_function_table<triangle_data,instancing> ift,
-    const device GPUInstance* instances,uint slotCount,thread RtPayload& payload,
+    const device GPUInstance* instances,uint slotCount,thread Payload& payload,
     const device GPURtMesh* meshes,const device GPUVertex* vertices,const device uint* indices,uint meshCount) {
     return rtRefineSurfaceHit(r,rtTrace(r,as,ift,instances,slotCount,payload),
                              instances,slotCount,meshes,vertices,indices,meshCount);

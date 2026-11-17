@@ -1,8 +1,11 @@
 #include "material_shading.h"
 #include "renderer/emission_pack.h"
 #include "temporal_motion.h"
+#include "materials/exact_pragma_on.h"
 #include "renderer/visibility_math.h"
+#include "materials/exact_pragma_off.h"
 #include "renderer/visibility_layout.h"
+#include "pipeline/material_classes.generated.metal.h"
 
 static float4x4 visibilityMatrix(const device float *m) {
     return float4x4(float4(m[0], m[1], m[2], m[3]), float4(m[4], m[5], m[6], m[7]), float4(m[8], m[9], m[10], m[11]),
@@ -23,6 +26,25 @@ static uint materialClass(const device GPUMaterial &m, constant GPUVisibilityPar
     return normal | emissive;
 }
 
+// F15.2 (ticket 21): per-class bins.  RESOLVE_BIN (constant 24) is undefined for every other pipeline (kResolveBin 0).
+constant bool kBinFeature = (kResolveBin & (VISIBILITY_BIN_CLASS | VISIBILITY_BIN_OVERFLOW)) != 0u;
+constant bool kBinOverflow = (kResolveBin & VISIBILITY_BIN_OVERFLOW) != 0u;
+constant uint kBinMask = kResolveBin & MATERIAL_FEATURES_ALL;
+static uint featureMaskOf(const device GPUMaterial &m) { return (m.flags >> MATERIAL_FEATURE_SHIFT) & MATERIAL_FEATURES_ALL; }
+// Bin of a feature mask in the scene's class table (hard bound: the table holds at most 16 classes), the overflow bin otherwise.
+static uint classBinOf(constant GPUVisibilityParams &p, uint mask) {
+    const uint count = min(p.classCount, min(VISIBILITY_FEATURE_CLASSES, kMaterialClassActiveBudget));
+    for (uint i = 0; i < count; ++i)
+        if (p.classMasks[i] == mask)
+            return i;
+    return VISIBILITY_FEATURE_CLASSES;
+}
+// The bin this feature-bin kernel serves.
+static uint ownBin(constant GPUVisibilityParams &p) { return kBinOverflow ? VISIBILITY_FEATURE_CLASSES : classBinOf(p, kBinMask); }
+
+static void writeSubsurface(texture2d<float, access::write> sss, uint2 pixel, thread const ShadingResult &value) {
+    sss.write(float4(value.sssIrradiance, sssCodeOf(value.sssMaterial)), pixel);
+}
 kernel void visibility_clear(constant GPUVisibilityParams &p [[buffer(11)]], device uint *args [[buffer(13)]],
                              texture2d<float, access::write> color [[texture(1)]],
                              texture2d<float, access::write> normal [[texture(2)]],
@@ -31,8 +53,8 @@ kernel void visibility_clear(constant GPUVisibilityParams &p [[buffer(11)]], dev
                              texture2d<float, access::write> motion [[texture(5)]],
                              texture2d<float, access::write> reactive [[texture(6)]],
                              uint2 pixel [[thread_position_in_grid]]) {
-    if (pixel.y == 0 && pixel.x < 16)
-        args[pixel.x] = pixel.x >= 12 ? 0u : (pixel.x % 3 == 0) ? 0u : 1u;
+    if (pixel.y == 0 && pixel.x < 64)
+        args[pixel.x] = pixel.x >= VISIBILITY_ARGS_WORDS ? 0u : (pixel.x % 3 == 0) ? 0u : 1u; // F15.2: x = 0, y = z = 1 per bin
     if (pixel.x >= p.outputWidth || pixel.y >= p.outputHeight)
         return;
     color.write(float4(p.background[0], p.background[1], p.background[2], 1), pixel);
@@ -60,7 +82,8 @@ kernel void visibility_classify(const device GPUInstance *instances [[buffer(2)]
         const uint id = visibility.read(pixel).x;
         if (id != VISIBILITY_BACKGROUND && visibilityCluster(id) < 2u * p.candidateCapacity) {
             const auto candidate = candidateOf(id, p, a, b);
-            const uint cls = materialClass(materials[instances[candidate.slot].materialIndex], p);
+            const device GPUMaterial &material = materials[instances[candidate.slot].materialIndex];
+            const uint cls = p.binning == 2u ? classBinOf(p, featureMaskOf(material)) : materialClass(material, p);
             atomic_fetch_or_explicit(&mask, 1u << cls, memory_order_relaxed);
         }
     }
@@ -68,7 +91,8 @@ kernel void visibility_classify(const device GPUInstance *instances [[buffer(2)]
     if (tid == 0) {
         const uint bits = atomic_load_explicit(&mask, memory_order_relaxed);
         const uint tiles = p.tilesX * p.tilesY;
-        for (uint cls = 0; cls < VISIBILITY_CLASSES; ++cls)
+        const uint binCount = p.binning == 2u ? VISIBILITY_MAX_BINS : VISIBILITY_CLASSES;
+        for (uint cls = 0; cls < binCount; ++cls)
             if (bits & (1u << cls)) {
                 const uint index = atomic_fetch_add_explicit(&args[cls * 3], 1u, memory_order_relaxed);
                 if (index < tiles)
@@ -77,6 +101,7 @@ kernel void visibility_classify(const device GPUInstance *instances [[buffer(2)]
     }
 }
 
+#include "materials/exact_math_begin.h"
 static void resolveVisibilityPixel(constant FrameConstants &frame, const device GPUVertex *vertices,
                                    const device GPUInstance *instances, const device GPUMaterial *materials,
                                    const device GPULight *lights, const device TextureHandle *textures,
@@ -88,10 +113,12 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
                                    texture2d<float, access::write> diffuse, texture2d<float, access::write> specular,
                                    texture2d<float, access::write> motion, texture2d<float, access::write> reactive,
                                    uint2 pixel, uint id, bool reuse, thread ShadingResult &cached,
-                                   float sunVisibility = 1.0f, uint sunIndex = ~0u, bool replaceLocal = false,
+                                   float3 sunVisibility = float3(1.0f), uint sunIndex = ~0u, bool replaceLocal = false,
                                    float3 localDirect = float3(0), bool useGI = false, float3 irradiance = float3(0),
                                    bool omitSpecularAmbient=false, bool physicalGI=false, bool externalDiffuse=false,
-                                   float3 environment = float3(0), float sunAngularRadius = 0.0f) {
+                                   float3 environment = float3(0), float sunAngularRadius = 0.0f,
+                                   bool useGIBack = false, float3 irradianceBack = float3(0)) {
+    cached.sssMaterial = 0u; // F15.1 (ticket 17): set by the shading of a volumetric-subsurface pixel only
     if (pixel.x >= p.width || pixel.y >= p.height)
         return;
     if (id == VISIBILITY_BACKGROUND || visibilityCluster(id) >= 2u * p.candidateCapacity)
@@ -102,6 +129,12 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
         return;
     if (kResolveClass < 4u && materialClass(materials[instance.materialIndex], p) != kResolveClass)
         return;
+    if (kBinFeature) {
+        // F15.2: this pipeline serves one class bin; the pixels of other classes belong to their own pipelines.
+        const uint featureMask = featureMaskOf(materials[instance.materialIndex]);
+        if (kBinOverflow ? classBinOf(p, featureMask) != VISIBILITY_FEATURE_CLASSES : featureMask != kBinMask)
+            return;
+    }
     const GPUMeshlet m = meshlets[candidate.meshlet];
     const uint triangle = visibilityTriangle(id);
     if (triangle >= m.triangleCount)
@@ -138,10 +171,17 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
     surface.uvDy = (uv0 * bary.dy[0] + uv1 * bary.dy[1] + uv2 * bary.dy[2]) * bias;
     surface.materialIndex = instance.materialIndex;
     surface.mirrored = (instance.flags & INSTANCE_FLAG_MIRRORED) != 0;
+    if (kVertexColorOn) { // F15 closure (COLOR_0): perspective-correct barycentric blend of the three vertex colours
+        const uint ci0 = meshletVertices[m.vertexOffset + triangles[m.triangleOffset + triangle * 3]];
+        const uint ci1 = meshletVertices[m.vertexOffset + triangles[m.triangleOffset + triangle * 3 + 1]];
+        const uint ci2 = meshletVertices[m.vertexOffset + triangles[m.triangleOffset + triangle * 3 + 2]];
+        surface.vertexColor = frame.vertexColors[ci0] * weights.x + frame.vertexColors[ci1] * weights.y + frame.vertexColors[ci2] * weights.z;
+    }
+    surface.volumeScale = min(length(model[0].xyz), min(length(model[1].xyz), length(model[2].xyz))); // ticket 13: the thickness hint in world units
     const float3 eye = float3(frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2]);
     surface.frontFacing = dot(cross(w1.xyz - w0.xyz, w2.xyz - w0.xyz), eye - surface.worldPos) > 0;
     const ShadingResult value = reuse ? cached : shadeSurface(surface, frame, materials, lights, textures, false,
-                                                              sunVisibility, sunIndex, replaceLocal, localDirect, useGI, irradiance,omitSpecularAmbient,physicalGI,externalDiffuse,environment,sunAngularRadius);
+                                                              sunVisibility, sunIndex, replaceLocal, localDirect, useGI, irradiance,omitSpecularAmbient,physicalGI,externalDiffuse,environment,sunAngularRadius,useGIBack,irradianceBack);
     cached = value;
     color.write(float4(p.debugMode == 1   ? value.normal * 0.5f + 0.5f
                        : p.debugMode == 2 ? value.baseColor
@@ -167,11 +207,16 @@ static void resolveVisibilityPixel(constant FrameConstants &frame, const device 
     }
     motion.write(float4(velocity, 0, 0), pixel);
     cached.alpha = length(velocity);
+    // F15.1 (ticket 13): a transmissive pixel shows a refracted image that moves differently from the glass surface (the motion vector follows
+    // the surface), so MetalFX temporal must not trust its history: reactive like a cut-out, no kMaterialFeatures dependence.
+    const uint reactiveFlags = materials[instance.materialIndex].flags;
     const float reactiveValue = !validHistory                                          ? 1.0f
-                                : materials[instance.materialIndex].alphaCutoff > 0.0f ? 0.75f
+                                : (materials[instance.materialIndex].alphaCutoff > 0.0f ||
+                                   (reactiveFlags & (MATERIAL_FEATURE_TRANSMISSION << MATERIAL_FEATURE_SHIFT)) != 0u) ? 0.75f
                                                                                        : 0.0f;
     reactive.write(float4(reactiveValue), pixel);
 }
+#include "materials/exact_math_end.h"
 
 kernel void visibility_resolve(
     constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],
@@ -185,9 +230,12 @@ kernel void visibility_resolve(
     texture2d<float, access::write> color [[texture(1)]], texture2d<float, access::write> normal [[texture(2)]],
     texture2d<float, access::write> diffuse [[texture(3)]], texture2d<float, access::write> specular [[texture(4)]],
     texture2d<float, access::write> motion [[texture(5)]], texture2d<float, access::write> reactive [[texture(6)]],
+    texture2d<float, access::write> sss [[texture(10), function_constant(kSssWrite)]],
     uint2 tile [[threadgroup_position_in_grid]], uint2 local [[thread_position_in_threadgroup]]) {
     uint index = tile.y * p.tilesX + tile.x;
-    if (kResolveClass < 4u)
+    if (kBinFeature)
+        index = bins[ownBin(p) * p.tilesX * p.tilesY + tile.x];
+    else if (kResolveClass < 4u)
         index = bins[kResolveClass * p.tilesX * p.tilesY + tile.x];
     const uint2 pixel = uint2(index % p.tilesX, index / p.tilesX) * VISIBILITY_TILE + local;
     if (pixel.x >= p.width || pixel.y >= p.height)
@@ -197,6 +245,7 @@ kernel void visibility_resolve(
     resolveVisibilityPixel(frame, vertices, instances, materials, lights, textures, meshlets, meshletVertices,
                            triangles, a, b, p, previousInstances, temporal, color, normal, diffuse, specular, motion,
                            reactive, pixel, id, false, cached);
+    if (kSssWrite && cached.sssMaterial != 0u) writeSubsurface(sss, pixel, cached);
 }
 kernel void visibility_lit_resolve(
     constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],
@@ -214,9 +263,13 @@ kernel void visibility_lit_resolve(
     texture2d<float, access::read> sun [[texture(7)]],
     texture2d<float, access::read> localDirect [[texture(8)]],
     texture2d<float, access::read> irradiance [[texture(9)]],
+    texture2d<float, access::write> sss [[texture(10), function_constant(kSssWrite)]],
+    texture2d<float, access::read> irradianceBack [[texture(11)]],
     uint2 tile [[threadgroup_position_in_grid]], uint2 local [[thread_position_in_threadgroup]]) {
     uint index = tile.y * p.tilesX + tile.x;
-    if (kResolveClass < 4u)
+    if (kBinFeature)
+        index = bins[ownBin(p) * p.tilesX * p.tilesY + tile.x];
+    else if (kResolveClass < 4u)
         index = bins[kResolveClass * p.tilesX * p.tilesY + tile.x];
     const uint2 pixel = uint2(index % p.tilesX, index / p.tilesX) * VISIBILITY_TILE + local;
     if (pixel.x >= p.width || pixel.y >= p.height)
@@ -226,10 +279,12 @@ kernel void visibility_lit_resolve(
     resolveVisibilityPixel(frame, vertices, instances, materials, lights, textures, meshlets, meshletVertices,
                            triangles, a, b, p, previousInstances, temporal, color, normal, diffuse, specular, motion,
                            reactive, pixel, id, false, cached,
-                           (lighting.flags & 1u) ? sun.read(pixel).x : 1.0f, lighting.sunIndex,
+                           (lighting.flags & 1u) ? sun.read(pixel).xyz : float3(1.0f), lighting.sunIndex,
                            (lighting.flags & 2u) != 0, (lighting.flags & 2u) ? localDirect.read(pixel).xyz : float3(0),
                            (lighting.flags & 4u) != 0, (lighting.flags & 4u) ? irradiance.read(pixel).xyz : float3(0),(lighting.flags & 8u)!=0,(lighting.flags & 16u)!=0,(lighting.flags & RESOLVE_EXTERNAL_DIFFUSE)!=0,
-                           float3(lighting.environment[0],lighting.environment[1],lighting.environment[2]),lighting.sunAngularRadius);
+                           float3(lighting.environment[0],lighting.environment[1],lighting.environment[2]),lighting.sunAngularRadius,
+                           (lighting.flags & RESOLVE_GI_BACK) != 0, (lighting.flags & RESOLVE_GI_BACK) ? irradianceBack.read(pixel).xyz : float3(0));
+    if (kSssWrite && cached.sssMaterial != 0u) writeSubsurface(sss, pixel, cached);
 }
 kernel void visibility_adaptive(
     constant FrameConstants &frame [[buffer(0)]], const device GPUVertex *vertices [[buffer(1)]],
@@ -244,6 +299,7 @@ kernel void visibility_adaptive(
     texture2d<float, access::write> color [[texture(1)]], texture2d<float, access::write> normal [[texture(2)]],
     texture2d<float, access::write> diffuse [[texture(3)]], texture2d<float, access::write> specular [[texture(4)]],
     texture2d<float, access::write> motion [[texture(5)]], texture2d<float, access::write> reactive [[texture(6)]],
+    texture2d<float, access::write> sss [[texture(10), function_constant(kSssWrite)]],
     uint2 tile [[threadgroup_position_in_grid]], uint2 local [[thread_position_in_threadgroup]],
     uint lane [[thread_index_in_simdgroup]]) {
     const uint2 origin = tile * VISIBILITY_TILE + local * 2u;
@@ -253,6 +309,7 @@ kernel void visibility_adaptive(
     resolveVisibilityPixel(frame, vertices, instances, materials, lights, textures, meshlets, meshletVertices,
                            triangles, a, b, p, previousInstances, temporal, color, normal, diffuse, specular, motion,
                            reactive, origin, firstID, false, cached);
+    if (kSssWrite && cached.sssMaterial != 0u) writeSubsurface(sss, origin, cached);
     bool coarse = (p.pad2 & 2u) && !(temporal.debugFlags & 4u) && temporal.historyValid && firstID != 0u &&
                   all(origin + 1u < uint2(p.width, p.height)) && cached.alpha < 0.25f;
     if (coarse) {
@@ -260,8 +317,10 @@ kernel void visibility_adaptive(
         const auto instance = instances[candidate.slot];
         const device auto &material = materials[instance.materialIndex];
         const uint primitive = meshlets[candidate.meshlet].triangleOffset + visibilityTriangle(firstID) * 3u;
+        // F15.1: materials with feature bits are never reused (their lobes are not part of the
+        // base-model similarity test).
         coarse = material.roughness >= 0.75f && material.metallic <= 0.05f && material.alphaCutoff == 0 &&
-                 materialClass(material, p) == 0u;
+                 materialClass(material, p) == 0u && (material.flags >> MATERIAL_FEATURE_SHIFT) == 0u;
         float lo = INFINITY, hi = 0;
         for (uint y = 0; y < 2; ++y)
             for (uint x = 0; x < 2; ++x) {
@@ -282,6 +341,7 @@ kernel void visibility_adaptive(
         resolveVisibilityPixel(frame, vertices, instances, materials, lights, textures, meshlets, meshletVertices,
                                triangles, a, b, p, previousInstances, temporal, color, normal, diffuse, specular,
                                motion, reactive, pixel, id, coarse, cached);
+        if (kSssWrite && cached.sssMaterial != 0u) writeSubsurface(sss, pixel, cached);
         shaded += valid && id != 0 && !coarse;
     }
     const uint total = simd_sum(shaded), reused = simd_sum(coarse ? 3u : 0u);
@@ -378,7 +438,9 @@ kernel void material_lighting_guides(
     const device GPUMeshletCandidate *b [[buffer(10)]], constant GPUVisibilityParams &p [[buffer(11)]],
     const device GPUInstance *previousInstances [[buffer(14)]], constant GPUTemporalParams &temporal [[buffer(15)]],
     device GPUDISurface* output [[buffer(16)]], const device GPUShadowSurface* geometry [[buffer(17)]],
-    constant GPUDIParams& di [[buffer(18)]], texture2d<uint,access::read> visibility [[texture(0)]],
+    constant GPUDIParams& di [[buffer(18)]],
+    device GPULobeGuide* lobeGuide [[buffer(19)]], // F15.1: bound and used only when kMaterialFeatures != 0
+    texture2d<uint,access::read> visibility [[texture(0)]],
     texture2d<float,access::write> motion [[texture(7)]],
     texture2d<float,access::write> fallbackShading [[texture(8)]],
     texture2d<float,access::write> fallbackAlbedo [[texture(9)]],
@@ -387,6 +449,7 @@ kernel void material_lighting_guides(
     if(any(pixel>=uint2(p.width,p.height)))return;
     const uint index=pixel.y*p.width+pixel.x;
     output[index]=GPUDISurface{};motion.write(float4(0),pixel);
+    if(kMaterialFeatures!=0u)lobeGuide[index]=GPULobeGuide{};
     fallbackShading.write(float4(0),pixel);fallbackAlbedo.write(float4(0),pixel);fallbackOcclusion.write(float4(1),pixel);fallbackEmission.write(uint4(0),pixel);
     const uint id=visibility.read(pixel).x;
     if(id==VISIBILITY_BACKGROUND || visibilityCluster(id)>=2u*p.candidateCapacity || !geometry[index].valid)return;
@@ -432,6 +495,13 @@ kernel void material_lighting_guides(
     surface.uvDy = (uv0 * bary.dy[0] + uv1 * bary.dy[1] + uv2 * bary.dy[2]) * bias;
     surface.materialIndex = instance.materialIndex;
     surface.mirrored = (instance.flags & INSTANCE_FLAG_MIRRORED) != 0;
+    if (kVertexColorOn) { // F15 closure (COLOR_0): perspective-correct barycentric blend of the three vertex colours
+        const uint ci0 = meshletVertices[m.vertexOffset + triangles[m.triangleOffset + triangle * 3]];
+        const uint ci1 = meshletVertices[m.vertexOffset + triangles[m.triangleOffset + triangle * 3 + 1]];
+        const uint ci2 = meshletVertices[m.vertexOffset + triangles[m.triangleOffset + triangle * 3 + 2]];
+        surface.vertexColor = frame.vertexColors[ci0] * weights.x + frame.vertexColors[ci1] * weights.y + frame.vertexColors[ci2] * weights.z;
+    }
+    surface.volumeScale = min(length(model[0].xyz), min(length(model[1].xyz), length(model[2].xyz))); // ticket 13: the thickness hint in world units
     const float3 eye = float3(frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2]);
     surface.frontFacing = dot(cross(w1.xyz - w0.xyz, w2.xyz - w0.xyz), eye - surface.worldPos) > 0;
     const ShadingResult value=shadeSurface(surface,frame,materials,lights,textures,false);
@@ -445,6 +515,7 @@ kernel void material_lighting_guides(
     guide.materialRevision=di.historyEpoch;guide.instanceSlot=candidate.slot;guide.instanceGeneration=instance.generation;guide.valid=1;guide.pad[0]=as_type<uint>(value.occlusion);
     guide.pad[1]=packEmission(value.emission.x,value.emission.y,value.emission.z);
     output[index]=guide;
+    if(kMaterialFeatures!=0u)lobeGuide[index]=lobeGuideRecord(value,di.flags);
     const float3 objectPoint=float3(v0.px,v0.py,v0.pz)*weights.x+float3(v1.px,v1.py,v1.pz)*weights.y+float3(v2.px,v2.py,v2.pz)*weights.z;
     const device GPUInstance& old=previousInstances[candidate.slot];
     const bool valid=temporal.historyValid && old.generation==instance.generation && (old.flags&INSTANCE_FLAG_VALID);

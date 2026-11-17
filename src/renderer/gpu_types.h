@@ -58,6 +58,51 @@ PHOSPHOR_GPU_CONSTANT u32 INVALID_TEXTURE_INDEX = 0xFFFFFFFFu;
 // DOUBLE_SIDED: glTF `doubleSided`; back-face culling is disabled for the
 // material and back faces are lit with the flipped normal.
 PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_DOUBLE_SIDED = 1u << 0;
+/// F15.1 (ticket 22): the material carries per-slot KHR_texture_transform data: GPUMaterial::textureTransformIndex is the first of
+/// the MATERIAL_TT_RECORDS records of its transform block in the extension buffer (GPUTextureTransformRecord).
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_TEXTURE_TRANSFORM = 1u << 1;
+/// F15.4 (ticket 22): the transform block is valid for sampling this material as a LAYER of a stack.  A material whose uniform transform was baked
+/// into the vertex uvs of its direct users carries only this bit (its direct shading must not apply the block again); a per-slot material that is also
+/// a layer carries both.
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_LAYER_TRANSFORM = 1u << 3; // bit 3: bit 2 is MATERIAL_FLAG_UNLIT
+// UNLIT: KHR_materials_unlit, lowered onto the emission path (renderer/material_description.h lowerUnlit).  The emission is the
+// displayed colour only: the surface is never a sampled emitter and GI rays hitting it read no emission.
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FLAG_UNLIT = 1u << 2;
+// F15 (ticket 24): the material flags were assigned by parallel branches and collided twice (TEXTURE_TRANSFORM / UNLIT, LAYER_TRANSFORM /
+// UNLIT); they must be distinct single bits below the feature bits.
+PHOSPHOR_STATIC_ASSERT((MATERIAL_FLAG_DOUBLE_SIDED | MATERIAL_FLAG_TEXTURE_TRANSFORM | MATERIAL_FLAG_LAYER_TRANSFORM | MATERIAL_FLAG_UNLIT) ==
+                           (MATERIAL_FLAG_DOUBLE_SIDED + MATERIAL_FLAG_TEXTURE_TRANSFORM + MATERIAL_FLAG_LAYER_TRANSFORM + MATERIAL_FLAG_UNLIT),
+                       "material flags overlap");
+
+// F15.1 (ticket 05): material FEATURE bits live in GPUMaterial::flags from bit
+// MATERIAL_FEATURE_SHIFT: bit (8 + MaterialFeature value) is set while the
+// material has that feature active (renderer/material_description.h keeps the
+// enum; a static_assert there checks these constants).  The same bit positions
+// without the shift form the scene feature union (SceneStore::featureUnion) and
+// the value of the reserved function constant MATERIAL_FEATURES.
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_SHIFT        = 8;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_SPECULAR_IOR = 1u << 0;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_CLEARCOAT    = 1u << 1;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_SHEEN        = 1u << 2;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_ANISOTROPY   = 1u << 3;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_IRIDESCENCE  = 1u << 4;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_TRANSMISSION = 1u << 5;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_VOLUME       = 1u << 6;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_SUBSURFACE   = 1u << 7;
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURE_LAYERS       = 1u << 8;
+/// Every feature bit: the value of the all-lobes reference pipeline.
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_FEATURES_ALL         = (1u << 9) - 1u;
+/// F15.1 (ticket 22), HOST ONLY: marker or-ed into the feature union handed to FeaturePipelines::serve when a live material carries
+/// per-slot texture transforms (SceneStore::pipelineFeatureUnion).  Never a MATERIAL_FEATURES constant value: serve() strips it and sets
+/// the reserved constant TEXTURE_TRANSFORM instead.  Outside MATERIAL_FEATURES_ALL.
+PHOSPHOR_GPU_CONSTANT u32 FEATURE_UNION_TEXTURE_TRANSFORM = 1u << 31;
+/// F15 closure (COLOR_0), HOST ONLY: the same kind of marker for a scene with a per-vertex colour stream (reserved constant VERTEX_COLOR).
+PHOSPHOR_GPU_CONSTANT u32 FEATURE_UNION_VERTEX_COLOR = 1u << 30;
+/// GPUMaterial::extensionIndex of a material without an extension group.
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_EXTENSION_INVALID    = 0xFFFFFFFFu;
+/// Records of the extension group of one extended material (fixed, so
+/// toggling features never reallocates the group).
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_EXT_RECORDS          = 4;
 
 struct GPUMaterial {
     float baseColor[4];
@@ -72,10 +117,256 @@ struct GPUMaterial {
     u32 emissiveTex;
     float emissive[3];
     float alphaCutoff;
-    u32 flags;                 // MATERIAL_FLAG_*
-    float pad[2];
+    u32 flags;                 // MATERIAL_FLAG_* | feature bits << MATERIAL_FEATURE_SHIFT
+    u32 extensionIndex;        // first of the MATERIAL_EXT_RECORDS extension records, or MATERIAL_EXTENSION_INVALID
+    u32 textureTransformIndex; // F15.1 (ticket 22): first record of the transform block when MATERIAL_FLAG_TEXTURE_TRANSFORM is set, else 0
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterial) == 80, "GPUMaterial layout");
+
+// ---------------------------------------------------------------------------
+// F15.1 (ticket 05): material extension records (decision 07, ADR-0002).
+//
+// A separate GPU buffer of 80-byte records; an extended material owns a group
+// of MATERIAL_EXT_RECORDS consecutive records starting at
+// GPUMaterial::extensionIndex.  The layouts of EVERY F15 feature are frozen
+// here: later lobe tickets only read fields.  Texture fields are bindless
+// indices (INVALID_TEXTURE_INDEX = factor only).  Each record is one
+// GPUDeltaRecord payload.
+// ---------------------------------------------------------------------------
+
+/// Record 0: KHR_materials_ior + KHR_materials_specular, clearcoat, sheen.
+struct GPUMaterialExt0 {
+    float ior;                 // 0 = the permanent special mode (Fresnel evaluates to 1)
+    float specularFactor;
+    float specularColor[3];
+    u32   specularTex;         // A channel
+    u32   specularColorTex;    // RGB (sRGB)
+    float clearcoatFactor;
+    float clearcoatRoughness;
+    float clearcoatNormalScale;
+    u32   clearcoatFactorTex;  // R
+    u32   clearcoatRoughnessTex; // G
+    u32   clearcoatNormalTex;
+    float sheenColor[3];
+    float sheenRoughness;
+    u32   sheenColorTex;       // RGB (sRGB)
+    u32   sheenRoughnessTex;   // A
+    u32   pad;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterialExt0) == 80, "GPUMaterialExt0 layout");
+
+/// Record 1: anisotropy, iridescence, transmission, volume.
+struct GPUMaterialExt1 {
+    float anisotropyStrength;
+    float anisotropyRotation;  // radians, counter-clockwise from the tangent
+    u32   anisotropyTex;       // RGB: direction rg, strength b
+    float iridescenceFactor;
+    float iridescenceIor;
+    float iridescenceThicknessMin; // nm
+    float iridescenceThicknessMax; // nm
+    u32   iridescenceFactorTex;    // R
+    u32   iridescenceThicknessTex; // G
+    float transmissionFactor;
+    u32   transmissionTex;     // R
+    float volumeThickness;
+    u32   volumeThicknessTex;  // G
+    float attenuationColor[3];
+    float attenuationDistance; // +inf: no attenuation
+    u32   pad[3];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterialExt1) == 80, "GPUMaterialExt1 layout");
+
+/// Record 2: subsurface (OpenPBR semantics, ADR-0005).  mode: 0 thin, 1 volumetric.
+struct GPUMaterialExt2 {
+    u32   mode;
+    float weight;
+    float color[3];
+    float radius;              // metres
+    float radiusScale[3];
+    float anisotropy;
+    u32   weightTex;           // A
+    u32   colorTex;            // RGB (sRGB)
+    u32   radiusScaleTex;      // RGB (sRGB)
+    u32   pad[7];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterialExt2) == 80, "GPUMaterialExt2 layout");
+
+/// Record 3: layer stack.  packedMaskChannels: 2 bits per layer (layer i at
+/// bits 2i..2i+1; 0 R, 1 G, 2 B, 3 A).  heightContrast[i] in metres, or -1
+/// when the layer has none (plain mask blend).  Unused layers have material
+/// index MATERIAL_EXTENSION_INVALID.
+struct GPUMaterialExt3 {
+    u32   maskTex;
+    u32   layerCount;          // 0 .. 4
+    u32   layerMaterial[4];
+    u32   packedMaskChannels;
+    float heightContrast[4];
+    float uvScale[4];          // F15.4 (ticket 23): per-layer texture tiling (uv * uvScale); 0 for a layer that does not exist
+    u32   heightTex[4];        // F15.4: per-layer height texture (R): INVALID_TEXTURE_INDEX when the layer has none, 0 for a layer that does not exist
+    u32   features;            // F15.4: bits 0..15 = the stack's OWN feature mask, bits 16..31 = the blendable features of its layers (0 without a stack)
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterialExt3) == 80, "GPUMaterialExt3 layout");
+
+// ---------------------------------------------------------------------------
+// F15.1 (ticket 22): per-slot KHR_texture_transform.  A material with non-uniform transforms (slots that differ, or a mix of
+// transformed and plain slots) owns a TRANSFORM BLOCK of MATERIAL_TT_RECORDS consecutive records in the extension buffer (two
+// adjacent extension groups, allocated and freed together by the SceneStore).  Slot s (TT_SLOT_*) is stored at record s / 3,
+// transform s % 3.  Record 0 word `slotMask` has bit s set when slot s has a non-identity transform; the other slots sample the
+// plain UV.  uv' = M uv + o with M = R S of the specification (m = {m00, m01, m10, m11}, row major).
+// ---------------------------------------------------------------------------
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_TT_GROUPS  = 3;  // F15.1 (ticket 22, layers): 25 slots need 9 records
+PHOSPHOR_GPU_CONSTANT u32 MATERIAL_TT_RECORDS = MATERIAL_TT_GROUPS * MATERIAL_EXT_RECORDS;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_BASE_COLOR       = 0;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_METAL_ROUGH      = 1;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_NORMAL           = 2;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_OCCLUSION        = 3;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_EMISSIVE         = 4;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_SPECULAR         = 5;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_SPECULAR_COLOR   = 6;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_COAT             = 7;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_COAT_ROUGHNESS   = 8;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_COAT_NORMAL      = 9;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_SHEEN_COLOR      = 10;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_SHEEN_ROUGHNESS  = 11;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_ANISOTROPY       = 12;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_IRIDESCENCE      = 13;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_IRIDESCENCE_THICKNESS = 14;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_TRANSMISSION     = 15;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_VOLUME_THICKNESS = 16;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_SUBSURFACE_WEIGHT = 17;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_SUBSURFACE_COLOR = 18;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_SUBSURFACE_RADIUS = 19;
+// Layer stack (F15.4): the stack material's mask and the four layers' height textures.  A layer's OWN textures (base colour, normal, ...) go through
+// the transform block of the layer's sub-material (a library material), not through the stack's.
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_LAYER_MASK       = 20;
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_LAYER_HEIGHT0    = 21; // + layer index (0..3)
+PHOSPHOR_GPU_CONSTANT u32 TT_SLOT_COUNT            = 25;
+
+struct GPUTextureTransform {
+    float m[4];                // m00, m01, m10, m11
+    float o[2];                // offset
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUTextureTransform) == 24, "GPUTextureTransform layout");
+
+/// One record of a transform block (three transforms and two spare words; `slotMask` is only meaningful in record 0).  slotMask has 25 bits.
+struct GPUTextureTransformRecord {
+    GPUTextureTransform t[3];
+    u32 slotMask;
+    u32 reserved;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUTextureTransformRecord) == 80, "GPUTextureTransformRecord layout");
+
+/// One record of the extension buffer, untyped (the scatter payload).
+struct GPUMaterialExtRecord {
+    u32 w[20];
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUMaterialExtRecord) == 80, "GPUMaterialExtRecord layout");
+
+/// GPU address of the extension buffer inside a parameter struct (a device pointer in MSL, 8 bytes either way; 0 without extended
+/// materials).  F15.4 (ticket 23): the secondary-hit kernels (reflection hits, GI probe/reservoir hits, probe capture) read it to resolve a layer
+/// stack's blended base parameters (shaders/layer_resolve.h).
+#if defined(__METAL_VERSION__)
+typedef const device GPUMaterialExtRecord* GPUMaterialExtPtr;
+#else
+typedef u64 GPUMaterialExtPtr;
+#endif
+/// F15 closure (COLOR_0): GPU address of the per-vertex colour stream (float4 per vertex) inside a parameter struct; 0 without COLOR_0.  The secondary
+/// sites test it at run time (a null pointer leaves the value untouched), the primary pipelines are specialised (reserved constant VERTEX_COLOR).
+#if defined(__METAL_VERSION__)
+typedef const device float4* GPUVertexColorPtr;
+#else
+typedef u64 GPUVertexColorPtr;
+#endif
+
+// ---------------------------------------------------------------------------
+// F15.1 (ticket 06): the per-pixel lobe guide (decision 07: "an additional
+// guide buffer allocated and read only when the scene feature union is
+// non-empty").  The producers of the DI surfaces (material lighting guides
+// kernel, indexed overflow receivers) write one record per pixel with the
+// RESOLVED feature parameters (textures sampled, layers blended, instance
+// scale applied) of the pixel's material; DI, the specular transport, the
+// composite and the denoiser read it (tickets 07/08 onwards).  Base
+// parameters (albedo, metallic, roughness, shading normal) stay in
+// GPUDISurface.  The layout of EVERY F15 feature is frozen here; packing and
+// unpacking live in renderer/lobe_guide_pack.h.
+//
+// Rules: `features` holds the feature bits of the pixel's material that the
+// producer resolved (0 = base material: every other word is 0); the words of
+// a feature whose bit is clear are 0.  Half fields hold IEEE binary16 bits
+// (low half = first named value); oct fields hold a unit vector in WORLD
+// space, octahedral snorm16x2 (low half = x).
+// ---------------------------------------------------------------------------
+PHOSPHOR_GPU_CONSTANT u32 LOBE_GUIDE_FEATURE_MASK = 0xFFFFu;   // features: MATERIAL_FEATURE_* bits
+PHOSPHOR_GPU_CONSTANT u32 LOBE_GUIDE_FLAG_SUBSURFACE_VOLUMETRIC = 1u << 16; // GPUMaterialExt2::mode == 1
+// Features whose parameters the resolve (shadeSurface) resolves into LobeParams today; the producers
+// write `material bits & kMaterialFeatures & this`.  Later lobe tickets extend it.
+PHOSPHOR_GPU_CONSTANT u32 LOBE_GUIDE_RESOLVED_FEATURES = MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT | MATERIAL_FEATURE_SHEEN |
+    MATERIAL_FEATURE_ANISOTROPY | MATERIAL_FEATURE_IRIDESCENCE | MATERIAL_FEATURE_SUBSURFACE | // SUBSURFACE: the thin mode (ticket 16)
+    MATERIAL_FEATURE_TRANSMISSION | MATERIAL_FEATURE_VOLUME; // ticket 13
+
+struct GPULobeGuide {
+    u32   features;               // MATERIAL_FEATURE_* (bits 0..15) | LOBE_GUIDE_FLAG_* (bits 16..31)
+    float ior;                    // KHR_materials_ior (0 = special mode); also the transmission/volume IOR
+    u32   specularFactorCoat;     // half2: specularFactor, clearcoatFactor
+    u32   specularColorRG;        // half2: specularColor r, g
+    u32   specularColorBCoatRoughness; // half2: specularColor b, clearcoatRoughness
+    u32   clearcoatNormal;        // oct: coat normal (the shading normal without a coat normal texture)
+    u32   sheenColorRG;           // half2: sheenColor r, g
+    u32   sheenColorBRoughness;   // half2: sheenColor b, sheenRoughness
+    u32   anisotropyDirection;    // oct: anisotropy direction (tangent frame rotated by the rotation/texture), orthogonal to N
+    u32   anisotropyIridescence;  // half2: anisotropyStrength, iridescenceFactor
+    u32   iridescence;            // half2: iridescenceIor, iridescenceThickness (nm, resolved from min/max/texture)
+    u32   transmissionThickness;  // half2: transmissionFactor, volume thickness in WORLD units (mesh thickness * instance scale)
+    u32   attenuationRG;          // half2: attenuationColor r, g
+    u32   attenuationBDistance;   // half2: attenuationColor b, attenuationDistance (world units, +inf = none)
+    u32   subsurfaceWeightRadius; // half2: subsurface weight, radius (metres)
+    u32   subsurfaceColorRG;      // half2: subsurface colour r, g
+    u32   subsurfaceColorBAnisotropy; // half2: subsurface colour b, anisotropy
+    u32   subsurfaceScaleRG;      // half2: radiusScale r, g
+    u32   subsurfaceScaleB;       // half2: radiusScale b, 0
+    u32   reserved;               // 0
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPULobeGuide) == 80, "GPULobeGuide layout");
+
+// F15.1 (ticket 17): screen-space diffusion of volumetric subsurface (shaders/subsurface.metal).  Reverse-Z infinite projection: view depth
+// z = nearPlane / depth; metres per pixel at depth z are 2 z tanHalfFovX / width (square pixels).
+struct GPUSubsurfaceParams {
+    u32   width, height;               // the rendered (logical) image
+    u32   outputWidth, outputHeight;   // the attachments
+    float nearPlane, tanHalfFovX, tanHalfFovY;
+    u32   pad;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUSubsurfaceParams) == 32, "GPUSubsurfaceParams layout");
+
+/// F15.1 (ticket 17/18, RT tier): parameters of the subsurface random-walk kernel (shaders/subsurface_walk.metal, --subsurface-mode rt-walk).
+/// flags: SSS_WALK_SHADOW_RAYS = the lights are occluded by a shadow ray from each exit point of the walk; SSS_WALK_NO_LOCAL = point and spot
+/// lights are not lit by the walk (the direct-lighting path owns them); SSS_WALK_NO_LIGHTS = negative control: the walk lights nothing.
+/// samples = walks per pixel and frame, maxSteps = hard bound of the events (free flights and boundary hits) of one walk.
+/// The single-scatter albedo table is the buffer of renderer/subsurface_walk_table.h (kSubsurfaceTableData).
+PHOSPHOR_GPU_CONSTANT u32 SSS_WALK_SHADOW_RAYS = 1u;
+PHOSPHOR_GPU_CONSTANT u32 SSS_WALK_NO_LOCAL    = 2u;
+PHOSPHOR_GPU_CONSTANT u32 SSS_WALK_NO_LIGHTS   = 4u;
+struct GPUSubsurfaceWalkParams {
+    u32   width, height;               // the rendered (logical) image
+    u32   outputWidth, outputHeight;   // the attachments
+    float tanHalfFovX, tanHalfFovY;
+    u32   slotCount, meshCount;
+    u32   samples, maxSteps, frameIndex, flags;
+    u32   lightCount, materialCount, pad0, pad1;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUSubsurfaceWalkParams) == 64, "GPUSubsurfaceWalkParams layout");
+
+/// F15.1 (ticket 17/18, RT tier): temporal accumulation and spatial prefilter of the walk signal (shaders/subsurface_accumulate.metal).
+/// window = radius of the (2 r + 1)^2 prefilter, maxCount = bound of the history length (the exponential memory), depthTolerance = relative view-depth tolerance of
+/// both the prefilter and the history rejection, normalCosine = the normal cone of the prefilter.
+PHOSPHOR_GPU_CONSTANT u32 SSS_ACCUM_RESET = 1u;
+PHOSPHOR_GPU_CONSTANT u32 SSS_ACCUM_NO_REJECT = 2u; // negative control: the history is read at the same pixel without any rejection (motion and depth ignored)
+struct GPUSubsurfaceAccumParams {
+    u32   width, height, outputWidth, outputHeight;
+    u32   flags, window, maxCount, pad0;
+    float nearPlane, depthTolerance, normalCosine, pad1;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUSubsurfaceAccumParams) == 48, "GPUSubsurfaceAccumParams layout");
 
 struct GPUMeshInfo {
     u32 meshletCount;
@@ -102,6 +393,13 @@ PHOSPHOR_GPU_CONSTANT u32 RT_PROBE_PRIMARY = 0u;
 PHOSPHOR_GPU_CONSTANT u32 RT_PROBE_SHADOW = 1u;
 PHOSPHOR_GPU_CONSTANT u32 RT_PROBE_AO = 2u;
 PHOSPHOR_GPU_CONSTANT u32 RT_PROBE_DIFFUSE = 3u;
+// F15.1 (ticket 14): a visibility ray that ACCUMULATES the RGB transmittance of transmissive casters (any-hit, the intersection function rejects
+// the transmissive triangles after multiplying their factor into the payload) instead of stopping at them; opaque and alpha-masked casters
+// stop it as RT_PROBE_SHADOW does.  Every other ray type sees a transmissive surface as an opaque hit.
+PHOSPHOR_GPU_CONSTANT u32 RT_PROBE_SHADOW_TRANSMITTED = 4u;
+// GPURtParams::transmittanceFlags.
+PHOSPHOR_GPU_CONSTANT u32 RT_TRANSMITTANCE_NO_DEDUP = 1u << 0; // negative control: no per-primitive duplicate filter (--debug-transmittance-dedup off)
+PHOSPHOR_GPU_CONSTANT u32 RT_TRANSMITTANCE_INJECT_DUPLICATE = 1u << 1; // spike control: every transmissive triangle invokes the accumulation twice (--debug-transmittance-inject)
 PHOSPHOR_GPU_CONSTANT u32 RT_MESH_ALPHA = 1u;
 
 struct GPURtInstanceDesc {
@@ -120,8 +418,10 @@ PHOSPHOR_STATIC_ASSERT(sizeof(GPURtMesh) == 32, "GPURtMesh layout");
 
 struct GPURtParams {
     u32 slotCount, meshCount, materialCount, corruption;
+    u32 transmittanceFlags, pad0;             // F15.1 (ticket 14): RT_TRANSMITTANCE_*
+    GPUVertexColorPtr vertexColors;           // F15 closure (COLOR_0): the colour stream of the any-hit alpha test (offset 24, the former pad1 / pad2); 0 without COLOR_0
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPURtParams) == 16, "GPURtParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPURtParams) == 32, "GPURtParams layout");
 
 struct GPURtRay {
     float ox, oy, oz, tmin;
@@ -180,8 +480,39 @@ struct FrameConstants {
     u32 debugMode;
     float exposure;
     u32 frameIndex;
+    // F15: GPU address of the DFG table buffer (renderer/dfg_table.h values,
+    // owned by SceneRenderer). Fragment functions must read the table through
+    // it: MTL_SHADER_VALIDATION corrupts their reads of program-scope constant
+    // arrays (measured 2026-11-13, see shaders/materials/bsdf.h).
+#if defined(__METAL_VERSION__)
+    const constant float* dfgTable;
+#else
+    u64 dfgTable;
+#endif
+    // F15.1 (ticket 05): GPU address of the material extension buffer
+    // (GPUMaterialExtRecord[]); read only by materials whose flags carry
+    // feature bits, so it may stay 0 for scenes without features.
+#if defined(__METAL_VERSION__)
+    const device GPUMaterialExtRecord* materialExtensions;
+#else
+    u64 materialExtensions;
+#endif
+    // F15.1 (ticket 10): GPU address of the sheen albedo table buffer (renderer/sheen_table.h values, owned by SceneRenderer),
+    // read by fragment functions for the same reason as dfgTable.
+#if defined(__METAL_VERSION__)
+    const constant float* sheenTable;
+#else
+    u64 sheenTable;
+#endif
+    // F15 closure (COLOR_0): GPU address of the per-vertex colour stream (float4 per GPUVertex, parallel to the vertex buffer); 0 and never read
+    // unless the pipeline sets the reserved constant VERTEX_COLOR (a scene without COLOR_0 has no stream).
+#if defined(__METAL_VERSION__)
+    const device float4* vertexColors;
+#else
+    u64 vertexColors;
+#endif
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(FrameConstants) == 160, "FrameConstants layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(FrameConstants) == 192, "FrameConstants layout");
 
 // ---------------------------------------------------------------------------
 // F5: persistent GPU scene (renderer/scene_store.h, renderer/gpu_scene_layout.h)
@@ -488,6 +819,16 @@ PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_RT = 1u << 1;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_HISTORY_VALID = 1u << 2;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_CONTACT = 1u << 3;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_LIGHT_VALID = 1u << 4;
+// F15.1 (ticket 15): the scene has transmissive casters and the CSM path keeps them out of the opaque depth maps: the cascades carry a
+// single-layer transmittance map (nearest transmissive depth + summed ln RGB transmittance) the receiver multiplies in.
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_TRANSMITTANCE_MAP = 1u << 5;
+// The receiver ignores the map (negative control `--debug-transmittance-map off`): transmissive casters then cast nothing.
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_TRANSMITTANCE_IGNORED = 1u << 6;
+// F15 closure (ticket 15): the receiver keeps its own transmissive surface in the map sum (negative control `--debug-receiver-own off`).
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_RECEIVER_OWN_IGNORED = 1u << 7;
+// F15.1 (ticket 16): the scene has a caster with a material extension record (thin / diffuse-transmission / feature materials): the PCSS filter taps use the
+// receiver-plane bias, so a tilted receiver that is also a caster (the quad itself) does not self-shadow.  Clear for featureless scenes (images unchanged).
+PHOSPHOR_GPU_CONSTANT u32 SHADOW_FLAG_RECEIVER_PLANE_BIAS = 1u << 8;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_NONE = 0u;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_BIAS = 1u;
 PHOSPHOR_GPU_CONSTANT u32 SHADOW_CORRUPT_CASTER = 2u;
@@ -510,12 +851,23 @@ struct GPUShadowSurface {
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowSurface) == 48, "GPUShadowSurface layout");
 
 struct GPUShadowHistory {
+    float position[3], visibility;        // visibility = the luminance of the RGB transmittance (the variance estimator's scalar)
+    float geometricNormal[3], secondMoment;
+    u32 slot, generation, lightID, lightRevision;
+    u32 sceneRevision, viewID, samples, valid;
+    float transmittance[3], pad;          // F15.1 (ticket 14): the temporal mean of the RGB transmittance (= visibility on each channel without glass)
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowHistory) == 80, "GPUShadowHistory layout");
+// F15 ticket 24: the history of a scene without transmissive materials: the 64-byte record of the pre-ticket-14 layout (the first 64 bytes of
+// GPUShadowHistory).  The 80-byte stride cost `shadow_temporal` 0.06 ms on Sponza D2 (docs/opt-log.md): `shadow_temporal_scalar` reads and
+// writes this layout in the same buffers (allocated for GPUShadowHistory), `shadow_temporal` keeps the RGB record of a scene with glass.
+struct GPUShadowHistoryScalar {
     float position[3], visibility;
     float geometricNormal[3], secondMoment;
     u32 slot, generation, lightID, lightRevision;
     u32 sceneRevision, viewID, samples, valid;
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowHistory) == 64, "GPUShadowHistory layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowHistoryScalar) == 64, "GPUShadowHistoryScalar layout");
 
 struct GPUShadowParams {
     float inverseViewProjection[16], viewProjection[16];
@@ -531,8 +883,9 @@ struct GPUShadowParams {
     u32 contactSteps, cascadeIndex, casterSlot, meshletFirst;
     u32 meshletCount, meshletGridWidth, corruption, pad;
     GPUShadowCascade cascades[4];
+    GPUVertexColorPtr vertexColors; // F15 closure (COLOR_0): the colour stream of the caster alpha tests (the _vc twins read it); 0 without COLOR_0
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowParams) == 864, "GPUShadowParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowParams) == 872, "GPUShadowParams layout");
 
 struct GPUShadowCounters {
     u32 guides, rays, hits, historyReused;
@@ -560,6 +913,8 @@ PHOSPHOR_STATIC_ASSERT(sizeof(GPUShadowCacheTile) == 48, "GPUShadowCacheTile lay
 // F13 residual surface base omits external DI/GI and hemisphere diffuse.
 // A positive raw assembly supplies full pre-reflection Lo for SSR separately.
 PHOSPHOR_GPU_CONSTANT u32 RESOLVE_EXTERNAL_DIFFUSE = 1u<<5;
+// F15 closure (ticket 19): the resolve's GI irradiance texture has a companion with E(-N) (thin-walled subsurface transmitted lobe).
+PHOSPHOR_GPU_CONSTANT u32 RESOLVE_GI_BACK = 1u<<6;
 struct GPUResolveLightingParams {
     u32 flags, sunIndex, width, height; // bits: sun visibility, replace local DI, indirect irradiance
     float environment[3];               // declared isotropic environment radiance (bit16 = F13 path)
@@ -580,12 +935,32 @@ PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_TEMPORAL = 2u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_SPATIAL = 4u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ENABLE_VISIBILITY = 8u;
 PHOSPHOR_GPU_CONSTANT u32 DI_USE_STBN = 16u;
+// F15.1 (ticket 06): the lobe guide buffer exists and its records for this frame were written by a
+// specialised producer (not by a base-pipeline fallback while compiling); consumers read it only
+// then.  DI_LOBE_GUIDE_CORRUPT is the negative control of --debug-lobe-guide (+0.25 on ior, on the sheen roughness of sheen pixels and on the weight of thin subsurface pixels).
+PHOSPHOR_GPU_CONSTANT u32 DI_LOBE_GUIDE_VALID = 64u;
+PHOSPHOR_GPU_CONSTANT u32 DI_LOBE_GUIDE_CORRUPT = 128u;
+// The lobe guide buffer is allocated and bound (di_receiver_pack clears the record of surfaces it invalidates).
+PHOSPHOR_GPU_CONSTANT u32 DI_LOBE_GUIDE_BOUND = 256u;
+// F15 closure (ticket 06): --debug-lobe-guide-delay makes the guide-writing overflow receivers spend a bounded, data-dependent time before
+// the write (up to 16384 dependent fma per fragment, the longest for the first layer of the coplanar fixture), so that overlapping fragments
+// finish out of order: the raster order group must still order the writes, its absence must not.
+PHOSPHOR_GPU_CONSTANT u32 DI_LOBE_GUIDE_DELAY = 4096u;
+// F15.1 (ticket 17, RT tier): the volumetric-subsurface walk is effective this frame: the walk lights the analytic (delta) lights through its own
+// next-event estimation, so DI shades the diffuse of a volumetric-subsurface pixel with 1 - weight only for the delta samples (area emitters keep it).
+PHOSPHOR_GPU_CONSTANT u32 DI_SSS_WALK = 512u;
 // F13.6: RT reflections also see geometry-backed emitters (DI_LIGHT_TRIANGLE).
 // Their specular lobe is then split by the reflection RT probability: DI keeps
 // smoothstep(low, high, roughness), the RT path (taken with the complementary
 // probability) adds the emission it hits. Analytic and punctual lights keep
 // their full DI specular: no reflection ray can hit them.
 PHOSPHOR_GPU_CONSTANT u32 DI_REFLECTED_EMITTER_SPECULAR = 32u;
+// F15 closure (--specular-ms, ADR-0007): the DI target and shading add the Kulla-Conty multiple-scattering lobe (materials/bsdf_energy.h).
+PHOSPHOR_GPU_CONSTANT u32 DI_SPECULAR_MS = 8192u; // 512 is DI_SSS_WALK, 4096 DI_LOBE_GUIDE_DELAY
+// F15 (ticket 24): DI parameter flags assigned by parallel branches must stay disjoint.
+PHOSPHOR_STATIC_ASSERT((DI_RESET_HISTORY | DI_ENABLE_TEMPORAL | DI_ENABLE_SPATIAL | DI_ENABLE_VISIBILITY | DI_USE_STBN | DI_REFLECTED_EMITTER_SPECULAR | DI_LOBE_GUIDE_VALID | DI_LOBE_GUIDE_CORRUPT | DI_LOBE_GUIDE_BOUND | DI_SSS_WALK | DI_LOBE_GUIDE_DELAY | DI_SPECULAR_MS) ==
+                           (DI_RESET_HISTORY + DI_ENABLE_TEMPORAL + DI_ENABLE_SPATIAL + DI_ENABLE_VISIBILITY + DI_USE_STBN + DI_REFLECTED_EMITTER_SPECULAR + DI_LOBE_GUIDE_VALID + DI_LOBE_GUIDE_CORRUPT + DI_LOBE_GUIDE_BOUND + DI_SSS_WALK + DI_LOBE_GUIDE_DELAY + DI_SPECULAR_MS),
+                       "DI flags overlap");
 PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_WEIGHT = 1u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_ALIAS = 2u;
 PHOSPHOR_GPU_CONSTANT u32 DI_ERROR_TARGET = 4u;
@@ -655,8 +1030,22 @@ struct GPUDIParams {
     float depthRelativeThreshold, normalThreshold, targetFloor, pad0;
     u32 stbnDimensions, stbnSeed, slotCount, pad1; // pad1!=0 forces full-light brute iteration in cluster shade
     float emitterSpecularLow, emitterSpecularHigh; u32 pad2, pad3; // = ReflectionSettings rtRoughnessLow/High
+    // F15.1 (ticket 22): GPU address of the material extension buffer: the per-slot texture transforms of the secondary-site texture lookups
+    // (emitter / hit / capture surfaces); 0 when the scene has none.  Set by the host that owns the params.
+#if defined(__METAL_VERSION__)
+    const device GPUMaterialExtRecord* materialExtensions;
+#else
+    u64 materialExtensions;
+#endif
+    // F15 closure round 3 (COLOR_0): GPU address of the per-vertex colour stream; the cut-out alpha of a sampled emitter multiplies its vertex colour's
+    // alpha (restir_common.h diSampleTexturedLight).  0 without COLOR_0.  A runtime test (this pointer), as in the reflection / GI parameters.
+#if defined(__METAL_VERSION__)
+    const device float4* vertexColors;
+#else
+    u64 vertexColors;
+#endif
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUDIParams) == 112, "GPUDIParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDIParams) == 128, "GPUDIParams layout");
 
 struct GPULightCluster {
     u32 count, overflow, pad[2]; // overflow selects full local-light iteration
@@ -702,9 +1091,11 @@ struct GPUProbeGridParams {
     u32 width, height, mode, reset;
     u32 cacheCapacity, cacheProbeLimit, cacheMaxAge, cacheGeneration;
     u32 geometryRevision, lightRevision, materialRevision, viewRevision;
-    u32 debugFlags, debugPadding[3];
+    u32 debugFlags, debugPadding0;
+    GPUMaterialExtPtr materialExtensions; // F15.1 (ticket 22) per-slot texture transforms and F15.4 (ticket 23) layer stacks: the extension buffer (offset 168, the former debugPadding[1..2])
+    GPUVertexColorPtr vertexColors;       // F15 closure (COLOR_0): the colour stream of GI hit surfaces (offset 176); 0 without COLOR_0
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeGridParams) == 176, "GPUProbeGridParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeGridParams) == 184, "GPUProbeGridParams layout");
 
 struct GPUProbeState {
     float offset[3]; u32 state;
@@ -773,8 +1164,24 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECTION_SINGLE_SAMPLE = 64u; // one sample: the ker
 // reflectionFallbackEmissionShare() is the share a non-RT path adds back.
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_EXCLUDE_DI_EMISSION = 128u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DI_EMITTER_BAND = 512u;
+// F15.1 (ticket 08): the lobe guide (buffer 20 of the "_lobe" reflection kernels) is valid this frame.
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_LOBE_GUIDE_VALID = 1024u;
+// F15.1 (ticket 13, VERIFICATION ONLY, --debug-transmission-both-branches): a transmissive pixel evaluates BOTH branches of the Fresnel one-sample
+// estimator at the camera-visible interface (each with its own unweighted contribution) instead of drawing one: the same expectation, no branch noise.
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DEBUG_BOTH_BRANCHES = 2048u;
+// F15.1 (ticket 22, C22-A1): bits 12-13 of the reflection flags carry the number of EXTRA specular bounces a reflection ray continues through when its
+// secondary hit is mirror-like (0 = the single-bounce path of F13, the negative control; 3 = the engine default).
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_BOUNCE_SHIFT = 12u;
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_BOUNCE_MASK = 3u;
+// F15 closure (ticket 13): the refraction walk tints only the camera-visible surface, as the engine did before the tint rule (every thin-walled
+// surface and the entering interface of every closed solid; negative control `--debug-glass-tint camera`).
+PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DEBUG_TINT_CAMERA_ONLY = 1u << 14; // bit 14: bits 12-13 are REFLECTION_BOUNCE_*
 // F13.5 negative control: probe lookups ignore the box projection.
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_DEBUG_NO_PARALLAX = 256u;
+// F15 (ticket 24): the reflection flag bits were assigned by parallel branches (bounce bits 12-13 and the tint control collided); keep them disjoint.
+PHOSPHOR_STATIC_ASSERT((REFLECTION_ENABLE_RT | REFLECTION_ENABLE_SSR | REFLECTION_ENABLE_CACHE | REFLECTION_ENABLE_PROBES | REFLECTION_ENABLE_GI | REFLECTION_CAPTURE_HALF | REFLECTION_SINGLE_SAMPLE | REFLECTION_EXCLUDE_DI_EMISSION | REFLECTION_DEBUG_NO_PARALLAX | REFLECTION_DI_EMITTER_BAND | REFLECTION_LOBE_GUIDE_VALID | REFLECTION_DEBUG_BOTH_BRANCHES | (REFLECTION_BOUNCE_MASK << REFLECTION_BOUNCE_SHIFT) | REFLECTION_DEBUG_TINT_CAMERA_ONLY) ==
+                           (REFLECTION_ENABLE_RT + REFLECTION_ENABLE_SSR + REFLECTION_ENABLE_CACHE + REFLECTION_ENABLE_PROBES + REFLECTION_ENABLE_GI + REFLECTION_CAPTURE_HALF + REFLECTION_SINGLE_SAMPLE + REFLECTION_EXCLUDE_DI_EMISSION + REFLECTION_DEBUG_NO_PARALLAX + REFLECTION_DI_EMITTER_BAND + REFLECTION_LOBE_GUIDE_VALID + REFLECTION_DEBUG_BOTH_BRANCHES + (REFLECTION_BOUNCE_MASK << REFLECTION_BOUNCE_SHIFT) + REFLECTION_DEBUG_TINT_CAMERA_ONLY),
+                       "reflection flags overlap");
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_NONE = 0u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_RT = 1u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECTION_PATH_SSR = 2u;
@@ -802,6 +1209,17 @@ PHOSPHOR_GPU_CONSTANT u32 DENOISE_SOFT_CHANGE = 16u;
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_STATIONARY = 32u;
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_HISTORY_STOCHASTIC = 2u; // history flags: bit0 remains a numerical error
 PHOSPHOR_GPU_CONSTANT u32 DENOISE_DIAGNOSTIC_ENDPOINTS = 4u; // opt-in old endpoint rejection for the quality negative
+// F15.1 (ticket 08): the "_lobe" specular denoiser kernels run with a valid lobe guide (buffer 9 / 4).
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_LOBE_GUIDE_VALID = 64u;
+// Diagnostics of the lobe contract (PHOSPHOR_DIAGNOSTIC_DENOISE_LOBE=stripes|flip, lobe kernels only): the sampled
+// lobe id the denoiser sees is forced to 1 on vertical stripes 16 px wide (static: neighbours across a stripe edge
+// are rejected), or on the stripes of alternating frames (the history key changes every frame: history rejected).
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_DIAGNOSTIC_LOBE_STRIPES = 128u, DENOISE_DIAGNOSTIC_LOBE_FLIP = 256u;
+// F15.1 (ticket 13) refract-axis negative (PHOSPHOR_DIAGNOSTIC_DENOISE_LOBE=reflect-axis): the lobe kernels treat a refract-axis sample as a
+// reflect-axis one, as a defective implementation without the refract rule would: the key loses its axis bit and the spatial axis of the
+// edge-stopping weights is the mirror reflection of the view about the normal instead of the refracted ray.  The reprojection (motion
+// vectors) never depends on the axis; the axis acts through the history/neighbour key and the cosine of the axes in the a-trous weights.
+PHOSPHOR_GPU_CONSTANT u32 DENOISE_DIAGNOSTIC_LOBE_REFLECT_AXIS = 512u;
 
 struct GPUReflectionParams {
     float viewProjection[16], inverseViewProjection[16], view[16];
@@ -812,8 +1230,16 @@ struct GPUReflectionParams {
     u32 ssrSteps, ssrBinarySteps, probeCount, seed;
     float environment[3], maxProbeMip;
     float regularizationScale; u32 ssrRoughSteps, boostSamples; float boostRoughness; // k: alpha' = max(alpha_secondary, k*alpha_camera); SSR steps at roughness 1; samples after a reset below boostRoughness
+    GPUMaterialExtPtr materialExtensions; // F15.1 (ticket 22) per-slot texture transforms and F15.4 (ticket 23) layer stacks: the extension buffer, for the layer stacks of reflection hits
+    // F15 closure (COLOR_0): GPU address of the per-vertex colour stream (float4 per vertex); 0 without COLOR_0.  A runtime test (this pointer), not a
+    // function constant: the RT kernels are linked compute pipelines that the cache compiles anyway.
+#if defined(__METAL_VERSION__)
+    const device float4* vertexColors;
+#else
+    u64 vertexColors;
+#endif
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionParams) == 304, "GPUReflectionParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionParams) == 320, "GPUReflectionParams layout");
 struct GPUSpecularSample {
     float radiance[3], hitDistance; // weighted outgoing Lo; 0 distance for environment/miss
     float direction[3], proposalSolidAngle;
@@ -838,8 +1264,10 @@ struct GPUProbeCaptureParams {
     float viewProjection[16], capturePosition[4];
     u32 lightCount, slotCount, materialCount, sampledLightCount;
     float environment[3]; u32 storageFlags; // formerly unused raster seed; ABI size unchanged
+    GPUMaterialExtPtr materialExtensions;   // F15.1 (ticket 22) per-slot texture transforms and F15.4 (ticket 23) layer stacks: the extension buffer, for the layer stacks the capture draws
+    GPUVertexColorPtr vertexColors;         // F15 closure (COLOR_0): the colour stream of the capture surfaces (the _vc entry points read it); 0 without COLOR_0
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeCaptureParams) == 112, "GPUProbeCaptureParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUProbeCaptureParams) == 128, "GPUProbeCaptureParams layout");
 struct GPUProbeFilterParams {
     u32 side, mip, sampleCount, cubeIndex;
     float roughness, sourceSide; u32 storageFlags, diagnosticReadback;
@@ -881,6 +1309,13 @@ struct GPUDenoiseSpecularHistory {
     float roughness, hitDistance; u32 secondarySlot, secondaryGeneration;
 };
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseSpecularHistory) == 16, "GPUDenoiseSpecularHistory layout");
+// F15.1 ticket 13: the refracted-path endpoint of a transmissive pixel, a SECOND extension that follows the specular one in the history buffer
+// only when the scene's feature union contains transmission (denoiseHistoryBytes(count, specular, endpoint)); read and written by the transmission
+// lobe kernels only, so the base record and the base kernels stay as they were.  endpointKey = key + 1, 0 = none.
+struct GPUDenoiseEndpointHistory {
+    float endpoint[3]; u32 endpointKey;
+};
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUDenoiseEndpointHistory) == 16, "GPUDenoiseEndpointHistory layout");
 
 // F14: ALL positions/radii/heights/distances are WORLD METRES; extinction and
 // scattering coefficients are m^-1. RGB radiance and irradiance remain linear
@@ -933,8 +1368,20 @@ struct GPUFogParams {
     u32 lightRevision, previousViewID, corruption, maxHistoryAge;
     float moonDirection[3], pad0;
     float moonIrradiance[3], pad1;
+    // F15.1 (ticket 22): GPU address of the material extension buffer (per-slot texture transforms of textured emitters); 0 without one.
+#if defined(__METAL_VERSION__)
+    const device GPUMaterialExtRecord* materialExtensions;
+#else
+    u64 materialExtensions;
+#endif
+    // F15 closure round 3 (COLOR_0): the per-vertex colour stream of the emitter cut-out alpha (fogLocalSample); 0 without COLOR_0.
+#if defined(__METAL_VERSION__)
+    const device float4* vertexColors;
+#else
+    u64 vertexColors;
+#endif
 };
-PHOSPHOR_STATIC_ASSERT(sizeof(GPUFogParams) == 448, "GPUFogParams layout");
+PHOSPHOR_STATIC_ASSERT(sizeof(GPUFogParams) == 464, "GPUFogParams layout");
 struct GPUFogCell {
     float source[3], extinction; // source radiance per metre; scalar extinction m^-1
     float worldPosition[3], viewDepth;
@@ -1024,6 +1471,18 @@ PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_MIXED = 4u;
 // Samples averaged into a boosted record (bits 16-23; 0 = one sample). The
 // stationary specular history weights each frame by it.
 PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_COUNT_SHIFT = 16u, SPECULAR_SAMPLE_COUNT_MASK = 0xffu;
+// F15.1 (ticket 08): the lobe the transport sampled for this pixel, in spare bits of GPUSpecularSample.flags
+// (bit 31 stays SPECULAR_SAMPLE_ERROR).  bits 8-9: lobe id (0 = base specular, 1 = clearcoat, 2 = transmission,
+// 3 reserved); bit 10: axis (0 = reflect, 1 = refract).  The "_lobe" denoiser kernels reject neighbours and history
+// across a different (id, axis) key and take the edge-stopping roughness and spatial guide axis of the sampled lobe.
+// Today the transport only samples lobe 0 / reflect, so every key is 0.
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_LOBE_SHIFT = 8u, SPECULAR_SAMPLE_LOBE_MASK = 3u;
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_AXIS_REFRACT = 1u << 10;
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_LOBE_KEY_MASK = (3u << 8) | (1u << 10);
+// F15.1 (ticket 13, temporal clip): bit 11 = the sample carries the refracted-path ENDPOINT of a transmissive pixel in direction[3]
+// (point) and proposalSolidAngle (encoded key); see renderer/denoise_endpoint.h.  The transport writes it, the specular denoiser matches it.
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_SAMPLE_ENDPOINT = 1u << 11;
+PHOSPHOR_GPU_CONSTANT u32 SPECULAR_LOBE_BASE = 0u, SPECULAR_LOBE_CLEARCOAT = 1u, SPECULAR_LOBE_TRANSMISSION = 2u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_GI = 1u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_CUSTOM = 2u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_DI = 4u;
@@ -1031,6 +1490,22 @@ PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_SPEC = 8u;
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_AO = 16u;
 // SSR source only: remove the receiver's packed emission (F13.1 single count).
 PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_EXCLUDE_EMISSION = 32u;
+// F15.1 (ticket 08): the lobe guide (buffer 3 of reflection_composite_lobe) is valid this frame.
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_LOBE_GUIDE_VALID = 64u;
+// F15.1 (ticket 19): texture 8 of the composite holds E(-N) for the thin subsurface pixels (every GI mode); without it the pixel's own GI stands for it.
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_GI_BACK = 128u;
+// F15.1 (ticket 10, decision 06): the probe kernel adds the sheen term S E L(N) with the PROBE radiance at N into the specular signal, so the composite
+// must not add its declared-environment sheen term (set with --reflections probes; the probe kernel skips the term itself when GI is on).
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_SHEEN_FROM_PROBE = 256u;
+// F15.1 (ticket 17, RT tier): the composite's diffuse ambient / GI factor of a walk pixel comes from the walk's gain target (rgb = w (1 - metallic)
+// x the exiting radiance per unit uniform dome radiance, a = w): factor = base (1 - a) + rgb.  Lobe variant only.
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_SSS = 512u; // 512: 256 is REFLECT_COMPOSE_SHEEN_FROM_PROBE (integration)
+// F15 closure (--specular-ms, ADR-0007): the composite adds the environment / GI form of the multiple-scattering lobe next to the diffuse ambient.
+PHOSPHOR_GPU_CONSTANT u32 REFLECT_COMPOSE_SPECULAR_MS = 1024u; // 256 is SHEEN_FROM_PROBE, 512 SSS
+// F15 (ticket 24): reflection-composite flags assigned by parallel branches (SHEEN_FROM_PROBE, SSS, and the coming SPECULAR_MS) must stay disjoint.
+PHOSPHOR_STATIC_ASSERT((REFLECT_COMPOSE_GI | REFLECT_COMPOSE_CUSTOM | REFLECT_COMPOSE_DI | REFLECT_COMPOSE_SPEC | REFLECT_COMPOSE_AO | REFLECT_COMPOSE_EXCLUDE_EMISSION | REFLECT_COMPOSE_LOBE_GUIDE_VALID | REFLECT_COMPOSE_GI_BACK | REFLECT_COMPOSE_SHEEN_FROM_PROBE | REFLECT_COMPOSE_SSS | REFLECT_COMPOSE_SPECULAR_MS) ==
+                           (REFLECT_COMPOSE_GI + REFLECT_COMPOSE_CUSTOM + REFLECT_COMPOSE_DI + REFLECT_COMPOSE_SPEC + REFLECT_COMPOSE_AO + REFLECT_COMPOSE_EXCLUDE_EMISSION + REFLECT_COMPOSE_LOBE_GUIDE_VALID + REFLECT_COMPOSE_GI_BACK + REFLECT_COMPOSE_SHEEN_FROM_PROBE + REFLECT_COMPOSE_SSS + REFLECT_COMPOSE_SPECULAR_MS),
+                       "reflection composite flags overlap");
 struct GPUReflectionReduceParams {u32 width,height,samples,stridePixels;};
 PHOSPHOR_STATIC_ASSERT(sizeof(GPUReflectionReduceParams)==16,"GPUReflectionReduceParams layout");
 struct GPUReflectionComposeParams {u32 width,height,backingWidth,backingHeight;u32 flags,pad[3];float environment[3];u32 pad2;};

@@ -23,29 +23,41 @@ std::string formatPipelineStats(const PipelineStats& s) {
     std::snprintf(buf, sizeof(buf),
                   "PIPELINES requests %u | archive hits %u, misses %u, unavailable %u (miss rate %.1f%%) | "
                   "compiler calls %u (%.1f ms, max %.1f ms) | render-thread compiles %u (%.1f ms) | "
-                  "fallbacks %u (draws %llu) | failures %u | reloads %u (failed %u)",
+                  "fallbacks %u (draws %llu) | failures %u | reloads %u (failed %u) | compile retries %u",
                   s.requests, s.archiveHits, s.archiveMisses, s.archiveUnavailable,
                   static_cast<double>(s.archiveMissRate()) * 100.0, s.compilerCalls, s.compileMs,
                   static_cast<double>(s.compileMsMax), s.renderThreadCompiles, s.renderThreadCompileMs,
                   s.fallbacksServed, static_cast<unsigned long long>(s.fallbackDraws), s.failures,
-                  s.reloads, s.reloadFailures);
+                  s.reloads, s.reloadFailures, s.compileRetries);
     return buf;
 }
 
-std::string pipelineStatsJson(const PipelineStats& s) {
+std::string pipelineStatsJson(const PipelineStats& s, const PipelineStats* atStart) {
     char buf[768];
     std::snprintf(buf, sizeof(buf),
                   "{\"requests\":%u,\"archiveHits\":%u,\"archiveMisses\":%u,\"archiveUnavailable\":%u,"
                   "\"archiveMissRate\":%.4f,\"compilerCalls\":%u,\"compileMs\":%.3f,\"compileMsMax\":%.3f,"
                   "\"fallbacksServed\":%u,\"fallbackDraws\":%llu,\"renderThreadCompiles\":%u,"
                   "\"renderThreadCompileMs\":%.3f,\"failures\":%u,\"swaps\":%u,\"reloads\":%u,"
-                  "\"reloadFailures\":%u}",
+                  "\"reloadFailures\":%u,\"compileRetries\":%u}",
                   s.requests, s.archiveHits, s.archiveMisses, s.archiveUnavailable,
                   static_cast<double>(s.archiveMissRate()), s.compilerCalls, s.compileMs,
                   static_cast<double>(s.compileMsMax), s.fallbacksServed,
                   static_cast<unsigned long long>(s.fallbackDraws), s.renderThreadCompiles,
-                  s.renderThreadCompileMs, s.failures, s.swaps, s.reloads, s.reloadFailures);
-    return buf;
+                  s.renderThreadCompileMs, s.failures, s.swaps, s.reloads, s.reloadFailures, s.compileRetries);
+    std::string json = buf;
+    if (atStart) {
+        char measured[256];
+        std::snprintf(measured, sizeof(measured),
+                      ",\"measured\":{\"requests\":%u,\"archiveMisses\":%u,\"compilerCalls\":%u,\"fallbackDraws\":%llu,"
+                      "\"renderThreadCompiles\":%u}}",
+                      s.requests - atStart->requests, s.archiveMisses - atStart->archiveMisses, s.compilerCalls - atStart->compilerCalls,
+                      static_cast<unsigned long long>(s.fallbackDraws - atStart->fallbackDraws),
+                      s.renderThreadCompiles - atStart->renderThreadCompiles);
+        json.pop_back(); // the closing brace of the object above
+        json += measured;
+    }
+    return json;
 }
 
 // ---------------------------------------------------------------------------

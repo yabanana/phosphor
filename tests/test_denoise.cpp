@@ -3,6 +3,8 @@
 #include <doctest/doctest.h>
 #include <cmath>
 #include <limits>
+#include <numeric>
+#include <vector>
 using namespace phosphor;
 namespace {
 GPUDISurface receiver(){GPUDISurface s{};s.valid=1;s.depth=3;s.geometricNormal[2]=s.shadingNormal[2]=1;s.instanceSlot=7;s.instanceGeneration=3;s.materialRevision=5;s.roughness=.2f;return s;}
@@ -107,6 +109,49 @@ TEST_CASE("F13 atrous edge weights preserve identity on constant signals and sto
     CHECK(denoiseSpatialWeight(a,a,2,200,1,p)<.001f);
 }
 
+// F15 (clustered-DI budget residue): the variance-guided luminance edge-stopping weight is row-normalised, hence NOT energy conserving on a
+// heavy-tailed signal.  Reference model of the loss (the same CPU mirror weights as the shader, 3 a-trous iterations, flat receiver): an iid
+// field of mean 1 where a fraction p of the samples is (1 + k) and the rest is lowered to keep the mean; `ratio` = energy out / energy in.
+// Declared behaviour: the budget estimator itself is unbiased (paired GPU measurement, .scratch/f15/issues/20-chess-fixture.md); the loss is
+// the filter's, grows with the tail weight, and vanishes with the luminance weight disabled (negative control) or on a light-tailed signal.
+namespace {
+// senderNormalised: the F13.4 energy-preserving variant (out(q) = sum_p w(q,p) x(p) / W(p), W(p) = sum_q w(p,q), symmetric weights; the weight
+// of denoiseSpatialWeight is symmetric here because the variance is one constant); false: the shipped receiver-normalised gather.
+double atrousEnergyRatio(double p,double k,double inputSigmaScale,float phi,bool senderNormalised=false){
+    constexpr int N=48;std::vector<float> img(N*N);u32 state=12345u;auto uniform=[&]{state=state*1664525u+1013904223u;return double(state>>8)/double(1u<<24);};
+    const double hi=1+k,lo=(1-p*hi)/(1-p);double sum=0,sq=0;for(auto& v:img){v=float(uniform()<p?hi:lo);sum+=v;sq+=double(v)*v;}
+    const double mean=sum/img.size(),variance=sq/img.size()-mean*mean;
+    for(auto& v:img)v=float(mean+(v-mean)*inputSigmaScale); // temporal accumulation lowers the noise the spatial filter sees, not the variance estimate
+    DenoiseSettings settings;settings.luminancePhi=phi;auto params=denoiseParameters(settings,N,N,DENOISE_SIGNAL_DI,0,1,1,false);const auto s=receiver();
+    const double before=std::accumulate(img.begin(),img.end(),0.0);const float taps[5]={1,4,6,4,1};
+    for(int iteration=0;iteration<3;++iteration){
+        params.atrousStep=1u<<iteration;const int step=1<<iteration;std::vector<float> out(img.size());
+        auto w=[&](int y,int x,int dy,int dx){const int qy=y+dy*step,qx=x+dx*step;return taps[dy+2]*taps[dx+2]*double(denoiseSpatialWeight(s,s,img[y*N+x],img[qy*N+qx],float(variance),params));};
+        auto inside=[&](int y,int x,int dy,int dx){const int qy=y+dy*step,qx=x+dx*step;return qy>=0&&qy<N&&qx>=0&&qx<N;};
+        std::vector<double> sender(img.size(),0.0);
+        if(senderNormalised)for(int y=0;y<N;++y)for(int x=0;x<N;++x)for(int dy=-2;dy<=2;++dy)for(int dx=-2;dx<=2;++dx)if(inside(y,x,dy,dx))sender[y*N+x]+=w(y,x,dy,dx);
+        for(int y=0;y<N;++y)for(int x=0;x<N;++x){double acc=0,weights=0;
+            for(int dy=-2;dy<=2;++dy)for(int dx=-2;dx<=2;++dx){if(!inside(y,x,dy,dx))continue;const int q=(y+dy*step)*N+x+dx*step;
+                const double weightValue=w(y,x,dy,dx);
+                if(senderNormalised)acc+=weightValue*img[q]/sender[q];else{acc+=weightValue*img[q];weights+=weightValue;}}
+            out[y*N+x]=float(senderNormalised?acc:acc/weights);}
+        img=out;}
+    return std::accumulate(img.begin(),img.end(),0.0)/before;
+}
+}
+TEST_CASE("F15 variance-guided atrous filter loses energy on heavy-tailed noise, not with the luminance weight off"){
+    const double heavy=atrousEnergyRatio(.02,20,1.0,4),heavyAccumulated=atrousEnergyRatio(.02,20,.2,4),light=atrousEnergyRatio(.2,.2,1.0,4);
+    CHECK(heavy<.9);                 // raw-level heavy tail (model value ~0.79)
+    CHECK(heavyAccumulated<.995);    // after temporal accumulation (sigma x0.2): ~1-2 % loss, the magnitude measured on the GPU (0.977 at 128 strata)
+    CHECK(heavyAccumulated>heavy);
+    CHECK(light>.99);                // a light-tailed signal is untouched
+    CHECK(atrousEnergyRatio(.02,20,1.0,1e6f)>.995); // negative control (image-border clipping only)
+    // F13.4 energy-preserving variant: exact conservation on the same fields, and the control that fails if its normalisation is replaced by the row one.
+    for(const double inputScale:{1.0,.2})CHECK(atrousEnergyRatio(.02,20,inputScale,4,true)==doctest::Approx(1.0).epsilon(1e-4));
+    CHECK(atrousEnergyRatio(.2,.2,1.0,4,true)==doctest::Approx(1.0).epsilon(1e-4));
+    CHECK(atrousEnergyRatio(.02,20,.2,4,false)<.995);   // control: the per-row normalisation of the same weights is NOT conservative; a variant regressing to it fails above: the same heavy-tailed field, luminance weight disabled
+}
+
 TEST_CASE("F13.6 specular atrous weight is bounded by the reflection lobe"){
     const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);auto a=receiver();
     a.shadingNormal[0]=0;a.shadingNormal[1]=0;a.shadingNormal[2]=1;a.viewDirection[0]=0;a.viewDirection[1]=0;a.viewDirection[2]=1;
@@ -163,13 +208,13 @@ TEST_CASE("F13 compact denoise history round-trips every field a later frame rea
     // Budget closure: header + 64-byte record + 16-byte specular extension
     // replace the 112-byte record. Every value the temporal pass can write must
     // survive packing, and the reuse decision on the unpacked history must match.
-    static_assert(sizeof(GPUDenoiseHistoryHeader)==64&&sizeof(GPUDenoiseHistoryRecord)==64&&sizeof(GPUDenoiseSpecularHistory)==16);
+    static_assert(sizeof(GPUDenoiseHistoryHeader)==64&&sizeof(GPUDenoiseHistoryRecord)==64&&sizeof(GPUDenoiseSpecularHistory)==16&&sizeof(GPUDenoiseEndpointHistory)==16);
     CHECK(DenoiseSettings{}.maxHistory<=DENOISE_HISTORY_MAX_LENGTH);CHECK(REFLECTION_PATH_ENVIRONMENT<=DENOISE_HISTORY_MAX_PATH);
     CHECK((1u|DENOISE_HISTORY_STOCHASTIC)<=DENOISE_HISTORY_MAX_FLAGS);
     for(const u32 length:{0u,1u,2u,255u,256u})for(const u32 flags:{0u,1u,DENOISE_HISTORY_STOCHASTIC,1u|DENOISE_HISTORY_STOCHASTIC})
         for(u32 path=0;path<=REFLECTION_PATH_ENVIRONMENT;++path)for(const u32 valid:{0u,1u}){const u32 state=denoisePackState(length,flags,path,valid);
             CHECK(denoiseStateLength(state)==length);CHECK(denoiseStateFlags(state)==flags);CHECK(denoiseStatePath(state)==path);CHECK(denoiseStateValid(state)==valid);}
-    CHECK(denoiseHistoryBytes(100,false)==64+100*64);CHECK(denoiseHistoryBytes(100,true)==64+100*80);CHECK(denoiseHistorySpecularOffset(100)==64+100*64);
+    CHECK(denoiseHistoryBytes(100,false)==64+100*64);CHECK(denoiseHistoryBytes(100,true)==64+100*80);CHECK(denoiseHistoryBytes(100,true,true)==64+100*96);CHECK(denoiseHistoryBytes(100,false,true)==64+100*64);CHECK(denoiseHistoryEndpointOffset(100)==64+100*80);CHECK(denoiseHistorySpecularOffset(100)==64+100*64);
     DenoiseSettings settings;const auto s=receiver();
     for(const u32 variant:{0u,1u,2u,3u,4u}){const u32 signal=variant==4?DENOISE_SIGNAL_SPECULAR:variant;
         const auto p=denoiseParameters(settings,4,4,signal,2,7,9,false);auto m=spec();if(variant==4)m.flags|=SPECULAR_SAMPLE_STOCHASTIC;
@@ -226,4 +271,265 @@ TEST_CASE("F13.6 a specular history cap below the sample count keeps the weight 
     h=denoiseTemporal(s,glm::vec3(7),h,p,{},{},four);REQUIRE(h.valid);CHECK(h.length==2);CHECK(h.color[0]==doctest::Approx(7));
     // A single-sample frame under the cap blends normally.
     h=denoiseTemporal(s,glm::vec3(1),h,p,{},{},one);CHECK(h.length==2);CHECK(h.color[0]==doctest::Approx(4));
+}
+
+// F15.1 (ticket 08): the lobe contract of the specular denoiser. The base rule (null lobe pointers) is untouched.
+namespace {
+const u32 kCoat=specularSampleLobeFlags(SPECULAR_LOBE_CLEARCOAT,false),kRefract=specularSampleLobeFlags(SPECULAR_LOBE_TRANSMISSION,true);
+GPUSpecularSample lobeSpec(u32 lobeFlags){auto s=spec();s.flags|=lobeFlags;return s;}
+}
+TEST_CASE("F15.1 specular lobe flags: key packing keeps the sample bits intact"){
+    CHECK(specularSampleLobeKey(0)==0);CHECK(specularSampleLobeKey(SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_STOCHASTIC|SPECULAR_SAMPLE_ERROR|(5u<<SPECULAR_SAMPLE_COUNT_SHIFT))==0);
+    for(u32 id=0;id<4;++id)for(const bool refract:{false,true}){const u32 f=specularSampleLobeFlags(id,refract);
+        CHECK(specularSampleLobeKey(f)==(id|(refract?4u:0u)));CHECK((f&SPECULAR_SAMPLE_LOBE_KEY_MASK)==f);
+        // no overlap with the other sample bits (count bits 16-23, error bit 31, valid/prefiltered/mixed/stochastic bits 0-3)
+        CHECK((f&(SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_PREFILTERED|SPECULAR_SAMPLE_MIXED|SPECULAR_SAMPLE_STOCHASTIC|SPECULAR_SAMPLE_ERROR|(SPECULAR_SAMPLE_COUNT_MASK<<SPECULAR_SAMPLE_COUNT_SHIFT)))==0);}
+    // the history state word carries the key without touching length, flags, path or valid
+    for(u32 lobe=0;lobe<=DENOISE_HISTORY_MAX_LOBE;++lobe){const u32 state=denoisePackState(77,DENOISE_HISTORY_STOCHASTIC,REFLECTION_PATH_ENVIRONMENT,1,lobe);
+        CHECK(denoiseStateLobe(state)==lobe);CHECK(denoiseStateLength(state)==77);CHECK(denoiseStateFlags(state)==DENOISE_HISTORY_STOCHASTIC);
+        CHECK(denoiseStatePath(state)==REFLECTION_PATH_ENVIRONMENT);CHECK(denoiseStateValid(state)==1);}
+}
+TEST_CASE("F15.1 history is rejected across sampled lobe ids and axes, accepted for the same key"){
+    const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);const auto s=receiver();DenoiseLobeGuide guide;guide.ior=1.5f;guide.clearcoatRoughness=.2f;
+    const u32 keys[]={0u,kCoat,kRefract,specularSampleLobeFlags(SPECULAR_LOBE_BASE,true),specularSampleLobeFlags(SPECULAR_LOBE_CLEARCOAT,true)};
+    for(const u32 flags:keys){
+        const auto sample=lobeSpec(flags);const auto h=denoiseTemporal(s,glm::vec3(1),{},p,{},{},sample,-1,glm::vec3(0),glm::vec3(-1),&guide);REQUIRE(h.valid);
+        CHECK(h.lobe==specularSampleLobeKey(flags));
+        CHECK(denoiseCompatible(s,h,p,sample,&guide));
+        for(const u32 other:keys){
+            const bool same=specularSampleLobeKey(other)==specularSampleLobeKey(flags);
+            CHECK(denoiseCompatible(s,h,p,lobeSpec(other),&guide)==same);}
+        // the packed record keeps the key
+        const auto back=denoiseUnpack(denoisePackHeader(h),denoisePackRecord(h),denoisePackSpecular(h));CHECK(back.lobe==h.lobe);CHECK(denoiseCompatible(s,back,p,sample,&guide));
+    }
+    // the chain: accumulation continues across frames of one lobe and restarts at the first frame of another
+    auto h=denoiseTemporal(s,glm::vec3(1),{},p,{},{},lobeSpec(0),-1,glm::vec3(0),glm::vec3(-1),&guide);
+    h=denoiseTemporal(s,glm::vec3(1),h,p,{},{},lobeSpec(0),-1,glm::vec3(0),glm::vec3(-1),&guide);CHECK(h.length==2);
+    h=denoiseTemporal(s,glm::vec3(1),h,p,{},{},lobeSpec(kCoat),-1,glm::vec3(0),glm::vec3(-1),&guide);CHECK(h.length==1);CHECK(h.lobe==specularSampleLobeKey(kCoat));
+    // the base rule (no lobe pointer) ignores the key: byte-identical behaviour for scenes without features
+    const auto base=denoiseTemporal(s,glm::vec3(1),{},p,{},{},lobeSpec(kCoat));CHECK(base.lobe==0);CHECK(denoiseCompatible(s,base,p,lobeSpec(0)));CHECK(denoiseCompatible(s,base,p,lobeSpec(kRefract)));
+    // other signals never carry a lobe
+    const auto di=denoiseParameters({},4,4,DENOISE_SIGNAL_DI,0,1,1,false);const auto hd=denoiseTemporal(s,glm::vec3(1),{},di,{},{},lobeSpec(kCoat),-1,glm::vec3(0),glm::vec3(-1),&guide);
+    CHECK(hd.lobe==0);CHECK(denoiseCompatible(s,hd,di,lobeSpec(kRefract),&guide));
+}
+TEST_CASE("F15.1 neighbours are rejected across sampled lobe ids and axes"){
+    const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);auto a=receiver();a.roughness=.8f;a.viewDirection[2]=1;auto b=a;
+    DenoiseLobeGuide guide;guide.ior=1.5f;guide.clearcoatRoughness=.8f;
+    DenoiseLobePixel base,coat,refract,baseRefract;coat.sampleFlags=kCoat;refract.sampleFlags=kRefract;baseRefract.sampleFlags=specularSampleLobeFlags(SPECULAR_LOBE_BASE,true);
+    for(auto* l:{&base,&coat,&refract,&baseRefract})l->guide=guide;
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&base,&base)>.99f);CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&coat,&coat)>.99f);CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&refract,&refract)>.99f);
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&base,&coat)==0);CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&coat,&base)==0);CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&base,&refract)==0);
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&base,&baseRefract)==0); // same id, other axis
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&coat,&refract)==0);
+    // null lobe pointers: the base rule, identical numbers
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,p)==doctest::Approx(denoiseSpatialWeight(a,b,2,2,1,p,&base,&base)));
+    // DI never uses lobes
+    const auto d=denoiseParameters({},4,4,DENOISE_SIGNAL_DI,0,1,1,false);CHECK(denoiseSpatialWeight(a,b,2,2,1,d,&base,&coat)>.99f);
+}
+TEST_CASE("F15.1 the edge-stopping roughness follows the sampled lobe"){
+    DenoiseLobeGuide guide;guide.ior=1.5f;guide.clearcoatRoughness=.04f;
+    CHECK(denoiseLobeRoughness(.6f,0,guide)==doctest::Approx(.6f));
+    CHECK(denoiseLobeRoughness(.6f,SPECULAR_LOBE_CLEARCOAT,guide)==doctest::Approx(.04f));
+    CHECK(denoiseLobeRoughness(.6f,SPECULAR_LOBE_TRANSMISSION|4u,guide)==doctest::Approx(.6f)); // ior 1.5: factor 1
+    guide.ior=1.25f;CHECK(denoiseLobeRoughness(.6f,SPECULAR_LOBE_TRANSMISSION|4u,guide)==doctest::Approx(.3f));
+    guide.ior=1.0f;CHECK(denoiseLobeRoughness(.6f,SPECULAR_LOBE_TRANSMISSION|4u,guide)==doctest::Approx(0.f));
+    guide.ior=0;CHECK(denoiseLobeRoughness(.6f,SPECULAR_LOBE_TRANSMISSION|4u,guide)==doctest::Approx(.6f)); // special mode: default ior
+    CHECK(denoiseLobeRoughness(.6f,3,guide)==doctest::Approx(.6f));
+    // the weight bound of a pair of reflection axes uses the centre pixel's LOBE roughness: a smooth coat lobe on a rough base
+    // keeps neighbours with a slightly different reflection axis apart, the rough base lobe lets them through.
+    const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);auto a=receiver();a.roughness=.8f;a.viewDirection[2]=1;auto b=a;
+    const float angle=.003f;b.viewDirection[0]=std::sin(angle);b.viewDirection[2]=std::cos(angle);
+    DenoiseLobeGuide g;g.ior=1.5f;g.clearcoatRoughness=.04f;DenoiseLobePixel base,coat;coat.sampleFlags=kCoat;base.guide=coat.guide=g;
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&base,&base)>.99f);
+    CHECK(denoiseSpatialWeight(a,b,2,2,1,p,&coat,&coat)<.4f);
+    // the history stores the lobe roughness and compares the current lobe roughness against it
+    const auto s=receiver();auto rs=s;rs.roughness=.8f;const auto h=denoiseTemporal(rs,glm::vec3(1),{},p,{},{},lobeSpec(kCoat),-1,glm::vec3(0),glm::vec3(-1),&g);
+    CHECK(h.roughness==doctest::Approx(.04f));CHECK(denoiseCompatible(rs,h,p,lobeSpec(kCoat),&g));
+    auto g2=g;g2.clearcoatRoughness=.5f;CHECK_FALSE(denoiseCompatible(rs,h,p,lobeSpec(kCoat),&g2)); // the coat roughness changed beyond the threshold
+}
+TEST_CASE("F15.1 ticket 09: a significant coat takes the sharper of the coat and base roughness"){
+    DenoiseLobeGuide g;g.ior=1.5f;
+    g.clearcoatRoughness=.8f;CHECK(denoiseLobeRoughness(.1f,SPECULAR_LOBE_CLEARCOAT,g)==doctest::Approx(.1f)); // a rough coat over a smooth base: the base lobe is the sharper
+    g.clearcoatRoughness=.1f;CHECK(denoiseLobeRoughness(.8f,SPECULAR_LOBE_CLEARCOAT,g)==doctest::Approx(.1f)); // the smooth coat over a rough base keeps its reflection
+    g.clearcoatRoughness=.3f;CHECK(denoiseLobeRoughness(.3f,SPECULAR_LOBE_CLEARCOAT,g)==doctest::Approx(.3f));
+    CHECK(denoiseLobeRoughness(.8f,0,g)==doctest::Approx(.8f)); // an insignificant coat: the key is the base lobe, the base roughness
+    g.clearcoatRoughness=NAN;CHECK(denoiseLobeRoughness(.8f,SPECULAR_LOBE_CLEARCOAT,g)==doctest::Approx(.8f));
+}
+TEST_CASE("F15.1 ticket 09: the stable key keeps the history of a mixed-sample pixel"){
+    // The transport picks the coat or the base lobe per sample, but the key it records is a pure function of the pixel: the
+    // history of the pixel is accepted frame after frame (no reset), where a per-sample key would reject about half of the frames.
+    const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);auto s=receiver();s.roughness=.8f;
+    DenoiseLobeGuide g;g.ior=1.5f;g.clearcoatRoughness=.05f;
+    DenoiseHistory h{};u32 length=0;
+    for(int frame=0;frame<8;++frame){h=denoiseTemporal(s,glm::vec3(1),h,p,{},{},lobeSpec(kCoat),-1,glm::vec3(0),glm::vec3(-1),&g);length=h.length;}
+    CHECK(length==8);CHECK(h.lobe==specularSampleLobeKey(kCoat));CHECK(h.roughness==doctest::Approx(.05f));
+    // the contrast: alternating sampled keys (the per-sample key) reset the history at every switch
+    h=DenoiseHistory{};
+    for(int frame=0;frame<8;++frame)h=denoiseTemporal(s,glm::vec3(1),h,p,{},{},lobeSpec(frame&1?kCoat:0u),-1,glm::vec3(0),glm::vec3(-1),&g);
+    CHECK(h.length==1);
+}
+TEST_CASE("F15.1 (ticket 13) a thin-walled surface keeps the refract axis straight along -V"){
+    auto s=receiver();s.shadingNormal[0]=0;s.shadingNormal[1]=0;s.shadingNormal[2]=1;
+    const float angle=.5f;s.viewDirection[0]=std::sin(angle);s.viewDirection[1]=0;s.viewDirection[2]=std::cos(angle);
+    DenoiseLobeGuide g;g.ior=1.5f;g.volumeThickness=0;
+    const auto thin=denoiseLobeAxis(s,4,g);
+    CHECK(thin.x==doctest::Approx(-std::sin(angle)));CHECK(thin.z==doctest::Approx(-std::cos(angle))); // the ray goes through unbent: -V
+    g.volumeThickness=.8f;const auto volume=denoiseLobeAxis(s,4,g);
+    CHECK(volume.x>thin.x);                                                                                // the volume bends it towards the normal
+    CHECK(glm::dot(thin,volume)<.999f);
+}
+TEST_CASE("F15.1 the refract axis follows the refracted direction, not the reflection axis"){
+    auto s=receiver();s.shadingNormal[0]=0;s.shadingNormal[1]=0;s.shadingNormal[2]=1;
+    const float angle=.5f;s.viewDirection[0]=std::sin(angle);s.viewDirection[1]=0;s.viewDirection[2]=std::cos(angle);
+    DenoiseLobeGuide g;g.ior=1.5f;
+    const auto reflect=denoiseLobeAxis(s,0,g),refract=denoiseLobeAxis(s,4,g);
+    // reflect(-V, N) mirrors V about N; the refracted ray continues through the surface: Snell with eta = 1/1.5.
+    CHECK(reflect.x==doctest::Approx(-std::sin(angle)));CHECK(reflect.z==doctest::Approx(std::cos(angle)));
+    CHECK(refract.z<0);CHECK(glm::length(refract)==doctest::Approx(1));
+    CHECK(std::sin(angle)==doctest::Approx(1.5f*std::abs(refract.x)).epsilon(1e-4)); // Snell: sin(theta_i) = ior * sin(theta_t)
+    CHECK(glm::dot(reflect,refract)<.5f);
+    // total internal reflection falls back to the reflection axis
+    DenoiseLobeGuide inverted;inverted.ior=1.0f;auto shallow=s;shallow.viewDirection[0]=std::sin(1.5f);shallow.viewDirection[2]=std::cos(1.5f);
+    CHECK(glm::length(denoiseLobeAxis(shallow,4,inverted))==doctest::Approx(1));
+    // The clip control "reflect axis used for a refract-axis lobe" is a filter with the wrong axis: for the same pair of pixels the two
+    // axes give different weights, so the wrong axis changes the filter (ticket 13 runs the clip control once refraction exists).
+    auto a=s;a.roughness=.04f;auto b=a;const float d=.003f;b.viewDirection[0]=std::sin(angle+d);b.viewDirection[2]=std::cos(angle+d);
+    const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);DenoiseLobePixel viaRefract,viaReflect;viaRefract.sampleFlags=specularSampleLobeFlags(SPECULAR_LOBE_BASE,true);viaRefract.guide=viaReflect.guide=g;
+    const float wRefract=denoiseSpatialWeight(a,b,2,2,1,p,&viaRefract,&viaRefract),wReflect=denoiseSpatialWeight(a,b,2,2,1,p,&viaReflect,&viaReflect);
+    CHECK(wRefract>wReflect*1.3f); // the refracted image moves slower per pixel than the reflected one
+    CHECK(denoiseLobeAxis(a,4,g).x!=denoiseLobeAxis(a,0,g).x);
+}
+
+TEST_CASE("F15.1 ticket 11: an anisotropic pixel is filtered at the roughness of its sharper axis"){
+    DenoiseLobeGuide g;g.ior=1.5f;
+    for(const float r:{.2f,.3f,.6f,1.f})for(const float k:{0.f,.25f,.5f,1.f}){
+        // alpha_t >= alpha_b: the sharper axis is the perpendicular one, the base roughness; the base-lobe key returns the same value.
+        CHECK(denoiseAnisotropicRoughness(r,k)==doctest::Approx(r).epsilon(1e-5));
+        CHECK(denoiseLobeRoughness(r,0,g)==doctest::Approx(denoiseAnisotropicRoughness(r,k)).epsilon(1e-5));
+    }
+    CHECK(denoiseAnisotropicRoughness(.01f,1.f)==doctest::Approx(std::sqrt(.002f)).epsilon(1e-5)); // the alpha floor
+    // The rejected alternative, the effective roughness sqrt(sqrt((alpha_t^2 + alpha_b^2) / 2)), is rougher than the sharp axis for k > 0:
+    const float r=.3f,k=1.f,ab=r*r,at=ab+(1-ab)*k*k,eff=std::sqrt(std::sqrt(.5f*(at*at+ab*ab)));
+    CHECK(eff>denoiseAnisotropicRoughness(r,k)*1.5f);
+    // With the rule the lobe bound of a pair of reflection axes is the one of the sharp axis (a stretched-axis bound would let them through).
+    const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);auto a=receiver();a.roughness=.3f;a.viewDirection[2]=1;auto b=a;
+    const float angle=.12f;b.viewDirection[0]=std::sin(angle);b.viewDirection[2]=std::cos(angle);
+    DenoiseLobePixel base;base.guide=g;
+    const float sharp=denoiseSpatialWeight(a,b,2,2,1,p,&base,&base);
+    auto wide=a;wide.roughness=eff;auto wideB=b;wideB.roughness=eff;
+    CHECK(denoiseSpatialWeight(wide,wideB,2,2,1,p,&base,&base)>sharp);
+}
+TEST_CASE("F15.1 ticket 11 (round 3): an anisotropic highlight keeps the base lobe id, so its history and neighbours survive"){
+    // The transport gives an anisotropic pixel without a coat lobe id 0 (shaders/reflection_lobe.h sets the id only in the coat block; the
+    // anisotropic lobe is the BASE lobe with a different D V), whichever strength or rotation: the key of every frame is 0 and the history accumulates.
+    const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);const auto s=receiver();DenoiseLobeGuide guide;guide.ior=1.5f;
+    const u32 anisoKey=specularSampleLobeFlags(SPECULAR_LOBE_BASE,false);
+    CHECK(specularSampleLobeKey(anisoKey)==0u);CHECK(denoiseStableLobeKey(specularSampleLobeKey(anisoKey),guide)==0u);
+    auto h=denoiseTemporal(s,glm::vec3(1),{},p,{},{},lobeSpec(anisoKey),-1,glm::vec3(0),glm::vec3(-1),&guide);REQUIRE(h.valid);CHECK(h.lobe==0u);
+    for(u32 frame=2;frame<=6;++frame){
+        CHECK(denoiseCompatible(s,h,p,lobeSpec(anisoKey),&guide));
+        h=denoiseTemporal(s,glm::vec3(1),h,p,{},{},lobeSpec(anisoKey),-1,glm::vec3(0),glm::vec3(-1),&guide);CHECK(h.length==frame);CHECK(h.lobe==0u);}
+    // the history roughness of the highlight is the sharper axis of the lobe (base roughness), for every strength
+    for(const float k:{.25f,.5f,1.f}){auto rs=s;rs.roughness=.3f;
+        const auto hk=denoiseTemporal(rs,glm::vec3(1),{},p,{},{},lobeSpec(anisoKey),-1,glm::vec3(0),glm::vec3(-1),&guide);
+        CHECK(hk.roughness==doctest::Approx(denoiseAnisotropicRoughness(.3f,k)).epsilon(1e-5));}
+    // neighbours of two anisotropic highlights filter together
+    DenoiseLobePixel a,b;a.guide=b.guide=guide;a.sampleFlags=b.sampleFlags=anisoKey|SPECULAR_SAMPLE_VALID;
+    auto sv=s;sv.viewDirection[2]=1;CHECK(denoiseSpatialWeight(sv,sv,.5f,.5f,.1f,p,&a,&b)>.99f);
+    // negative controls: a transport that flipped the lobe id of the highlight (here to the clear coat, frame by frame) would reject the history
+    // and the neighbours; the stable key does not mask it for a pixel without a transmission factor.
+    const auto flipped=denoiseTemporal(s,glm::vec3(1),h,p,{},{},lobeSpec(kCoat),-1,glm::vec3(0),glm::vec3(-1),&guide);
+    CHECK(flipped.length==1u);CHECK(flipped.lobe==specularSampleLobeKey(kCoat));
+    CHECK_FALSE(denoiseCompatible(s,h,p,lobeSpec(kCoat),&guide));
+    DenoiseLobePixel c=b;c.sampleFlags=kCoat|SPECULAR_SAMPLE_VALID;CHECK(denoiseSpatialWeight(sv,sv,.5f,.5f,.1f,p,&a,&c)==0.f);
+}
+TEST_CASE("F15.1 (ticket 13) a transmissive pixel has one key whichever branch of the reflect/refract estimator was drawn"){
+    const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);const auto s=receiver();
+    DenoiseLobeGuide glass;glass.ior=1.5f;glass.transmissionFactor=1.0f;
+    const u32 reflectBranch=0u,refractBranch=kRefract;
+    CHECK(denoiseStableLobeKey(specularSampleLobeKey(reflectBranch),glass)==(SPECULAR_LOBE_TRANSMISSION|4u));
+    CHECK(denoiseStableLobeKey(specularSampleLobeKey(refractBranch),glass)==(SPECULAR_LOBE_TRANSMISSION|4u));
+    // history survives a branch change in either direction
+    const auto fromRefract=denoiseTemporal(s,glm::vec3(1),{},p,{},{},lobeSpec(refractBranch),-1,glm::vec3(0),glm::vec3(-1),&glass);REQUIRE(fromRefract.valid);
+    CHECK(denoiseCompatible(s,fromRefract,p,lobeSpec(reflectBranch),&glass));
+    const auto fromReflect=denoiseTemporal(s,glm::vec3(1),{},p,{},{},lobeSpec(reflectBranch),-1,glm::vec3(0),glm::vec3(-1),&glass);
+    CHECK(fromReflect.lobe==fromRefract.lobe);CHECK(denoiseCompatible(s,fromReflect,p,lobeSpec(refractBranch),&glass));
+    auto h=denoiseTemporal(s,glm::vec3(1),fromRefract,p,{},{},lobeSpec(reflectBranch),-1,glm::vec3(0),glm::vec3(-1),&glass);CHECK(h.length==2);
+    // neighbours of different branches filter together (same axis and roughness: the refracted image)
+    DenoiseLobePixel a,b;a.guide=b.guide=glass;a.sampleFlags=reflectBranch|SPECULAR_SAMPLE_VALID;b.sampleFlags=refractBranch|SPECULAR_SAMPLE_VALID;
+    auto sv=s;sv.viewDirection[2]=1;CHECK(denoiseSpatialWeight(sv,sv,.5f,.5f,.1f,p,&a,&b)>.99f);
+    // a pixel below the factor threshold, or without a guide factor, keeps the sampled key (the clearcoat and base rules are untouched)
+    DenoiseLobeGuide faint=glass;faint.transmissionFactor=.25f;
+    CHECK(denoiseStableLobeKey(specularSampleLobeKey(reflectBranch),faint)==0u);CHECK(denoiseStableLobeKey(specularSampleLobeKey(refractBranch),faint)==(SPECULAR_LOBE_TRANSMISSION|4u));
+    CHECK(denoiseStableLobeKey(specularSampleLobeKey(kCoat),DenoiseLobeGuide{})==SPECULAR_LOBE_CLEARCOAT);
+    DenoiseLobeGuide nan=glass;nan.transmissionFactor=std::nanf("");CHECK(denoiseStableLobeKey(0u,nan)==0u);
+}
+
+namespace {
+GPUSpecularSample endpointSample(u32 key,float x,float y,float z){GPUSpecularSample m=spec();m.flags|=SPECULAR_SAMPLE_STOCHASTIC|SPECULAR_SAMPLE_ENDPOINT|specularSampleLobeFlags(SPECULAR_LOBE_TRANSMISSION,true);
+    m.direction[0]=x;m.direction[1]=y;m.direction[2]=z;m.proposalSolidAngle=denoiseEndpointKeyEncode(key);return m;}
+GPUDenoiseEndpointHistory endpointHistory(u32 key,float x,float y,float z){GPUDenoiseEndpointHistory h{};h.endpoint[0]=x;h.endpoint[1]=y;h.endpoint[2]=z;h.endpointKey=denoiseEndpointHistoryKey(key);return h;}
+}
+TEST_CASE("F15.1 (ticket 13) the endpoint key rides in a normal float and the sample flag is a free bit"){
+    for(const u32 key:{0u,1u,2u,12345u,0x7fffffu}){const float e=denoiseEndpointKeyEncode(key);CHECK(std::isnormal(e));CHECK(e>=1.0f);CHECK(e<2.0f);CHECK(denoiseEndpointKeyDecode(e)==key);}
+    CHECK((SPECULAR_SAMPLE_ENDPOINT&(SPECULAR_SAMPLE_VALID|SPECULAR_SAMPLE_PREFILTERED|SPECULAR_SAMPLE_MIXED|SPECULAR_SAMPLE_STOCHASTIC|SPECULAR_SAMPLE_ERROR|
+        SPECULAR_SAMPLE_LOBE_KEY_MASK|(SPECULAR_SAMPLE_COUNT_MASK<<SPECULAR_SAMPLE_COUNT_SHIFT)))==0u);
+    CHECK(denoiseEndpointHistoryKey(0u)!=DENOISE_ENDPOINT_NONE); // key 0 (environment) is a real key, a zeroed record is none
+    CHECK(GPUDenoiseEndpointHistory{}.endpointKey==DENOISE_ENDPOINT_NONE);
+}
+TEST_CASE("F15.1 (ticket 13) the history carries the endpoint of the sample it was accumulated from"){
+    DenoiseLobeGuide glass;glass.ior=1.5f;glass.transmissionFactor=1.0f;const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);const auto s=receiver();
+    const auto m=endpointSample(41u,.25f,-.5f,.125f);const auto h=denoiseTemporal(s,glm::vec3(1),{},p,{},{},m,-1,glm::vec3(0),glm::vec3(-1),&glass);REQUIRE(h.valid);
+    const auto packed=denoisePackEndpoint(h);
+    CHECK(packed.endpointKey==denoiseEndpointHistoryKey(41u));CHECK(packed.endpoint[0]==.25f);CHECK(packed.endpoint[1]==-.5f);CHECK(packed.endpoint[2]==.125f);
+    CHECK(sizeof(denoisePackSpecular(h))==16); // the base specular extension carries no endpoint
+    // a sample without the flag, or an error sample, stores none
+    auto plain=m;plain.flags&=~SPECULAR_SAMPLE_ENDPOINT;CHECK(denoiseTemporal(s,glm::vec3(1),{},p,{},{},plain,-1,glm::vec3(0),glm::vec3(-1),&glass).endpointKey==DENOISE_ENDPOINT_NONE);
+    auto bad=m;bad.flags|=SPECULAR_SAMPLE_ERROR;CHECK(denoiseTemporal(s,glm::vec3(1),{},p,{},{},bad,-1,glm::vec3(0),glm::vec3(-1),&glass).endpointKey==DENOISE_ENDPOINT_NONE);
+    // other signals never store one
+    const auto di=denoiseParameters({},4,4,DENOISE_SIGNAL_DI,0,1,1,false);CHECK(denoiseTemporal(s,glm::vec3(1),{},di,{},{},m).endpointKey==DENOISE_ENDPOINT_NONE);
+}
+TEST_CASE("F15.1 (ticket 13) the endpoint window search picks the nearest same-key endpoint inside the footprint rule"){
+    const auto center=endpointSample(5u,1.0f,0.0f,0.0f);
+    // footprint: the largest endpoint distance to a same-key neighbour, other keys and missing endpoints ignored
+    const GPUSpecularSample neighbours[4]={endpointSample(5u,1.0f,0.2f,0.0f),endpointSample(5u,1.0f,0.0f,-0.1f),endpointSample(6u,9.0f,9.0f,9.0f),spec()};
+    CHECK(denoiseEndpointFootprint(center,neighbours,4)==doctest::Approx(0.2f));
+    CHECK(denoiseEndpointFootprint(center,neighbours+2,2)==0.0f);
+    const float f=denoiseEndpointFootprint(center,neighbours,4);
+    const GPUDenoiseEndpointHistory window[5]={GPUDenoiseEndpointHistory{},endpointHistory(5u,1.0f,0.5f,0.0f),endpointHistory(5u,1.0f,0.25f,0.0f),endpointHistory(7u,1.0f,0.0f,0.0f),endpointHistory(5u,1.0f,0.25f,0.0f)};
+    CHECK(denoiseEndpointSelect(center,f,window,5)==2); // nearest same key (0.25 <= 1.5 x 0.2), the first of the equal ones
+    CHECK(denoiseEndpointSelect(center,f,window+1,1)==-1); // 0.5 is beyond 1.5 x 0.2
+    CHECK(denoiseEndpointSelect(center,0.0f,window,5)==2); // no footprint (a sliver): the nearest same-key endpoint of the window
+    CHECK(denoiseEndpointSelect(center,f,window+3,1)==-1); // other key only
+    auto none=center;none.flags&=~SPECULAR_SAMPLE_ENDPOINT;CHECK(denoiseEndpointSelect(none,f,window,5)==-1);
+    // an environment endpoint (key 0) matches only environment history
+    const auto sky=endpointSample(0u,0.0f,1.0f,0.0f);const GPUDenoiseEndpointHistory skyWindow[2]={endpointHistory(5u,0.0f,1.0f,0.0f),endpointHistory(0u,0.0f,.99f,.1f)};
+    CHECK(denoiseEndpointSelect(sky,0.2f,skyWindow,2)==1);
+}
+TEST_CASE("F15.1 (ticket 13) an endpoint-matched candidate skips the receiver geometry tests only"){
+    DenoiseLobeGuide glass;glass.ior=1.5f;glass.transmissionFactor=1.0f;const auto p=denoiseParameters({},4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);const auto s=receiver();
+    const auto m=endpointSample(41u,.25f,-.5f,.125f);const auto h=denoiseTemporal(s,glm::vec3(1),{},p,{},{},m,-1,glm::vec3(0),glm::vec3(-1),&glass);REQUIRE(h.valid);
+    auto tilted=s;tilted.shadingNormal[0]=.8f;tilted.shadingNormal[2]=.6f;tilted.geometricNormal[0]=.8f;tilted.geometricNormal[2]=.6f; // another point of the sphere
+    auto farther=s;farther.depth=3.4f;farther.position[2]=.4f;
+    CHECK_FALSE(denoiseCompatible(tilted,h,p,m,&glass));CHECK(denoiseCompatible(tilted,h,p,m,&glass,false));
+    CHECK_FALSE(denoiseCompatible(farther,h,p,m,&glass));CHECK(denoiseCompatible(farther,h,p,m,&glass,false));
+    // identity, revision, lobe key and roughness are still compared
+    auto other=s;other.instanceSlot=8;CHECK_FALSE(denoiseCompatible(other,h,p,m,&glass,false));
+    auto rev=s;rev.materialRevision=6;CHECK_FALSE(denoiseCompatible(rev,h,p,m,&glass,false));
+    auto rough=s;rough.roughness=.9f;CHECK_FALSE(denoiseCompatible(rough,h,p,m,&glass,false));
+    DenoiseLobeGuide coat=glass;coat.transmissionFactor=0.0f;auto reflectBranch=m;reflectBranch.flags&=~SPECULAR_SAMPLE_LOBE_KEY_MASK;CHECK_FALSE(denoiseCompatible(s,h,p,reflectBranch,&coat,false)); // another lobe key
+    auto reset=p;reset.flags|=DENOISE_RESET;CHECK_FALSE(denoiseCompatible(s,h,reset,m,&glass,false));
+}
+TEST_CASE("F15.1 (ticket 13) an endpoint-matched history blends at 1 / maxHistory once its length reaches the cap"){
+    DenoiseLobeGuide glass;glass.ior=1.5f;glass.transmissionFactor=1.0f;DenoiseSettings settings;const auto p=denoiseParameters(settings,4,4,DENOISE_SIGNAL_SPECULAR,0,1,1,false);
+    const auto s=receiver();const auto m=endpointSample(41u,.25f,-.5f,.125f);
+    DenoiseHistory h{};for(u32 i=0;i<settings.maxHistory+4;++i)h=denoiseTemporal(s,glm::vec3(0),h,p,{},{},m,-1,glm::vec3(0),glm::vec3(-1),&glass,true);
+    REQUIRE(h.length==settings.maxHistory);
+    const auto surface=denoiseTemporal(s,glm::vec3(1),h,p,{},{},m,-1,glm::vec3(0),glm::vec3(-1),&glass,false);
+    const auto matched=denoiseTemporal(s,glm::vec3(1),h,p,{},{},m,-1,glm::vec3(0),glm::vec3(-1),&glass,true);
+    CHECK(surface.color[0]==doctest::Approx(settings.temporalAlpha));
+    CHECK(matched.color[0]==doctest::Approx(1.0f/float(settings.maxHistory)));
+    // a short history still blends by 1 / length (the running mean), matched or not
+    const auto first=denoiseTemporal(s,glm::vec3(1),denoiseTemporal(s,glm::vec3(0),{},p,{},{},m,-1,glm::vec3(0),glm::vec3(-1),&glass,true),p,{},{},m,-1,glm::vec3(0),glm::vec3(-1),&glass,true);
+    CHECK(first.color[0]==doctest::Approx(0.5f));
 }

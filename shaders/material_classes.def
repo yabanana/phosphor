@@ -1,0 +1,29 @@
+# material_classes.def -- declared inputs of the material permutation generator (F15.2, ADR-0003).
+#
+# Read by `variant_gen classes` (tools/variant_gen/class_gen.cpp), which turns it and the manifests below into
+# ${CMAKE_BINARY_DIR}/generated/pipeline/material_classes.generated.h, material_classes.generated.metal.h and
+# material_class_plan.json (the pipeline descriptors of the class table; tools/material_class_archive.py adds exactly
+# those to shaders/pipelines.mtl4-json).  Line format: see the header of class_gen.cpp.
+#
+# Manifests are exported from scenes (never written by hand):
+#   build/release/class_manifest export shaders/material_classes        the F15 fixtures (GPU free)
+#   phosphor --export-class-manifest FILE ...                           the scene the app loads (chess, corpus)
+# tests/test_material_classes.cpp fails when a committed fixture manifest differs from a fresh export.
+# EXTENSION POINT: a new input is one `manifest` line (ticket 20 chess fixture, ticket 22 Khronos corpus) or one
+# `declare` line; the budgets below are checked on every generation.
+
+budget archived 64   # distinct MATERIAL_FEATURES values in the archive (class masks, scene unions, all-lobes)
+budget active 16     # feature classes of one scene served through bins; the excess runs the all-lobes pipeline
+
+kernel phx_exact::visibility_resolve       # the compute resolve of the visibility path
+kernel phx_exact::visibility_lit_resolve   # the same with the F10-F14 lighting inputs
+
+manifest material_classes/material.json
+manifest material_classes/transmission.json
+manifest material_classes/shadow.json
+manifest material_classes/terrain.json          # tools/class_manifest: the terrain patch fixture, layers = bit 8 (ticket 23)
+manifest material_classes/chess.json            # tools/f15_export_manifests.py: ABeautifulGame rigs (ticket 20)
+manifest material_classes/khronos-corpus.json   # the Khronos corpus models that load, declared rigs (ticket 22)
+
+# declare <NAME> <lobe>[|lobe...]   a class no manifest shows yet, e.g.
+# declare CHESS_QUEEN_SKIN subsurface|specular_ior

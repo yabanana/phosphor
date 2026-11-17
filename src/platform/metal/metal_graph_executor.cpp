@@ -1,4 +1,5 @@
 #include "platform/metal/pipeline_cache.h"
+#include "platform/metal/render_state_tracker.h"
 #include "platform/metal/metal_graph_executor.h"
 #include <cstdlib>
 #include <cstring>
@@ -687,12 +688,14 @@ void MetalGraphExecutor::execute(MetalContext::Frame& frame) {
                 MTL4::RenderCommandEncoder* enc = target->renderCommandEncoder(passDescriptors_[groupIndex]);
                 setImportedAttachments(groupIndex, false);
                 enc->setLabel(groupLabels_[groupIndex]);
+                metal_state::begin(enc);
                 // Barriers of every member were hoisted to the group start.
                 encodeBarriers(enc, group.firstPosition);
                 for (u32 pos = plan.firstPosition; pos <= plan.lastPosition; ++pos) runPass(enc, pos, frame);
                 if (timestamps_ && unitOfPosition_[plan.lastPosition] != kNone) {
                     timestamps_->endUnit(enc, unitOfPosition_[plan.lastPosition]);
                 }
+                metal_state::end(enc);
                 enc->endEncoding();
             }
         } else if (plan.type == rg::PassType::External) {

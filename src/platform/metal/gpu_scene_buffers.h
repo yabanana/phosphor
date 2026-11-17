@@ -73,12 +73,16 @@ public:
     /// scatters() and copies(); returns the bytes written by the CPU.
     u64 stageFrame(const SceneStore& store);
 
-    [[nodiscard]] const std::array<Scatter, 4>& scatters() const { return scatters_; }
+    /// Scatters: 0 instances, 1 materials, 2 nodes, 3 motion, 4 material extensions (F15.1).
+    static constexpr u32 kScatters = 5;
+    [[nodiscard]] const std::array<Scatter, kScatters>& scatters() const { return scatters_; }
     [[nodiscard]] const std::vector<Copy>& copies() const { return copies_; }
 
     // --- Persistent ----------------------------------------------------------------
     [[nodiscard]] MTL::Buffer* instances() const { return instances_; }
     [[nodiscard]] MTL::Buffer* materials() const { return materials_; }
+    /// F15.1: the extension records (null while no material of the scene is extended).
+    [[nodiscard]] MTL::Buffer* extensions() const { return extensions_; }
     [[nodiscard]] MTL::Buffer* nodes() const { return nodes_; }
     [[nodiscard]] MTL::Buffer* motions() const { return motions_; }
     [[nodiscard]] MTL::Buffer* identity() const { return identity_; }
@@ -113,6 +117,7 @@ private:
     MetalContext& context_;
     MTL::Buffer* instances_      = nullptr;
     MTL::Buffer* materials_      = nullptr;
+    MTL::Buffer* extensions_     = nullptr;
     MTL::Buffer* nodes_          = nullptr;
     MTL::Buffer* motions_        = nullptr;
     MTL::Buffer* identity_       = nullptr;
@@ -127,6 +132,7 @@ private:
 
     u32 slotCap_     = 0;
     u32 materialCap_ = 0;
+    u32 extensionCap_ = 0; // records
     u32 bucketCap_   = 0;
     u32 commandCap_  = 0;
     u32 childCap_    = 0;
@@ -137,7 +143,7 @@ private:
     u64 version_     = 0;
     bool forceFull_  = false; // a persistent buffer was reallocated: next stageFrame() re-sends everything
 
-    std::array<Scatter, 4> scatters_{};
+    std::array<Scatter, kScatters> scatters_{};
     std::vector<Copy>      copies_;
 };
 

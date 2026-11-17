@@ -43,7 +43,8 @@ constexpr u32 MAX_COLOR_ATTACHMENTS  = 8;
 struct ColorOutput {
     rg::Format format         = rg::Format::Unknown;
     bool       unspecialized  = false; // format, blend and write mask left open
-    enum class Blend : u8 { Disabled, AlphaOver } blend = Blend::Disabled;
+    /// TransmittanceMap (F15.1 ticket 15, CSM transmittance map): RGB sums (One, One, Add), alpha keeps the maximum (Max).
+    enum class Blend : u8 { Disabled, AlphaOver, TransmittanceMap } blend = Blend::Disabled;
     u8         writeMask      = 0xF;   // RGBA bits
     bool operator==(const ColorOutput&) const = default;
 };

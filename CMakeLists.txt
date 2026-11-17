@@ -72,6 +72,11 @@ add_library(phosphor_core STATIC
     src/renderer/history_registry.cpp
     src/renderer/exposure.cpp
     src/renderer/gpu_scene.cpp
+    src/renderer/lobe_guide_reference.cpp
+    src/renderer/material_description.cpp
+    src/renderer/material_description_io.cpp
+    src/renderer/material_extension_pack.cpp
+    src/renderer/material_support.cpp
     src/renderer/meshlet_builder.cpp
     src/renderer/rt_proxy.cpp
     src/renderer/rt_proxy_transition.cpp
@@ -97,6 +102,7 @@ add_library(phosphor_core STATIC
     src/renderer/meshlet_cull_reference.cpp
     src/renderer/meshlet_check.cpp
     src/renderer/scene_check.cpp
+    src/renderer/material_class_export.cpp
     src/renderer/scene_extract.cpp
     src/renderer/scene_store.cpp
     src/renderer/transform_reference.cpp
@@ -117,11 +123,22 @@ add_library(phosphor_core STATIC
     src/scene/camera.cpp
     src/scene/ecs.cpp
     src/scene/gltf_loader.cpp
+    src/scene/gltf_contained_fs.cpp
+    src/scene/gltf_material_extensions.cpp
+    src/scene/gltf_lights.cpp
     src/scene/mesh_processing.cpp
     src/scene/procedural.cpp
+    src/scene/terrain_textures.cpp
     src/scene/texture_manager.cpp
     src/testbench/cornell_box.cpp
+    src/testbench/corpus_rig.cpp
     src/testbench/lighting_validation.cpp
+    src/testbench/material_validation.cpp
+    src/testbench/transmission_validation.cpp
+    src/testbench/transmissive_shadow_validation.cpp
+    src/testbench/glass_receiver_validation.cpp
+    src/testbench/chess_fixture.cpp
+    src/testbench/terrain_fixture.cpp
     src/testbench/reflection_validation.cpp
     src/testbench/culling_viz.cpp
     src/testbench/many_lights.cpp
@@ -160,6 +177,10 @@ set_source_files_properties(tools/image_diff/image_diff.cpp PROPERTIES COMPILE_O
 add_executable(soc_model tools/soc_model/soc_model.cpp)
 target_link_libraries(soc_model PRIVATE phosphor_core tinygltf) # tinygltf: nlohmann json.hpp
 target_compile_options(soc_model PRIVATE ${PHOSPHOR_WARNINGS})
+# F15.2 (ticket 21): feature-class manifest exporter of the F15 fixtures (GPU-free). Portable.
+add_executable(class_manifest tools/class_manifest/class_manifest.cpp)
+target_link_libraries(class_manifest PRIVATE phosphor_core tinygltf) # tinygltf: nlohmann json.hpp
+target_compile_options(class_manifest PRIVATE ${PHOSPHOR_WARNINGS})
 # OPT-1.1: offline graph optimiser CLI (scenarios -> plans + report). Portable.
 add_executable(graph_opt tools/graph_opt/graph_opt.cpp)
 target_link_libraries(graph_opt PRIVATE phosphor_core)

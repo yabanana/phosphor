@@ -1,0 +1,258 @@
+{
+  "source": "https://ambientcg.com",
+  "variant": "1K-JPG",
+  "license": "CC0-1.0",
+  "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+  "owner": "ambientCG (Lennart Demes)",
+  "approved": "owner, 2026-11-14 (four CC0 1K JPG sets, ~38.9 MB)",
+  "assets": {
+    "Grass004": {
+      "zip": "Grass004_1K-JPG.zip",
+      "zip_bytes": 11003149,
+      "zip_sha256": "4b63495f459db8481f4d5144e4e9069345c81cf898cc71f2216f5dd3bb344469",
+      "files": [
+        {
+          "path": "Grass004.png",
+          "bytes": 546989,
+          "sha256": "2cb26c75238d3b2dc71867d66c85603b211344965d80c9f9c8020cd1ac8a23d2"
+        },
+        {
+          "path": "Grass004_1K-JPG.blend",
+          "bytes": 1109012,
+          "sha256": "8d3f6b255d8ac9282497c19db3deb8b270166ecca9530b459ab533ded0295eaf"
+        },
+        {
+          "path": "Grass004_1K-JPG.mtlx",
+          "bytes": 2257,
+          "sha256": "8a0c46f14ab87606d71108b4150f42c0d8660fe61922edd5428932516e5de03b"
+        },
+        {
+          "path": "Grass004_1K-JPG.tres",
+          "bytes": 1015,
+          "sha256": "d25b89ced1e367e96ede81d4da6218458dae3252e49c00725046e1831bd21e25"
+        },
+        {
+          "path": "Grass004_1K-JPG.usdc",
+          "bytes": 2969,
+          "sha256": "ef745454ba939013574c84dd64fe299f19fe6e90ec7cfba600ea00e900e6dd7b"
+        },
+        {
+          "path": "Grass004_1K-JPG_AmbientOcclusion.jpg",
+          "bytes": 904824,
+          "sha256": "04dde15209751196f5d0fc84507e6e2fbd7876a766ba3ab158e061dd9b756b95"
+        },
+        {
+          "path": "Grass004_1K-JPG_Color.jpg",
+          "bytes": 1985561,
+          "sha256": "9e1c60da44b34a9738b1256ba827541f097dc583521b1d281e61b5f4b4217bc5"
+        },
+        {
+          "path": "Grass004_1K-JPG_Displacement.jpg",
+          "bytes": 918011,
+          "sha256": "8268bbb7075ea22714913ab3f38a9ff35a2c759cb7d4961a2e87d0ef29b1b849"
+        },
+        {
+          "path": "Grass004_1K-JPG_NormalDX.jpg",
+          "bytes": 2339065,
+          "sha256": "c375ab178faa4df0b0e0b13dabc5594ab8e8e8220a9d40e8815ff8e602ec058c"
+        },
+        {
+          "path": "Grass004_1K-JPG_NormalGL.jpg",
+          "bytes": 2339612,
+          "sha256": "8014a81d896a5c589b60612a769bc39eb1213e48d96f6146f485ea36e9e9610f"
+        },
+        {
+          "path": "Grass004_1K-JPG_Roughness.jpg",
+          "bytes": 851664,
+          "sha256": "706580983860f942e141acdd68c4128dd683be50fcc5d85b7c67a9a3a8c7bac0"
+        }
+      ]
+    },
+    "Rock030": {
+      "zip": "Rock030_1K-JPG.zip",
+      "zip_bytes": 9677446,
+      "zip_sha256": "2fd0bc2d214e2487c19062ed0798a85dd135b41cfc12bbaed42d5acae238f989",
+      "files": [
+        {
+          "path": "Rock030.png",
+          "bytes": 434696,
+          "sha256": "241a33f52edae3376b80fe24c250400453c71935a6a1586fe055527e6e55c72a"
+        },
+        {
+          "path": "Rock030_1K-JPG.blend",
+          "bytes": 1109428,
+          "sha256": "51fb91c0e17ad7d2a9533d3f707a9b11ef08d8eb67bfd7d8e79c739d71dd01cb"
+        },
+        {
+          "path": "Rock030_1K-JPG.mtlx",
+          "bytes": 2242,
+          "sha256": "a34f435c12302982ef7e044ffda8214f3f036bf7af114069e0106c6bfec925f0"
+        },
+        {
+          "path": "Rock030_1K-JPG.tres",
+          "bytes": 1010,
+          "sha256": "571b80b34fe8eab5c03d10bb28d0e63e40013f2d321b2edc96c0ac7f5d9c5a4d"
+        },
+        {
+          "path": "Rock030_1K-JPG.usdc",
+          "bytes": 2996,
+          "sha256": "df80ab22e73834ea724559b4c52d6e391e2c030483aab87635f12e46ad36de7a"
+        },
+        {
+          "path": "Rock030_1K-JPG_AmbientOcclusion.jpg",
+          "bytes": 568556,
+          "sha256": "405ab1943485560bc01cd0c6c10065195adf7ef9c554f9b24914c3311751dde6"
+        },
+        {
+          "path": "Rock030_1K-JPG_Color.jpg",
+          "bytes": 1483352,
+          "sha256": "1dca8a336518ce0adca4b5cbe2ab30819c8769388f1c15278082a99f022c615a"
+        },
+        {
+          "path": "Rock030_1K-JPG_Displacement.jpg",
+          "bytes": 348477,
+          "sha256": "7739ae7883e6f7600e2a87319e7eada73fb654241909f3da24ef301a10c5665b"
+        },
+        {
+          "path": "Rock030_1K-JPG_NormalDX.jpg",
+          "bytes": 2526607,
+          "sha256": "9a2fb25d9a3365d751ad6b5772cc2e6a3960ac58702978327eba95a003bfe7ee"
+        },
+        {
+          "path": "Rock030_1K-JPG_NormalGL.jpg",
+          "bytes": 2528233,
+          "sha256": "8fd1d22eb6c7b6e4a374196c0de791f724538b8b86eb9c7a946fec1f5834cb94"
+        },
+        {
+          "path": "Rock030_1K-JPG_Roughness.jpg",
+          "bytes": 669875,
+          "sha256": "f37850f72994458994716d084683d80611528d1685264bde3071569e8ca53489"
+        }
+      ]
+    },
+    "Ground037": {
+      "zip": "Ground037_1K-JPG.zip",
+      "zip_bytes": 10574958,
+      "zip_sha256": "4e69db2b7251b1736fa70fe6fe4ab80d64bd220117dd5dd4c7caaead51c2574e",
+      "files": [
+        {
+          "path": "Ground037.png",
+          "bytes": 513329,
+          "sha256": "bc7cebb2860a92e9446802a3018f56074879803f1bddb0b80517cd5bfd57c6ae"
+        },
+        {
+          "path": "Ground037_1K-JPG.blend",
+          "bytes": 1109220,
+          "sha256": "980feed3dfe7aadb2b2ef1a917e5ac6afc5c92d96ad3152b43eb03018e554f85"
+        },
+        {
+          "path": "Ground037_1K-JPG.mtlx",
+          "bytes": 2272,
+          "sha256": "6c13bd23a18bef3434b348e79db899390d09abea2f7bfcf424b9f70f69711aa9"
+        },
+        {
+          "path": "Ground037_1K-JPG.tres",
+          "bytes": 1020,
+          "sha256": "be67d37e142194a9a5f64aeb43d1959e3b47452327de93e369ac2cc7ccfd1c12"
+        },
+        {
+          "path": "Ground037_1K-JPG.usdc",
+          "bytes": 2982,
+          "sha256": "3b3c481b29dfb3c862ad36cfebc86c6ab0902a818262d67abe52c6d91e9a2377"
+        },
+        {
+          "path": "Ground037_1K-JPG_AmbientOcclusion.jpg",
+          "bytes": 612112,
+          "sha256": "8afe189ae915888551076cb279f6282c84255e4b2bdb2c4ce8c1c891074245ef"
+        },
+        {
+          "path": "Ground037_1K-JPG_Color.jpg",
+          "bytes": 2187764,
+          "sha256": "d92bec8a35b9cb16ec79b421ca0f572a7400286eae109beafa266629ef49a6cf"
+        },
+        {
+          "path": "Ground037_1K-JPG_Displacement.jpg",
+          "bytes": 500481,
+          "sha256": "bc102168f5d014ce208ed5c1d9140c39513d29303e1b3436cb06c92c7780e419"
+        },
+        {
+          "path": "Ground037_1K-JPG_NormalDX.jpg",
+          "bytes": 2474498,
+          "sha256": "0e2d613d117d9231aa0aa61f39b19755f891b4ed1d1599a004cb018a8224e039"
+        },
+        {
+          "path": "Ground037_1K-JPG_NormalGL.jpg",
+          "bytes": 2474236,
+          "sha256": "ea59dbdcfa5bf2f28bdd4aa896d4e5f96c4cce5939100dcc6db4bbbcdebfe38d"
+        },
+        {
+          "path": "Ground037_1K-JPG_Roughness.jpg",
+          "bytes": 694944,
+          "sha256": "3786b088e981aae562f06b6477972d379cffd09a5cc542ab42f9ffd94f9bcb0e"
+        }
+      ]
+    },
+    "Snow006": {
+      "zip": "Snow006_1K-JPG.zip",
+      "zip_bytes": 7620054,
+      "zip_sha256": "442ff74e547014523aaa7a4579ba6bf3e61992644e44a8cb539dd430cda1a321",
+      "files": [
+        {
+          "path": "Snow006.png",
+          "bytes": 214025,
+          "sha256": "943a0263c4c11c11c3238b21329b3e10350685c490945e72aeb252414c4bdd48"
+        },
+        {
+          "path": "Snow006_1K-JPG.blend",
+          "bytes": 1109844,
+          "sha256": "830e84427ad030dd80bcc39825abd9c361c7362a4a344704b2999f0797cea63d"
+        },
+        {
+          "path": "Snow006_1K-JPG.mtlx",
+          "bytes": 2242,
+          "sha256": "c5497b30fe5d2b9d71811ef32f529d0d3151712a61218e6027690dcdbace2236"
+        },
+        {
+          "path": "Snow006_1K-JPG.tres",
+          "bytes": 1010,
+          "sha256": "858114bc6f95cf5a73127cf70857dac631c8796adfa2b118f9178b87f0eb7f75"
+        },
+        {
+          "path": "Snow006_1K-JPG.usdc",
+          "bytes": 3021,
+          "sha256": "da591ffe55f661aa23135b85329253e57eaa90d05448c4bb0a6182f8d52318d1"
+        },
+        {
+          "path": "Snow006_1K-JPG_AmbientOcclusion.jpg",
+          "bytes": 489185,
+          "sha256": "949466be6c4ab509e356a7aaf4cc4379189b20acf4f2029c891fab8cea183cbe"
+        },
+        {
+          "path": "Snow006_1K-JPG_Color.jpg",
+          "bytes": 668846,
+          "sha256": "bf29965ab1e05abf3fdc7f103a2338a1ad454ac49d8ba2b766023bd1b91a64ec"
+        },
+        {
+          "path": "Snow006_1K-JPG_Displacement.jpg",
+          "bytes": 463467,
+          "sha256": "400747f78a1ccd3e5e78d2348a7c4124b3cc398cedb6322bae4cc070b39b5c40"
+        },
+        {
+          "path": "Snow006_1K-JPG_NormalDX.jpg",
+          "bytes": 2083446,
+          "sha256": "11b2c8b452c8395b5c030868e06ccf265f91dc82bceffadf135e8eaeb54e0703"
+        },
+        {
+          "path": "Snow006_1K-JPG_NormalGL.jpg",
+          "bytes": 2081501,
+          "sha256": "6fe9ba49ce22b243a9c26d1aa7efe73455c782a75a18cdf2cc1be435a505b018"
+        },
+        {
+          "path": "Snow006_1K-JPG_Roughness.jpg",
+          "bytes": 501335,
+          "sha256": "dc51a768a2fe83f4c52aed680edc79000bcd51c847e3c887d2a64354013388a4"
+        }
+      ]
+    }
+  }
+}

@@ -18,6 +18,10 @@ public:
     // The scene's single declared isotropic environment (GiEnvironment sky):
     // reflection misses, probe-capture misses and the GI-off ambient use it.
     void setEnvironment(std::array<float,3> skyRadiance);
+    // F15.1 (ticket 17, RT tier): before prepareFrame, whether the subsurface walk is effective (the composite reads its gain target); after the
+    // walk pass is in the graph, the gain target (addToGraph reads it).
+    void setSubsurfaceWalk(bool active);
+    void setSubsurfaceGain(rg::TextureRef gain);
     rg::TextureRef addToGraph(rg::RenderGraph&,rg::TextureRef baseHDR,rg::TextureRef depth);
     void bindFrame(MetalGraphExecutor&);
     [[nodiscard]] u64 version() const;

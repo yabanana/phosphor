@@ -19,7 +19,11 @@
 #                   (the generic pipeline), or the word `runtime`: the shader
 #                   must then read the value from a runtime buffer (the MSL
 #                   header only exposes k<Name>Specialised and k<Name>).
-#   reserved        a constant declared but not an axis (the pipeline salt).
+#   reserved        a constant declared but not an axis.  SALT is the pipeline
+#                   salt.  Every other reserved constant is a uint whose MSL
+#                   value k<CamelName> is 0 when the constant is UNDEFINED, so a
+#                   pipeline that does not set it keeps its descriptor (and its
+#                   archive key) unchanged (MATERIAL_FEATURES: F15, ADR-0003).
 #
 # The dense variant index is a mixed-radix number: the FIRST axis is the least
 # significant digit.  Variants = product of (max - min + 1) over the axes.
@@ -29,3 +33,37 @@ axis EMISSIVE    bool 1 false true true
 axis DEBUG_MODE  uint 2 0 2 runtime  # FrameConstants::debugMode
 
 reserved SALT uint 31
+
+# F15: bitmask of the material features compiled into the shading code (bit n =
+# MaterialFeature n, renderer/gpu_types.h MATERIAL_FEATURE_*).  Undefined => 0:
+# no extension lobes, today's pipelines.  The all-lobes value (every feature
+# bit, MATERIAL_FEATURES_ALL) is the reference / compile-fallback pipeline;
+# forward and resolve pipelines of a scene with extended materials set the
+# scene's feature union.  NOT an axis: the 42 dense variants are unchanged.
+reserved MATERIAL_FEATURES uint 22
+
+# F15.1 (ticket 17): 1 = the resolve kernels / the indexed overflow fallback of a scene with VOLUMETRIC subsurface write the
+# diffuse-irradiance target (kernel texture 10, fallback colour attachment 6) and strip that diffuse from the colour (the screen-space
+# diffusion pass puts it back).  Undefined => 0: every other pipeline keeps its descriptor (and archive key) unchanged.
+reserved SSS_OUTPUT uint 23
+
+# F15.2 (ticket 21): per-class tile binning of the visibility resolve.  1 = the resolve kernel serves one feature class: it
+# resolves only the pixels whose material feature mask equals MATERIAL_FEATURES (its bin = that mask's slot in the scene's class
+# table, GPUVisibilityParams::classMasks); 2 = the overflow bin: the all-lobes pipeline resolves the pixels whose class is not
+# in the table (more than 16 classes, or a class that is not generated).  Undefined => 0: today's resolve kernels (legacy four
+# classes through constant 21, or the generic dispatch), so every other pipeline keeps its descriptor (and archive key).
+reserved RESOLVE_BIN uint 24
+
+# F15.1 (ticket 22): 1 = the shading code evaluates per-slot KHR_texture_transform (shaders/texture_transform.h) for the materials that carry
+# MATERIAL_FLAG_TEXTURE_TRANSFORM.  Set only on the pipelines of a scene with such a material (SceneStore::textureTransformInUse);
+# undefined => 0, so every other pipeline keeps its descriptor (and archive key) and compiles the transform out.
+reserved TEXTURE_TRANSFORM uint 26
+
+# F15 closure (COLOR_0): 1 = the shading code multiplies the base colour by the interpolated per-vertex colour (FrameConstants::vertexColors,
+# the vertex stages of the indexed path emit it).  Set only on the pipelines of a scene whose assets have COLOR_0 (GpuScene::hasVertexColors);
+# undefined => 0, so every other pipeline keeps its descriptor (and archive key) and compiles the colour stream out.
+reserved VERTEX_COLOR uint 27
+# F15 closure (--specular-ms on): 1 = the shading code adds the Kulla-Conty multiple-scattering lobe to the GGX specular lobes
+# (shaders/materials/bsdf_energy.h).  Undefined => 0: every pipeline keeps its descriptor (and archive key) unchanged.  Set only by
+# PipelineCache::request on the functions that run shadeSurface, never by a caller.
+reserved SPECULAR_MS uint 25

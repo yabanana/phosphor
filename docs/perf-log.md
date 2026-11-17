@@ -1361,3 +1361,348 @@ window, so only same-window comparisons are reported.
 Images are bit-identical to the identity-slot build on Sponza, mirror,
 rough-emitter, probe RT capture, RTAO, fog moving light and day/night. The F9
 matrix passes 60/60.
+
+## F15 ticket 24: quiet-machine cost of the F15 features (2026-11-15, M5 Max, binary cfb9e11)
+
+**Setup.** Orchestrator Release binary of cfb9e11 (archive up to date, read only), `tools/f15_costs.py run` (129 runs, one phosphor process at a time under the
+shared GPU lock, nothing else running: no build, no agent, no solver). A/B/A per replica, 3 replicas, 256 measured frames after 64 warm-up,
+`--fixed-timestep --offscreen --no-ui --no-vsync --gpu-timing-serial`, effect = B minus the mean of the two A runs per replica, shown as median (min..max).
+Load average (1 min) at run start 1.3-2.9 over the session (the 3 minute figure at the start: 2.91 / 2.48 / 2.79; this process alone is about 1).
+Contention sentinel = p95 of `Display tone map` (constant work per resolution): per scenario it stayed within 3 % between the replicas of an item (0.0174-0.0188 ms at
+1280x720 back-light, 0.0299-0.0320 ms at 1080p chess side-light, 0.0160-0.0171 ms panes); the absolute value depends on the scenario (iridescence grids 0.041 /
+0.130 ms, clustered and ReSTIR variants read 0.13 on every replica: post chain after heavy RT work, not contention). 0 GPU allocations and 0 fallback draws in all 129 runs.
+Raw data: `build/f15-costs/run/{results.json,summary.md}` (not versioned). These are costs to record, not gates.
+
+**1. Transmission RT** (chess back-light rig, 1280x720, `--rt on --reflections rt`, 574k-triangle scene; A = pawn tops `transmission=0`, B = `transmission=1`;
+there is no opaque-glass switch on the procedural fixtures):
+
+| metric | A | B | B - A |
+|---|---:|---:|---:|
+| frame GPU p50 | 37.71 | 48.40 | +10.67 (+9.38..+10.85) |
+| frame GPU p95 | 38.37 | 49.30 | +10.85 (+9.50..+11.11) |
+| `Local clustered RT shading` p50 | 26.06 | 35.17 | +9.18 (+8.15..+9.29) |
+| `F13 reflection sample 0..7` p50 (each) | 1.05-1.10 | 1.22-1.29 | +0.17..+0.18 each (about +1.4 ms for the 8) |
+| `Solar temporal moments` p50 | 0.219 | 0.258 | +0.038 |
+| `Material resolve` p50 | 0.075 | 0.085 | +0.010 |
+
+Absolute (procedural glass fixtures at 1280x720, median of 3): `transmission-glass-behind-glass` frame p50 14.84 ms (`Local clustered RT shading` 8.40),
+`transmission-roughness-ior` 17.36 ms (8.90), declared `--rt off` model `transmission-rtoff` 4.18 ms. The A-A spread of the back-light frame p50 reached 3.1 ms in one
+replica (the first set; the effect range reflects it).
+
+**2. Transmissive shadows.**
+
+| item | A | B | frame p50 B - A | passes (p50, B - A) |
+|---|---|---|---|---|
+| 2a RT sun, chess shadow rig 1080p: pawn tops opaque vs glass | 4.50 | 4.66 | +0.148 (+0.071..+0.177; A-A spread 0.167: within noise) | `Solar temporal moments` +0.099 (+0.096..+0.102, RGB history), `Solar RT visibility` +0.027, `Material resolve` +0.023 |
+| 2b CSM 8192 map, same rig: opaque vs glass | 5.33 | 6.36 | +1.033 (+0.908..+1.033) | `CSM transmittance 0..3` +0.198 / +0.194 / +0.193 / +0.193 (0.78 ms), `CSM PCSS visibility` +0.128, `Solar temporal moments` +0.097, `Material resolve` +0.023 |
+| 2d CSM 2048 map, pane-sun@csm 720p: receiver ignores the map (`--debug-transmittance-map off`) vs on | 2.42 | 2.49 | +0.070 (+0.048..+0.083) | `CSM PCSS visibility` +0.075 (the receiver-side cost); the transmittance passes run in both arms |
+| 2e same on volume-pane@csm | 2.42 | 2.50 | +0.082 (+0.036..+0.103) | `CSM PCSS visibility` +0.075 |
+
+Absolute RT sun through glass at 1280x720 (`--shadows rt`, median of 3): pane-sun frame p50 2.20 ms (`Solar RT visibility` 0.108), volume-pane 2.21 (0.110), water-sun 2.21 (0.108).
+The "lite" sun kernel serves scenes without transmission; the A arm of 2a (factor 0 tops) runs it, and the delta above is the whole price of the glass kernel.
+Absolute map cost at the default 2048 (pane-sun@csm): `CSM transmittance 0..3` 0.025 / 0.021 / 0.021 / 0.021 ms (about 0.09 ms for four cascades).
+Memory (graph report `heap_bytes`, aliased): chess shadow rig with `--shadow-map-size 8192` 1 144.6 MiB (tops opaque) -> 2 172.6 MiB (glass), +1 028 MiB = four cascades of a
+256 MiB (8192^2 x 4 B) transmittance map; the default 2048 map is 1/16 of that (64 MiB for four cascades, derived, not measured here). In 2d the off arm still creates
+the maps (heap_bytes 179.88 MiB in both arms), so the map memory is isolated only by the chess A/B.
+
+**3. Subsurface diffusion** (chess side-light rig 1080p, A = `sss=off` no subsurface block, B = overrides applied: kings and queens volumetric screen-space diffusion):
+
+| metric | A | B | B - A |
+|---|---:|---:|---:|
+| frame GPU p50 | 4.302 | 4.713 | +0.411 (+0.352..+0.620) |
+| frame GPU p95 | 4.527 | 4.979 | +0.452 (+0.423..+0.554) |
+| `Subsurface diffusion` p50 | 0 | 0.431 | +0.431 (+0.429..+0.435) |
+| `Subsurface clear` p50 | 0 | 0.025 | +0.025 |
+| `Material resolve` p50 | 0.208 | 0.226 | +0.018 |
+
+Per pixel: the mask capture (`chess-sidelight/mask=1`, luminance > 0.2) has 71 152 subsurface pixels (3.4 % of 1920x1080), so the diffusion pass is 6.1 ns per subsurface pixel
+(6.4 ns with the clear), as a whole-frame figure: the pass is dispatched over the screen and the diffusion scales with the pixels it gathers for, which this A/B does not
+separate (one pixel count only). Memory: unaliased heap +64.3 MiB (537.8 -> 605.2 MB), aliased heap unchanged. Procedural side-lit spheres (`subsurface-volumetric-sun`, 1080p, absolute):
+frame p50 3.94 ms, `Subsurface diffusion` 0.515 ms (no matched no-block twin; `subsurface-volumetric-subpixel-off` is a different scene: 2.87 ms).
+
+**4. Iridescence per light** (ticket 12 static estimate: 187 flops per `bsdfThinFilm`): NO clean A/B exists. The iridescence grid has no film-off arm (its rows are factor 0.5 / 1)
+and material scenarios have no light-count option, so only absolute values are recorded (1080p, median of 3, sentinels 0.041-0.043 sun/legacy, 0.13 restir/clustered): `iridescence-grid-sun`
+frame p50 18.00 ms, `Pre-resolve material lighting guides` 0.772, `Material resolve` 0.250; `-point` (legacy) 18.58 ms, 0.773, 0.229; `-point@restir` 19.92 ms, 0.794, 0.208
+(DI candidates 1.043, temporal 0.948, spatial 0.857); `-point@clustered` 15.98 ms, 0.791, 0.203 (`Local clustered RT shading` 0.570). The frames are dominated by the 8 RT
+reflection samples (about 1 ms each) and the denoiser, so the per-light film cost is below what these absolute values can show. Not measured: GPU per-light cost (needs a
+film-off twin of the grid or a light-count option; neither exists in the current options, and none was invented).
+
+**5. GI-back lookup** (`subsurface-thin-gi-back`, DDGI + ReSTIR + RT, 1280x720, A = `--thin-gi-back off`, B = on):
+
+| metric | A | B | B - A |
+|---|---:|---:|---:|
+| `DDGI back irradiance (thin subsurface)` p50 | 0 | 0.175 | +0.175 (+0.174..+0.175) |
+| frame GPU p50 | 8.427 | 8.728 | +0.344 (-0.094..+0.429; A-A spread 0.376: not significant) |
+| frame GPU p95 | 9.378 | 9.599 | +0.200 (+0.052..+0.263) |
+
+The dedicated pass is the robust cost; the frame delta is dominated by run-to-run drift of `F13 denoise 2 atrous 0` (+0.127, range -0.074..+0.169) and cannot be attributed to the lookup.
+Memory +7.25 MiB (aliased heap 128.8 -> 136.4 MB).
+
+**6. Binning vs union on the chess fixture** (A = union, `--material-binning off`; B = binning on; resolve = `Material resolve` + `Material classification`, mean ms):
+
+| rig | union ms | binning ms | relative (median, min..max) | A-A noise | `Material resolve` p50 | `Material classification` p50 |
+|---|---:|---:|---|---:|---:|---:|
+| side-light 1080p | 0.230 | 0.226 | -1.8 % (-4.9..-0.4) | 2.6 % | -0.031 | +0.026 |
+| shadow rig (RT sun) 1080p | 0.266 | 0.283 | +6.7 % (+5.2..+7.6) | 0.9 % | -0.011 | +0.028 |
+| back-light (RT glass) 720p | 0.089 | 0.098 | +9.8 % (+8.2..+11.7) | 4.3 % | -0.006 | +0.014 |
+
+Decision rule (decision 05/08): binning adopted only if it lowers the resolve by at least 5 % beyond noise. It does not on any rig (the per-class resolve is cheaper by 0.006-0.031 ms but the
+classification costs 0.014-0.028 ms, net -1.8 % to +9.8 %); frame GPU p50 deltas -0.047 / +0.076 / +0.080 ms are inside the A-A spread. With the terrain result (union never worse than +4 %,
+binning never wins) the union pipeline stays the default and binning stays opt-in (`docs/opt-log.md`).
+
+### Terrain layer stack resolve (ticket 23; orchestrator, same day, binaries cfb9e11 / b7beed9 script)
+
+`python3 -I tools/f15_layers_timing.py run --binning [--terrain-textures build/terrain-materials]`: the terrain patch at 1920x1080, visibility
+resolve, `--rt off`, saturated clocks, 64 warm-up + 256 measured frames, A/B/A x 3 replicas per arm (90 runs per texture set), 1-minute load
+2.0 at the start, 0 GPU allocations.  Resolve mean GPU ms per frame ("Material resolve", plus "Material classification" with binning):
+
+| arm | procedural union | procedural binning | CC0 union | CC0 binning |
+|---|---|---|---|---|
+| single material | 0.089 | 0.106 | 0.087 | 0.104 |
+| layers-1 / 2 / 3 / 4 | 0.136 / 0.162 / 0.183 / 0.208 | 0.143 / 0.160 / 0.182 / 0.216 | 0.136 / 0.159 / 0.183 / 0.217 | 0.144 / 0.161 / 0.184 / 0.218 |
+| full (generated mask, height contrast, coat) | 0.204 | 0.206 | 0.201 | 0.208 |
+
+Per-replica effects (B / mean(A) - 1, median and range) are in `build/f15-layers-timing{,-cc0}/summary.md`.  The CC0 sets are the decision-12
+measurement; the procedural run is kept as the earlier stand-in.  Binning never lowers the resolve by >= 5 %: union stays the default.
+
+## F15 ticket 24: Sponza D2 band under the owner's option A (2026-11-15, M5 Max)
+
+**Owner decision (option A, relayed 2026-11-15).** The p95 cost of the F13 back-face continuation fix 26fe229 is attributed to F13, not to F15: it is
+measured on its own (with and without the continuation, same executable, interleaved) and logged here as an F13 correctness cost; the F15 band is
+measured against the ticket-03 baseline plus 26fe229 and stays at 0.10 ms (decision 11: median of three A/B/A GPU p95 deltas).  An attribution, not a
+wider threshold; no image changes.
+
+**Binaries** (`build/d2-skips/`, hashes in `binaries.sha256`; Sponza D2 command of `f15_d2_aba.sh`: 1080p, every feature, 128 + 256 frames,
+`--gpu-timing-serial --no-vsync`, one phosphor process at a time under the shared GPU lock, nothing else running):
+- `t03` = 2e1057a, the plan's cost baseline;
+- `t03fe` = 2e1057a + a measurement backport of 26fe229 (local branch `cl/f15-d2-t03-plus-26fe229`, 91bba50, never merged: the reflection-estimator and
+  probe-capture continuation; the refraction-walk part does not exist at 2e1057a).  Its D2 exactness capture differs from 2e1057a in 49 px (max 70), the
+  same count 26fe229 recorded against its parent, and its `--debug-lighting 4` continuation counters equal the closure tree's (316 / 7 and 369 / 19);
+- `s4` = the closure tree 29814ac, `s0` = the same tree with `kReflectionBackfaceSkips` 0 (executable byte-identical to `s4`, metallib differs only in
+  that constant; `s4`'s metallib is byte-identical to the closure build's); `s0` vs `s4` D2 exactness 934 px (max 122), as recorded before;
+- `s4lite` / `s0lite` = the same pair with the reflection_rt lite-payload fix (below), executable byte-identical between the two.
+- `final` = the F15 branch with that fix, 720ee63 (`build/release`; metallib byte-identical to `s4lite`'s).
+
+**1. Decision-11 A/B/A** (3 pairs each, `f15_d2_aba.sh`; GPU p95 per pair, ms):
+
+| comparison | what it measures | pair deltas | median | absolute new |
+|---|---|---|---|---|
+| s0 -> s4 (closure tree 29814ac) | F13 continuation cost on the 124-byte payload | +0.11 / +0.09 / +0.09 | **+0.086** | 15.48-15.62 |
+| t03fe -> s4 (closure tree 29814ac) | F15 band under option A, before the fix | +0.20 / +0.22 / +0.05 | **+0.198** (over 0.10) | 15.43-15.59 |
+| t03 -> t03fe | F13 continuation cost at the baseline (16-byte payload) | -0.05 / +0.08 / +0.01 | **+0.009** | 15.38-15.40 |
+| s0lite -> s4lite | F13 continuation cost on the shipped code | -0.05 / +0.09 / +0.07 | **+0.065** | 15.33-15.44 |
+| t03fe -> final | F15 band under option A | -0.04 / +0.04 / -0.10 | **-0.038** (within 0.10) | 15.33-15.39 |
+| t03 -> final | against the plain ticket-03 baseline | +0.02 / -0.02 / +0.08 | **+0.020** | 15.36-15.43 |
+
+0 GPU allocations in every run; final: startup pipelines 12.7 ms, archive 137 hits / 0 misses, 12 compiler calls (the linked RT pipelines), 0
+render-thread compiles.  Sky sentinel 0.76-0.93 ms on every binary (clean 0.674-0.677: the desktop compositor was active), so only the paired
+comparisons are meaningful; pairs whose two sentinels differ are noisier (the tail of `F13 reflection sample 0` alone moves by up to 0.4 ms between
+runs of one binary).
+
+**2. Six-replica interleaved rotation** (`f15_d2_rotation.sh`, order reversed every replica, `build/d2-skips/rot6`, s4lite = the fix):
+
+| binary | GPU p50 median | GPU p95 median (min-max) | refl. sample 0 p50 / p95 median | sky p95 median (min-max) | GPU allocations |
+|---|---|---|---|---|---|
+| s0 | 14.453 | 15.383 (15.35-15.46) | 2.709 / 3.584 | 0.790 (0.686-0.914) | [0] |
+| s4 | 14.463 | 15.512 (15.48-15.59) | 2.713 / 3.718 | 0.795 (0.783-0.928) | [0] |
+| s4lite | 14.444 | 15.419 (15.40-15.51) | 2.673 / 3.602 | 0.914 (0.788-0.917) | [0] |
+| t03 | 14.403 | 15.351 (15.32-15.42) | 2.656 / 3.620 | 0.830 (0.785-0.919) | [0] |
+| t03fe | 14.404 | 15.410 (15.36-15.50) | 2.658 / 3.600 | 0.796 (0.759-0.925) | [0] |
+
+| A -> B | median delta GPU p95 | per-replica GPU p95 deltas | median delta GPU p50 | median delta refl. sample 0 p95 |
+|---|---|---|---|---|
+| t03 -> t03fe | +0.065 | +0.09 / +0.05 / +0.11 / -0.06 / +0.08 / +0.04 | +0.006 | +0.072 |
+| s0 -> s4 | +0.139 | +0.18 / +0.14 / +0.20 / +0.11 / +0.14 / +0.02 | +0.015 | +0.123 |
+| t03fe -> s4 | +0.104 | +0.14 / +0.07 / +0.09 / +0.17 / +0.10 / +0.11 | +0.070 | +0.124 |
+| t03fe -> s4lite | +0.038 | +0.09 / +0.06 / -0.07 / +0.05 / +0.01 / +0.03 | +0.021 | -0.011 |
+| s4 -> s4lite | -0.086 | -0.05 / -0.01 / -0.16 / -0.12 / -0.09 / -0.09 | -0.025 | -0.127 |
+| t03 -> s4lite | +0.078 | +0.18 / +0.11 / +0.04 / -0.01 / +0.09 / +0.07 | +0.028 | +0.063 |
+
+**Reading.**  The F13 fix 26fe229 (about 3 900 continued transport rays per frame on D2, ~200 exhausting the bound of 4) costs **+0.01 to +0.07 ms
+of GPU p95** on Sponza D2 with the 16-byte payload: +0.009 (A/B/A) and +0.065 (rotation) at the baseline, +0.065 on the shipped code.  This is the
+F13 correctness cost the owner attributes to F13.  The ~0.2 ms seen at the closure tree was mostly not the continuation alone: it was the
+continuation multiplying the traversals of the 124-byte ticket-14 payload that `reflection_rt` still carried (an F15 cost), removed by the fix
+(docs/opt-log.md, "follow-up 3", adopted).  With it the F15 band is met under option A (-0.038 ms) and against the plain ticket-03 baseline (+0.020 ms);
+the absolute D2 gate holds (GPU p95 15.33-15.43 ms <= 16.67, 0 GPU allocations).  No image changes (F13 exactness 0 px, PFM bit-identical).
+
+## 2026-11-16 — F15 closure round 2: quiet-machine costs on the final tree (M5 Max)
+
+Binary `build/d2-final/final` (tree 9d418f5 + the targeted archive update, sha256 `c4d781e7…`), frozen by APFS clone; heavy CPU jobs
+(Mitsuba reference renders) SIGSTOPped for the whole window (`scratchpad/quiet_r2_wrap.sh`), quietgate: load 1.6-4.7 at the start (the 5/15-min
+averages carry the paused renders), disturbance only from the Claude app (56-90 %), MTLCompilerService at startup and ecosystemanalyticsd.
+0 GPU allocations in every measured run; every measured window 0 fallback draws, 0 compiler calls.
+
+### Sponza D2 band (decision 11: median of three A/B/A GPU p95 deltas <= 0.10 ms, absolute <= 16.67 ms): MET
+Rotation t03 (2e1057a, `build/d2-skips/t03`) / finalMS (41be99b, MS + mirror chain) / final, 3 replicas, order reversed every replica
+(`build/d2-final/rot-r2`):
+
+| binary | GPU p50 | GPU p95 median (min-max) | refl. sample 0 p50 / p95 | sky p95 |
+|---|---|---|---|---|
+| final | 14.238 | 15.320 (15.27-15.36) | 2.479 / 3.544 | 0.860 |
+| finalMS | 14.254 | 15.342 (15.32-15.42) | 2.489 / 3.560 | 0.796 |
+| t03 | 14.397 | 15.389 (15.38-15.40) | 2.651 / 3.532 | 0.787 |
+
+t03 -> final -0.059 ms (pairs -0.06 / -0.13 / -0.02); finalMS -> final -0.047; t03 -> finalMS -0.037 (the earlier window gave +0.043: run-to-run
+spread of the band measurement is about 0.08 ms).
+
+### Transmission, chess back-light rig (`tools/f15_costs.py --only t1-transmission-chess-backlight`)
+B arm (transmission 1) frame GPU p50 per run; the A arm (factor 0) is bimodal by about 3 ms between identical runs on preMS/finalMS, so the
+B-A medians mislead there; the B arm is stable:
+
+| binary | B frame p50 (3 runs) | B - A median | cluster RT shading B p50 | reflection samples B |
+|---|---|---|---|---|
+| base 3ef8f41 | 47.3 / 46.9 / 46.9 | +10.02 | 33.86 | 9.80 (8 passes) |
+| preMS 06dd3a7 | 47.3 / 47.2 / 49.3 | +11.83 | 32.91 | 11.34 |
+| finalMS 41be99b | 47.7 / 50.6 / 47.7 | +9.38 | 33.16 | 11.58 |
+| final | 51.6 / 52.2 / 51.4 | +14.19 | 36.85 | 11.74 |
+
+finalMS -> final (+3.7 ms cluster on the glass arm) = transport round 2 (049f570 closed-volume interior + masked casters, aa3b19b Fresnel weights,
+payload 144 B). Attribution spike: see opt-log.
+
+### Iridescence per light (A = thickness 0, B = film; 1920x1080; resolve mean / DI pass p50)
+legacy (resolve lights): 1 light +0.245 ms, 8 lights +0.477 ms -> (0.477-0.245)/7 = +0.033 ms per extra light; clustered DI: DI pass 1 light
++0.022, 8 lights +0.271 -> +0.036 ms per extra light; the resolve keeps +0.22-0.26 ms for the environment film term in both.
+
+### RT walk subsurface tier (`subsurface-volumetric-sun`, 1280x720, 3 replicas interleaved)
+"Subsurface diffusion" 0.328 ms; "Subsurface RT walk": 4 walks 3.93 ms, 16 walks (product default) 15.3 ms, 64 walks 60.4 ms (linear,
+~0.95 ms per walk per pixel-set); frame GPU p50 0.64 / 4.5 / 15.9 / 61.0 ms. Optional tier (default diffusion).
+
+### Layer stack resolve (terrain CC0, 1920x1080, union, "Material resolve" mean)
+| arm | base 3ef8f41 | preMS 06dd3a7 | finalMS 41be99b | final |
+|---|---|---|---|---|
+| single | 0.086 | 0.089 | 0.094 | 0.094 |
+| layers-1 | 0.129 | 0.270 | 0.286 | 0.285 |
+| layers-4 | 0.203 | 0.369 | 0.383 | 0.375 |
+| full | 0.199 | 0.467 | 0.544 | 0.543 |
+Feature blocks (final, f15_layers_timing A/B/A): blocks-1..4 1.229 / 1.474 / 1.553 / 2.504 ms. Attribution spike: opt-log.
+
+### Transmission after the 128-byte payload (f7d1f22; quiet A/B, opt-log "+3.7 ms payload SIZE")
+Chess back-light rig, B - A effect of the glass transport: pre-fix tip +14.46 ms, fix +12.62 ms (-1.84 ms); cluster RT shading +11.36 -> +9.67 ms. Adopted.
+
+### Layer stack after the attribution spike (owner-cited quiet numbers, opt-log 2026-11-16 F15.4 / F15.2 option (a))
+`Material resolve` mean at 1080p, terrain CC0, the final module choice (exact maths for scenes with material features) against the same binary
+forced to the fast module (`--debug-material-module fast`, debug only): layers-1 0.282 vs 0.158 ms (+78 %), layers-4 0.353 vs 0.239 ms (+48 %),
+full 0.494 vs 0.277 ms (+78 %); a featureless scene pays 0 (single material 0.095 / 0.095 ms, base module).  These replace the earlier
++62 / +81 % estimate.  The in-stack texture-transform code is compiled out without transforms (c8e240f / b6e3a55: layers-4 -7 %, full -9 %).
+
+## 2026-11-16 — F15 closure round 3: final window on the final binary (M5 Max)
+
+Binary `build/d2-final/final3` = `build/release` at the final tip after the +2 corpus tile pipelines (740b6b7), frozen by APFS clone:
+phosphor `c2514d6f…`, metallib `5adf457e…`, archive `49e5d00e…` (full hashes in the handoff). Window 18:20-19:13 after every
+correctness job (no Mitsuba, no other GPU job of ours); quietgate passed the start (load 3.4) but flagged the window as **disturbed**:
+a `java` process above 100 % CPU and the Virtualization VM (neither ours) were busy for part of it (the record keeps no timestamps).
+The A/B measurements are interleaved and their numbers agree with the earlier quiet windows; a confirmation window follows below.
+0 GPU allocations in every measured run.
+
+- hitch_check: 15 bench switches, 0 hitches, 21 / 21 archive hits, 0 compiler calls, 0 render-thread compiles; post-switch worst 1.15 ms
+  (steady p99 1.03 ms).
+- Sponza D2 rotation t03 / finalMS / final3, 3 replicas, order reversed every replica (`build/d2-final/rot-r3`):
+
+| binary | GPU p50 median | GPU p95 median (min-max) | refl. sample 0 p50 / p95 | sky p95 |
+|---|---|---|---|---|
+| final3 | 14.136 | 15.229 (15.21-15.31) | 2.486 / 3.551 | 0.686 |
+| finalMS | 14.130 | 15.171 (15.17-15.33) | 2.494 / 3.530 | 0.688 |
+| t03 | 14.275 | 15.296 (15.26-15.30) | 2.657 / 3.517 | 0.685 |
+
+  t03 -> final3 -0.036 ms (pairs -0.04 / +0.01 / -0.09): band MET (decision 11, <= 0.10 ms; absolute 15.23 ms <= 16.67); finalMS -> final3
+  +0.045 ms (round-3 changes inside the band).
+- Transmission, chess back-light rig (`f15_costs t1`): frame GPU p50 A 35.614 / B 47.952 ms, B - A +12.058 ms (+10.956..+15.350; A-A
+  spread 2.923); `Local clustered RT shading` +9.099, `F13 reflection samples` +2.934 ms.  The back-light rig with the RT-walk flag (no
+  subsurface material there, the walk does not run) on the round-2 binary against final3: frame p50 53.19 / 51.63 / 57.53 against
+  49.84 / 49.79 / 53.59 ms (the 128-byte payload).
+- RT walk tier (`subsurface-volumetric-sun`, 1280x720, 3 replicas interleaved), pass p50 median: `Subsurface diffusion` 0.328 ms; `Subsurface
+  RT walk` 4 / 16 / 64 walks 3.920 / 15.287 / 60.437 ms (frame p50 0.649 / 4.515 / 15.886 / 61.106 ms); unchanged from round 2.
+- Layer stack, terrain CC0 1080p, `Material resolve` (+ classification for bins), exact module, union / bin arm ms (single 0.095-0.096 /
+  0.112-0.115): layers-1 0.279 / 0.291, -2 0.311 / 0.325, -3 0.332 / 0.341, -4 0.352 / 0.363, full 0.492 / 0.503; feature blocks 1-4
+  1.265 / 1.494 / 1.608 / 2.433 union, 1.286 / 1.580 / 1.683 / 2.412 bin.  Binning never lowers the resolve by 5 %.
+- Material binning on the chess rigs (exact module; resolve + classification, mean): side-light +2.9 % (noise 0.8 %), shadow rig +10.3 %
+  (1.9 %), back-light +4.4 % (4.6 %): NOT adopted (opt-log).
+- Archive build (`tools/archive_build_time.py`, 2 interleaved rounds x 3 runs, build-time measure): final archive 2655 pipelines
+  62.16 s median (57.7-69.3), 494.3 MB; without the 226 RESOLVE_BIN class pipelines (all `phx_exact::visibility_(lit_)resolve`)
+  49.45 s (45.3-51.8), 418.2 MB: +25.7 % median (+27.4 % on the minima) against the F15.2 budget of +25 % (round 1: +9.4 % with 74 class
+  pipelines).  The run-to-run spread is about +-10 %, so the budget is not demonstrably met.
+
+## 2026-11-17 — F15 closure round 4: final window on the final binary (M5 Max)
+
+Binary `build/d2-final/final4` = `build/release` at tip 817b080 (round-4 owner fixes integrated), frozen by APFS clone: phosphor
+`e01bb209…`, metallib `0e5423c1…`, archive `c2776814…` (full hashes in the handoff), the binary of the round-4 correctness battery.
+Window 04:35-05:24 after the battery (no Mitsuba, no other GPU job of ours, battery 100 % on AC). quietgate passed the start (load 2.2)
+and flagged the window **disturbed**: macOS background services (Siri suggestions/inference, Spotlight, IntelligencePlatformComputeService,
+PerfPowerServices, knowledgeconstructiond) and this Claude session were seen busy at some sample; the timed GPU steps ran at load 1.1-2.3,
+the metal-tt rounds at load 18-52, which is metal-tt's own compiler processes (air-pack, applegpu-nt).  0 GPU allocations in every
+measured run.
+
+- hitch_check: 15 bench switches, 0 hitches, 21 / 21 archive hits, 0 compiler calls, 0 render-thread compiles; post-switch worst 1.22 ms
+  (steady p99 1.53 ms).
+- Sponza D2 rotation t03 / finalMS / final4, 3 replicas, order reversed every replica (`build/d2-final/rot-r4`):
+
+| binary | GPU p50 median | GPU p95 median (min-max) | refl. sample 0 p50 / p95 | sky p95 |
+|---|---|---|---|---|
+| final4 | 14.236 | 15.322 (15.28-15.41) | 2.485 / 3.550 | 0.908 |
+| finalMS | 14.229 | 15.351 (15.32-15.39) | 2.478 / 3.534 | 0.911 |
+| t03 | 14.344 | 15.303 (15.28-15.38) | 2.648 / 3.533 | 0.826 |
+
+  t03 -> final4 -0.005 ms (pairs -0.06 / +0.10 / -0.01): band MET (decision 11, <= 0.10 ms; absolute 15.32 ms <= 16.67); finalMS -> final4
+  -0.029 ms (round-3 + round-4 changes inside the band).  The sky pass p95 (clock sentinel) is 0.83-0.91 ms in every arm against 0.69 ms in
+  the round-3 window: the whole window ran at a different clock state, the comparison stays within the window.
+- Transmission, chess back-light rig (`f15_costs t1`): frame GPU p50 A 36.461 / B 48.666 ms, B - A +12.505 ms (+10.006..+12.765; A-A
+  spread 5.382); `Local clustered RT shading` +9.664, `F13 reflection samples` +2.939 ms (round 3: +12.058 / +9.099 / +2.934).
+- RT walk with glass in the union (`transmissive-shadow-sss-pane` against `-open`, same binary, 1280x720, 64 walks, 512 steps, 3 replicas
+  interleaved; `build/f15-costs-r4/walk-glass2`): `Subsurface RT walk` p50 95.31 / 95.49 / 96.00 against 54.01 / 54.07 / 54.17 ms, frame
+  GPU p50 97.8-98.6 against 56.4-56.6 ms: the glass variant (`subsurface_walk_glass`, full 128-byte payload and a transmitted exit shadow
+  ray, cf21330) costs +41.4 ms (+77 %) on this optional tier at 64 walks; glass-free scenes keep the Lite walk.  First valid measurement
+  (the round-3 attempt used a rig without a subsurface material).
+- RT walk tier (`subsurface-volumetric-sun`, 1280x720, 3 replicas interleaved), pass p50 median: `Subsurface diffusion` 0.320 ms; `Subsurface
+  RT walk` 4 / 16 / 64 walks 3.913 / 15.174 / 60.184 ms; unchanged from round 3.
+- Layer stack, terrain CC0 1080p, `Material resolve` (+ classification for bins), exact module, union / bin arm ms (single 0.094-0.096 /
+  0.112-0.114): layers-1 0.280 / 0.294, -2 0.310 / 0.322, -3 0.331 / 0.343, -4 0.354 / 0.362, full 0.494 / 0.509; feature blocks 1-4
+  1.211 / 1.442 / 1.568 / 2.459 union, 1.251 / 1.542 / 1.645 / 2.427 bin.  Binning never lowers the resolve by 5 %.
+- Material binning on the chess rigs (exact module; resolve + classification, mean): side-light +2.6 % (noise 0.5 %), shadow rig +4.2 %
+  (0.7 %), back-light -2.8 % (-17.1..+8.9 %, A-A noise 41.7 %): NOT adopted.
+- Archive build (`tools/archive_build_time.py`, 2 interleaved rounds x 3 runs): final archive (2655 + 5 exact-all compute pipelines)
+  runs 57.63 / 56.23 / 53.78 and 52.83 / 53.14 / 52.82 s (round medians 56.23 / 52.83 s), 495.6 MB; without the 226 RESOLVE_BIN class
+  pipelines 44.53 / 43.89 / 44.19 and 43.97 / 44.25 / 43.72 s (44.19 / 43.97 s), 420.7 MB.  Per round +27.2 % and +20.2 %; pooled median
+  of the six runs 53.46 against 44.08 s, +21.3 %; minima +20.8 %.  The two rounds of the same window straddle the +25 % budget (round 3:
+  +25.7 % median, +27.4 % minima), so the owner decision stands: not demonstrably met.
+
+## 2026-11-17 — F15 closure round 5: final window on the final binary (M5 Max)
+
+Binary `build/d2-final/final5` = `build/release` built from af1a2b5 (round 5: owner reversal of the combo fix 588f711, non-lobe MS
+kernel 47dcefe, targeted archive af1a2b5), frozen by APFS clone: phosphor `991b2f95…`, metallib `4518d6ea…`, archive `26742e85…` (full
+hashes in the handoff), the binary of the round-5 correctness battery.  Window 10:38-11:31 after part A (no Mitsuba, no other GPU job of
+ours, on AC, battery 77 -> 68 %).  quietgate passed the start (load 4.4) and flagged the window **disturbed**: the owner's Chrome and
+Codex renderers, WindowServer, git, a local `llama-server` in two samples and this Claude session were seen busy at some sample; the timed
+GPU steps ran at load 2.2-3.5, the metal-tt rounds at load 17-19 (metal-tt's own compilers, applegpu-nt / air-pack).  Not a quiet machine:
+every comparison below holds only as an interleaved A/B inside this window; the absolute times are not quiet-machine values.  0 GPU allocations in
+every measured run.
+
+- hitch_check: 15 bench switches, 0 hitches, 21 / 21 archive hits, 0 compiler calls, 0 render-thread compiles; post-switch worst 1.28 ms
+  (steady p99 1.30 ms).
+- Sponza D2 rotation t03 / finalMS / final5, 3 replicas, order reversed every replica (`build/d2-final/rot-r5`):
+
+| binary | GPU p50 median | GPU p95 median (min-max) | refl. sample 0 p50 / p95 | sky p95 median (min-max) |
+|---|---|---|---|---|
+| final5 | 14.278 | 15.354 (15.28-16.56) | 2.520 / 3.547 | 0.758 (0.714-0.808) |
+| finalMS | 14.225 | 15.398 (15.28-15.48) | 2.490 / 3.533 | 0.712 (0.696-0.772) |
+| t03 | 14.425 | 15.362 (15.30-15.86) | 2.701 / 3.529 | 0.713 (0.709-0.801) |
+
+  t03 -> final5 +0.051 ms (pairs +0.70 / +0.05 / -0.08): band MET (decision 11, median <= 0.10 ms; absolute 15.35 ms <= 16.67);
+  finalMS -> final5 -0.044 ms.  Replica 1 of final5 has a 16.56 ms p95 outlier (its pair +0.70); the median rule absorbs it, the outlier is
+  kept in the table.
+- Transmission, chess back-light rig (`f15_costs t1`): frame GPU p50 A 37.128 / B 51.862 ms, B - A +12.242 ms (+7.836..+15.559; A-A
+  spread 2.266); `Local clustered RT shading` +9.242, `F13 reflection samples` +2.879 ms (round 4: +12.505 / +9.664 / +2.939).
+- RT walk with glass in the union (`transmissive-shadow-sss-pane` against `-open`, same binary, 1280x720, 64 walks, 512 steps, 3 replicas
+  interleaved; `build/f15-costs-r5/walk-glass2`): `Subsurface RT walk` p50 94.77 / 95.76 / 95.84 against 52.73 / 55.29 / 54.04 ms
+  (medians 95.76 / 54.04), +41.7 ms (+77 %), equal to round 4.
+- RT walk tier (`subsurface-volumetric-sun`, 1280x720, 3 replicas interleaved), pass p50 median: `Subsurface diffusion` 0.317 ms;
+  `Subsurface RT walk` 4 / 16 / 64 walks 3.918 / 15.145 / 60.113 ms.
+- Layer stack, terrain CC0 1080p, `Material resolve` (+ classification for bins), exact module, union / bin arm ms (single 0.095-0.099 /
+  0.113-0.116): layers-1 0.279 / 0.295, -2 0.310 / 0.333, -3 0.329 / 0.355, -4 0.383 / 0.376, full 0.492 / 0.532; feature blocks 1-4
+  1.260 / 1.501 / 1.689 / 2.530 union, 1.392 / 1.679 / 1.747 / 2.620 bin.  Binning never lowers the resolve by 5 %.
+- Material binning on the chess rigs (exact module; resolve + classification, mean): side-light +3.9 % (noise 7.7 %), shadow rig +4.0 %
+  (2.0 %), back-light +6.5 % (3.0 %): NOT adopted.
+- Archive build (`tools/archive_build_time.py`, 2 interleaved rounds x 3 runs): final archive (round 4 + 1 compute pipeline
+  `reflection_probe_only_ms`) runs 59.09 / 55.96 / 57.24 and 56.52 / 56.70 / 57.27 s (round medians 57.24 / 56.70 s), 495.9 MB; without
+  the 226 RESOLVE_BIN class pipelines 46.41 / 47.51 / 46.55 and 47.44 / 47.83 / 47.63 s (46.55 / 47.63 s), 420.4 MB.  Per round +23.0 % and
+  +19.0 %; pooled median of the six runs 56.97 against 47.48 s, +20.0 %; minima +20.6 %.  Below +25 % in this window (round 4 +27.2 /
+  +20.2 %, round 3 +25.7 % median): the owner decision "not demonstrably met" stands.

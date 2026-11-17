@@ -316,6 +316,7 @@ std::string reportToJson(const BenchReport& r) {
             ",\n  \"rendering\": {\"offscreen\": " + std::string(boolean(v.offscreen)) + ", \"path\": \"" +
             jsonEscape(v.path) + "\", \"asset\": \"" + jsonEscape(v.asset) +
             "\", \"material_binning_requested\": " + boolean(v.materialBinning) + ", \"post\": " + boolean(v.post) +
+            ", \"specular_ms\": " + boolean(v.specularMs) +
             ", \"upscaler_effective\": \"" + jsonEscape(v.upscaler) + "\", \"tonemap\": \"" + jsonEscape(v.tonemap) +
             "\", \"input_width_last\": " + std::to_string(v.inputWidth) +
             ", \"input_height_last\": " + std::to_string(v.inputHeight) + ", \"views\": " + std::to_string(v.views) +
@@ -329,6 +330,9 @@ std::string reportToJson(const BenchReport& r) {
             ", \"history_resets_total\": " + std::to_string(v.historyResets) +
             ", \"binned_frames_total\": " + std::to_string(v.binnedFrames) +
             ", \"generic_frames_total\": " + std::to_string(v.genericFrames) +
+            ", \"feature_binned_frames_total\": " + std::to_string(v.featureBinnedFrames) +
+            ", \"class_bins\": " + std::to_string(v.classBins) +
+            ", \"class_overflow\": " + std::to_string(v.classOverflow) +
             ", \"guide_checks\": " + std::to_string(v.guideChecks) +
             ", \"shaded_pixels_last\": " + std::to_string(v.shadedPixels) +
             ", \"reused_pixels_last\": " + std::to_string(v.reusedPixels) +
@@ -353,7 +357,9 @@ std::string reportToJson(const BenchReport& r) {
            (r.pipelinesJson.empty() ? std::string() : ",\n  \"pipelines\": " + r.pipelinesJson) + ",\n" + timing +
            graph + scene + phases + hardware + meshlets + rendering + rtToJson(r.rt) +
            (r.lighting.present ? lightingToJson(r.lighting) : std::string()) +
-           (r.denoisedFixtureJson.empty()?std::string():",\n  \"denoised_fixture\": "+r.denoisedFixtureJson) + "\n}\n";
+           (r.denoisedFixtureJson.empty()?std::string():",\n  \"denoised_fixture\": "+r.denoisedFixtureJson) +
+           (r.materialsJson.empty() ? std::string() : ",\n  \"materials\": " + r.materialsJson) +
+           (r.subsurfaceJson.empty() ? std::string() : ",\n  \"subsurface\": " + r.subsurfaceJson) + "\n}\n";
 }
 
 } // namespace phosphor

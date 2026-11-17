@@ -144,3 +144,69 @@ TEST_CASE("pipelineDesc sets every axis constant, genericDesc none") {
     REQUIRE(g.colorCount == 1);
     CHECK(g.color[0].format == rg::Format::BGRA8Srgb);
 }
+
+// F15.1 (ticket 05): the reserved constant MATERIAL_FEATURES.
+#include "pipeline/pipeline_key.h"
+
+TEST_CASE("reserved constant MATERIAL_FEATURES: index 22, not an axis, the 42 variants are unchanged") {
+    CHECK(gen::kMaterialFeaturesConstantIndex == 22);
+    CHECK(materialFeaturesConstantIndex() == 22);
+    CHECK(gen::kAxisCount == 3);
+    CHECK(gen::kVariantCount == 42);
+    CHECK(MATERIAL_FEATURES_ALL == 0x1FFu);
+}
+
+TEST_CASE("withMaterialFeatures: union 0 keeps the descriptor and its key byte for byte") {
+    for (u32 i = 0; i < variantCount(); ++i) {
+        const PipelineDesc base = pipelineDesc(variantAt(i), rg::Format::BGRA8Srgb);
+        const PipelineDesc same = withMaterialFeatures(base, 0);
+        CHECK(canonicalString(same) == canonicalString(base));
+        CHECK(pipelineKey(same) == pipelineKey(base));
+        CHECK(same.constantCount == base.constantCount);
+    }
+    const PipelineDesc generic = genericDesc(rg::Format::BGRA8Srgb);
+    CHECK(canonicalString(withMaterialFeatures(generic, 0)) == canonicalString(generic));
+    CHECK(withMaterialFeatures(generic, 0).isGeneric());
+}
+
+TEST_CASE("withMaterialFeatures: a union appends constant 22; all-lobes is a distinct reference descriptor") {
+    const PipelineDesc base = pipelineDesc(variantAt(5), rg::Format::BGRA8Srgb);
+    const PipelineDesc spec = withMaterialFeatures(base, MATERIAL_FEATURE_SPECULAR_IOR);
+    REQUIRE(spec.constantCount == base.constantCount + 1);
+    CHECK(spec.constants[spec.constantCount - 1].index == 22);
+    CHECK(spec.constants[spec.constantCount - 1].type == ConstantType::UInt);
+    CHECK(spec.constants[spec.constantCount - 1].bits == 1u);
+    // The first constants (the variant axes) are untouched.
+    for (u32 i = 0; i < base.constantCount; ++i) CHECK(spec.constants[i] == base.constants[i]);
+    CHECK(pipelineKey(spec) != pipelineKey(base));
+
+    const PipelineDesc all = withAllLobes(base);
+    CHECK(all.constants[all.constantCount - 1].bits == MATERIAL_FEATURES_ALL);
+    CHECK(pipelineKey(all) != pipelineKey(spec));
+    CHECK(pipelineKey(all) != pipelineKey(base));
+    CHECK(canonicalString(all).find("c22:u=511") != std::string::npos);
+
+    // Re-specialising replaces instead of appending a second constant 22.
+    const PipelineDesc again = withMaterialFeatures(spec, MATERIAL_FEATURE_SPECULAR_IOR | MATERIAL_FEATURE_CLEARCOAT);
+    CHECK(again.constantCount == spec.constantCount);
+    CHECK(again.constants[again.constantCount - 1].bits == 3u);
+
+    // The generic pipeline gets only constant 22: it is no longer "generic".
+    const PipelineDesc g = withMaterialFeatures(genericDesc(rg::Format::BGRA8Srgb), MATERIAL_FEATURES_ALL);
+    CHECK(g.constantCount == 1);
+    CHECK_FALSE(g.isGeneric());
+    // Stripping constants (the compile fallback of the cache) yields the base generic pipeline.
+    CHECK(canonicalString(spec.generic()) == canonicalString(genericDesc(rg::Format::BGRA8Srgb)));
+}
+
+TEST_CASE("exact-all test mode maps base resolve kernels only when on (F15 closure round 4)") {
+    PipelineDesc d;
+    d.functions = {"visibility_resolve", "", ""};
+    CHECK(inExactModuleIfAllScenes(d).functions[0] == "visibility_resolve"); // default: byte-identical
+    setExactModuleAllScenes(true);
+    CHECK(inExactModuleIfAllScenes(d).functions[0] == "phx_exact::visibility_resolve");
+    d.functions[0] = "visibility_clear";
+    CHECK(inExactModuleIfAllScenes(d).functions[0] == "visibility_clear");
+    setExactModuleAllScenes(false);
+    CHECK_FALSE(exactModuleAllScenes());
+}

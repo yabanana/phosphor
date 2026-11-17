@@ -226,6 +226,20 @@ MeshData generateCube(float halfExtent) {
     return mesh;
 }
 
+MeshData generateCombedSphere(float radius, u32 slices, u32 stacks, const glm::vec3& comb, float handedness) {
+    MeshData mesh = generateSphere(radius, slices, stacks);
+    const glm::vec3 direction = glm::normalize(comb);
+    // Any direction not parallel to `comb` seeds the perpendicular at the poles of the field.
+    const glm::vec3 helper = std::abs(direction.y) < 0.9f ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+    for (size_t i = 0; i < mesh.normals.size(); ++i) {
+        const glm::vec3& n = mesh.normals[i];
+        glm::vec3 t = direction - glm::dot(direction, n) * n;
+        t = glm::length(t) > 1e-3f ? glm::normalize(t) : glm::normalize(glm::cross(n, helper));
+        mesh.tangents[i] = glm::vec4(t, handedness);
+    }
+    return mesh;
+}
+
 // ---------------------------------------------------------------------------
 // Plane: subdivided quad on XZ plane, Y=0, centered at origin.
 // Normal points up (+Y), tangent along +X.

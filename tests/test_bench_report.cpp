@@ -155,3 +155,15 @@ TEST_CASE("Native denoise request reports custom execution and unqualified domai
     CHECK(json["lighting"]["denoise_native_encoded_frames"]==0);
     CHECK(json["lighting"]["denoise_fallback"].get<std::string>().find("UnqualifiedRadiometricDomain")!=std::string::npos);
 }
+
+TEST_CASE("F15 bench report: schema 12 carries the materials support section only when present") {
+    CHECK(BENCH_REPORT_SCHEMA_VERSION == 12);
+    BenchReport report;
+    CHECK_FALSE(nlohmann::json::parse(reportToJson(report)).contains("materials"));
+    report.materialsJson = R"({"schema":"phosphor.materials.v2","count":2,"features":{"unsupported":1}})";
+    const auto document = nlohmann::json::parse(reportToJson(report));
+    CHECK(document.at("schema_version") == 12);
+    CHECK(document.at("materials").at("count") == 2);
+    CHECK(document.at("materials").at("features").at("unsupported") == 1);
+    CHECK(document.contains("frame_ms")); // existing fields stay
+}

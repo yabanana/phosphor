@@ -3,6 +3,7 @@
 #define PHOSPHOR_RT_NO_ALPHA_FUNCTION 1
 #include "rt_common.h"
 #include "renderer/visibility_math.h"
+#include "shadow_receiver_own.h"
 using namespace metal;
 using namespace phosphor;
 static float4x4 guideMatrix(constant float* p) {
@@ -25,9 +26,13 @@ kernel void shadow_receiver_pack(constant GPUShadowParams& p [[buffer(1)]],
                                   texture2d<float,access::write> world [[texture(5)]],
                                   texture2d<float,access::write> normals [[texture(6)]],
                                   texture2d<uint,access::read> keys [[texture(10)]],
-                                  depth2d<float,access::read> depth [[texture(0)]], uint2 pixel [[thread_position_in_grid]]) {
+                                  depth2d<float,access::read> depth [[texture(0)]],
+                                  const device GPUMaterial* materials [[buffer(16)]],const device RtTextureHandle* textures [[buffer(17)]],
+                                  const device GPUMaterialExtRecord* extensions [[buffer(22)]],
+                                  texture2d<float,access::write> receiverOwn [[texture(14)]], uint2 pixel [[thread_position_in_grid]]) {
     if (any(pixel >= uint2(p.width,p.height))) return;
     const uint4 key = keys.read(pixel); if (key.x == ~0u) return;
+    float3 own = float3(0);
     GPUShadowSurface s{};
     float3 point=0,normal=0;bool valid=key.x<p.slotCount;
     if(valid){const device GPUInstance& instance=instances[key.x];
@@ -51,7 +56,14 @@ kernel void shadow_receiver_pack(constant GPUShadowParams& p [[buffer(1)]],
                 if(valid){point=w0*bary.value[0]+w1*bary.value[1]+w2*bary.value[2];normal=normalize(crossNormal);
                     if(dot(normal,float3(p.cameraPosition[0],p.cameraPosition[1],p.cameraPosition[2])-point)<0)normal=-normal;
                     s.viewDepth=-(guideMatrix(p.view)*float4(point,1)).z;s.reverseDepth=z;
-                    valid=all(isfinite(point))&&all(isfinite(normal))&&isfinite(s.viewDepth)&&s.viewDepth>0;}
+                    valid=all(isfinite(point))&&all(isfinite(normal))&&isfinite(s.viewDepth)&&s.viewDepth>0;
+                    if(valid&&(p.flags&SHADOW_FLAG_TRANSMITTANCE_MAP)){ // F15 closure (ticket 15): the receiver's own surface in the map
+                        const float2 uv=float2(vertices[mesh.vertexOffset+indices[base]].u,vertices[mesh.vertexOffset+indices[base]].v)*bary.value[0]+
+                            float2(vertices[mesh.vertexOffset+indices[base+1u]].u,vertices[mesh.vertexOffset+indices[base+1u]].v)*bary.value[1]+
+                            float2(vertices[mesh.vertexOffset+indices[base+2u]].u,vertices[mesh.vertexOffset+indices[base+2u]].v)*bary.value[2];
+                        const float3 outward=normalize(crossNormal)*((instance.flags&INSTANCE_FLAG_MIRRORED)?-1.0f:1.0f);
+                        own=shadowReceiverOwnLn(materials,instance.materialIndex,p.materialCount,textures,extensions,uv,outward,
+                            normalize(float3(p.lightDirection[0],p.lightDirection[1],p.lightDirection[2])));}}
             }
         }
     }
@@ -61,6 +73,7 @@ kernel void shadow_receiver_pack(constant GPUShadowParams& p [[buffer(1)]],
     surfaces[pixel.y*p.width+pixel.x]=s;
     // Publish the canonical guides to DI/F13 and captures as well as F10.
     world.write(float4(point,float(s.valid)),pixel);normals.write(float4(normal,float(s.valid)),pixel);
+    if(p.flags&SHADOW_FLAG_TRANSMITTANCE_MAP)receiverOwn.write(float4(own,0.0f),pixel);
 }
 kernel void lighting_zero(texture2d<float,access::write> output [[texture(0)]], uint2 p [[thread_position_in_grid]]) {
     if(all(p<uint2(output.get_width(),output.get_height())))output.write(float4(0),p);
@@ -70,7 +83,9 @@ kernel void di_receiver_pack(constant FrameConstants& frame [[buffer(0)]],consta
     device GPUDISurface* surfaces [[buffer(2)]],texture2d<float,access::read> world [[texture(5)]],
     texture2d<float,access::read> geometric [[texture(6)]],texture2d<uint,access::read> keys [[texture(10)]],
     texture2d<float,access::read> shading [[texture(11)]],texture2d<float,access::read> albedo [[texture(12)]],texture2d<float,access::read> occlusion [[texture(13)]],
-    texture2d<uint,access::read> emission [[texture(14)]],uint2 pixel [[thread_position_in_grid]]) {
+    texture2d<uint,access::read> emission [[texture(14)]],
+    device GPULobeGuide* lobeGuide [[buffer(3)]], // F15.1: used only when DI_LOBE_GUIDE_BOUND
+    uint2 pixel [[thread_position_in_grid]]) {
     if(any(pixel>=uint2(p.width,p.height)))return;const uint4 key=keys.read(pixel);if(key.x==~0u)return;
     const float4 pos=world.read(pixel),g=geometric.read(pixel),s=shading.read(pixel),a=albedo.read(pixel);
     if(dot(s.xyz,s.xyz)<=0)return;
@@ -80,6 +95,8 @@ kernel void di_receiver_pack(constant FrameConstants& frame [[buffer(0)]],consta
     out.materialRevision=p.historyEpoch;out.instanceSlot=key.x;out.instanceGeneration=key.y;out.pad[0]=as_type<uint>(occlusion.read(pixel).x);out.valid=pos.w>0 && g.w>0 && dot(s.xyz,s.xyz)>0;
     out.pad[1]=emission.read(pixel).x; // F13.1: resolve emission (GPUDISurface::pad[1])
     surfaces[pixel.y*p.width+pixel.x]=out;
+    // F15.1: a receiver the DI surface rejects must not keep the record its fragment wrote.
+    if(!out.valid && (p.flags&DI_LOBE_GUIDE_BOUND))lobeGuide[pixel.y*p.width+pixel.x]=GPULobeGuide{};
 }
 
 // Independent F12 comparison signal before the engine's artistic AO/specular

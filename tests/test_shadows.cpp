@@ -5,6 +5,8 @@
 #include "renderer/gpu_scene.h"
 #include "renderer/visibility_math.h"
 #include <cmath>
+#include <cstring>
+#include <cstddef>
 #include <limits>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -39,6 +41,25 @@ GPUShadowHistory historyOf(const GPUShadowParams& p,const GPUShadowSurface& s) {
     return h;
 }
 }
+TEST_CASE("F15 ticket 24: the scalar shadow history is the 64-byte prefix of the RGB record and matches like it") {
+    static_assert(sizeof(GPUShadowHistoryScalar) == 64 && sizeof(GPUShadowHistory) == 80);
+    CHECK(offsetof(GPUShadowHistoryScalar, position) == offsetof(GPUShadowHistory, position));
+    CHECK(offsetof(GPUShadowHistoryScalar, visibility) == offsetof(GPUShadowHistory, visibility));
+    CHECK(offsetof(GPUShadowHistoryScalar, geometricNormal) == offsetof(GPUShadowHistory, geometricNormal));
+    CHECK(offsetof(GPUShadowHistoryScalar, secondMoment) == offsetof(GPUShadowHistory, secondMoment));
+    CHECK(offsetof(GPUShadowHistoryScalar, slot) == offsetof(GPUShadowHistory, slot));
+    CHECK(offsetof(GPUShadowHistoryScalar, valid) == offsetof(GPUShadowHistory, valid));
+    const GPUShadowParams p = historyParams();
+    const GPUShadowSurface s = historySurface();
+    GPUShadowHistory rgb = historyOf(p, s);
+    GPUShadowHistoryScalar scalar{};
+    std::memcpy(&scalar, &rgb, sizeof(scalar));
+    CHECK(shadowHistoryMatches(p, s, rgb));
+    CHECK(shadowHistoryMatches(p, s, scalar) == shadowHistoryMatches(p, s, rgb));
+    rgb.generation ^= 1u; std::memcpy(&scalar, &rgb, sizeof(scalar));
+    CHECK(!shadowHistoryMatches(p, s, scalar));
+}
+
 TEST_CASE("F10 shadow settings are opt-in and reject nonfinite or unbounded work") {
     ShadowSettings s;
     CHECK(s.mode==ShadowTechnique::Off); CHECK_FALSE(s.contact); CHECK_FALSE(s.staticCache);
@@ -285,4 +306,116 @@ TEST_CASE("F10 indexed and meshlet receivers decode the same world triangle and 
             }
         }
     }
+}
+
+// F15.1 (ticket 15): the single-layer transmittance map of a CSM cascade (renderer/shadow_math.h, shared with MSL).
+#include "renderer/transmission_math.h"
+TEST_CASE("CSM transmittance map: which casters leave the opaque depth maps") {
+    const u32 transmissive = MATERIAL_FEATURE_TRANSMISSION << MATERIAL_FEATURE_SHIFT;
+    CHECK(shadowCasterTransmissive(transmissive, 0u, 0.0f));
+    CHECK(shadowCasterTransmissive(transmissive | (MATERIAL_FEATURE_VOLUME << MATERIAL_FEATURE_SHIFT), 4u, 0.0f));
+    CHECK_FALSE(shadowCasterTransmissive(0u, 0u, 0.0f));                                  // opaque
+    CHECK_FALSE(shadowCasterTransmissive(MATERIAL_FEATURE_VOLUME << MATERIAL_FEATURE_SHIFT, 0u, 0.0f)); // volume without transmission
+    CHECK_FALSE(shadowCasterTransmissive(transmissive, MATERIAL_EXTENSION_INVALID, 0.0f)); // no extension records: nothing to read
+    CHECK_FALSE(shadowCasterTransmissive(transmissive, 0u, 0.5f));                         // alpha-masked: an opaque-masked caster (as in RT)
+}
+
+TEST_CASE("CSM transmittance map: receiver behind the nearest transmissive depth") {
+    // Reverse-Z: larger = nearer the light.  0 = no transmissive caster in the texel.
+    CHECK_FALSE(shadowTransmittanceBehind(0.2f, 0.0f, 0.001f));
+    CHECK(shadowTransmittanceBehind(0.2f, 0.5f, 0.001f));
+    CHECK_FALSE(shadowTransmittanceBehind(0.7f, 0.5f, 0.001f));   // in front of the glass
+    CHECK_FALSE(shadowTransmittanceBehind(0.4995f, 0.5f, 0.001f)); // on the glass surface itself: the bias keeps it lit
+    CHECK(shadowTransmittanceBehind(0.4985f, 0.5f, 0.001f));
+    // A medium cannot amplify: positive sums clamp to transmittance 1.
+    CHECK(shadowTransmittanceOfLn(0.7f) == 1.0f);
+    CHECK(shadowTransmittanceOfLn(0.0f) == 1.0f);
+    CHECK(shadowTransmittanceOfLn(std::log(0.25f)) == doctest::Approx(0.25f).epsilon(1e-6));
+}
+
+TEST_CASE("CSM transmittance map: facing of a fragment and the cascade distance origin") {
+    // Entry = the surface faces away from the light (a back face in the light's view).  The rasteriser's clockwise winding reports
+    // front_facing for such a face on an unmirrored instance; a mirrored instance reverses the world winding.
+    CHECK(shadowTransmitEntry(true, false));
+    CHECK_FALSE(shadowTransmitEntry(false, false));
+    CHECK_FALSE(shadowTransmitEntry(true, true));
+    CHECK(shadowTransmitEntry(false, true));
+    CHECK(shadowTransmitDistance(0.0f, 80.0f) == 0.0f);   // the far plane of the cascade is the origin
+    CHECK(shadowTransmitDistance(1.0f, 80.0f) == 80.0f);  // grows towards the light, like the distance of a ray from a receiver below
+}
+
+// A closed absorbing slab seen by the pass as two fragments (entry below, exit above in the light direction): the ln sums of the fragments are
+// the ray-traced sums, and the common distance origin cancels so a cascade that is deeper or shallower than the slab gives the same T.
+TEST_CASE("CSM transmittance map: the summed ln of a closed slab is independent of the cascade depth origin") {
+    const float ior = 1.5f, cosine = std::cos(20.0f * float(M_PI) / 180.0f), thickness = 0.12f;
+    const float attenuation[3] = {0.45f, 0.75f, 0.9f}, attenuationDistance = 0.3f;
+    for (float range : {5.0f, 80.0f, 400.0f}) {
+        // The slab bottom (entry, met first by a ray from below) at distance a, the top (exit) at a + thickness from the cascade far plane.
+        const float a = 0.3f * range, tEntry = a, tExit = a + thickness;
+        const TransmissionShadowLn entry = transmissionShadowSurfaceLn(cosine, true, true, ior, 1.0f, 1.0f, 1.0f, 1.0f,
+                                                                       attenuation[0], attenuation[1], attenuation[2], attenuationDistance, tEntry);
+        const TransmissionShadowLn exit = transmissionShadowSurfaceLn(cosine, false, true, ior, 1.0f, 1.0f, 1.0f, 1.0f,
+                                                                      attenuation[0], attenuation[1], attenuation[2], attenuationDistance, tExit);
+        const double fresnel = double(transmissionShadowLnPass(cosine, ior));
+        for (int k = 0; k < 3; ++k) {
+            const double sum = double(k == 0 ? entry.r : k == 1 ? entry.g : entry.b) + double(k == 0 ? exit.r : k == 1 ? exit.g : exit.b);
+            const double expected = 2.0 * fresnel - double(transmissionShadowSigma(attenuation[k], attenuationDistance)) * thickness;
+            CHECK(sum == doctest::Approx(expected).epsilon(1e-3).scale(1.0));
+        }
+    }
+}
+
+TEST_CASE("CSM transmittance map: the entry factor and tint apply once; a thin-walled surface is its own entry") {
+    const float ior = 1.5f, cosine = 1.0f;
+    const TransmissionShadowLn thin = transmissionShadowSurfaceLn(cosine, false, false, ior, 0.8f, 0.4f, 0.9f, 0.45f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f);
+    const double pass = 0.96;
+    CHECK(std::exp(thin.r) == doctest::Approx(pass * 0.8 * 0.4).epsilon(1e-5));
+    CHECK(std::exp(thin.g) == doctest::Approx(pass * 0.8 * 0.9).epsilon(1e-5));
+    CHECK(std::exp(thin.b) == doctest::Approx(pass * 0.8 * 0.45).epsilon(1e-5));
+    // A solid's exit carries only the Fresnel pass and the medium term (no factor, no tint): the entry carries them.
+    const TransmissionShadowLn solidExit = transmissionShadowSurfaceLn(cosine, false, true, ior, 0.8f, 0.4f, 0.9f, 0.45f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f);
+    CHECK(std::exp(solidExit.r) == doctest::Approx(pass).epsilon(1e-5));
+    const TransmissionShadowLn solidEntry = transmissionShadowSurfaceLn(cosine, true, true, ior, 0.8f, 0.4f, 0.9f, 0.45f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f);
+    CHECK(std::exp(solidEntry.r) == doctest::Approx(pass * 0.8 * 0.4).epsilon(1e-5));
+    // Metallic 1 (factor 0) floors at ln(1e-30): finite, T = 0 (the factor path of the ray-traced any-hit).
+    const TransmissionShadowLn metal = transmissionShadowSurfaceLn(cosine, false, false, ior, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f);
+    CHECK(std::isfinite(metal.r));
+    CHECK(std::exp(metal.r) < 1e-29);
+}
+
+// F15.1 (ticket 14 closure): a segment that ENDS inside a closed volume.  The signed sum alone keeps +sigma_t t_entry (the exit term is missing);
+// the open sigma restores the medium length endDistance - t_entry.
+TEST_CASE("RT transmittance: a segment that ends inside a closed volume is attenuated over the open length") {
+    const float ior = 1.5f, cosine = 0.8f, attenuation[3] = {0.6f, 0.8f, 0.95f}, attenuationDistance = 0.3f;
+    const float tEntry = 0.4f, endDistance = 0.65f;
+    const TransmissionShadowLn entry = transmissionShadowSurfaceLn(cosine, true, true, ior, 1.0f, 1.0f, 1.0f, 1.0f,
+                                                                   attenuation[0], attenuation[1], attenuation[2], attenuationDistance, tEntry);
+    const TransmissionShadowOpen open = transmissionShadowSurfaceOpen(true, true, attenuation[0], attenuation[1], attenuation[2], attenuationDistance);
+    const double fresnel = double(transmissionShadowLnPass(cosine, ior));
+    const float ln[3] = {entry.r, entry.g, entry.b}, o[3] = {open.r, open.g, open.b};
+    for (int k = 0; k < 3; ++k) {
+        const double sigma = double(transmissionShadowSigma(attenuation[k], attenuationDistance));
+        CHECK(double(o[k]) == doctest::Approx(sigma).epsilon(1e-6));
+        // Without the correction the entry term is positive (the pre-closure clamp T <= 1 hid the medium).
+        CHECK(double(ln[k]) == doctest::Approx(fresnel + sigma * tEntry).epsilon(1e-4));
+        const double corrected = double(ln[k]) + double(transmissionShadowOpenLn(o[k], endDistance));
+        CHECK(corrected == doctest::Approx(fresnel - sigma * (endDistance - tEntry)).epsilon(1e-4));
+    }
+    // A closed pair cancels (net open 0: no correction); a segment that STARTS inside a medium has a negative net (nothing to add).
+    const TransmissionShadowOpen exit = transmissionShadowSurfaceOpen(false, true, attenuation[0], attenuation[1], attenuation[2], attenuationDistance);
+    CHECK(open.r + exit.r == 0.0f);
+    CHECK(transmissionShadowOpenLn(exit.r, endDistance) == 0.0f);
+    // A thin-walled or non-solid surface opens nothing; no attenuation (distance infinite) opens nothing.
+    const TransmissionShadowOpen thin = transmissionShadowSurfaceOpen(true, false, attenuation[0], attenuation[1], attenuation[2], attenuationDistance);
+    CHECK((thin.r == 0.0f && thin.g == 0.0f && thin.b == 0.0f));
+    const TransmissionShadowOpen clear = transmissionShadowSurfaceOpen(true, true, attenuation[0], attenuation[1], attenuation[2], 1.0e39f);
+    CHECK((clear.r == 0.0f && clear.g == 0.0f && clear.b == 0.0f));
+}
+
+TEST_CASE("CSM transmittance map: the divisor is 1, 2 or 4 and keeps a usable map") {
+    ShadowSettings settings;
+    for (u32 n : {1u, 2u, 4u}) { settings.transmittanceDivisor = n; CHECK_NOTHROW(validateShadowSettings(settings)); }
+    settings.transmittanceDivisor = 3; CHECK_THROWS(validateShadowSettings(settings));
+    settings.transmittanceDivisor = 0; CHECK_THROWS(validateShadowSettings(settings));
+    settings.transmittanceDivisor = 4; settings.mapResolution = 32; CHECK_THROWS(validateShadowSettings(settings)); // 8 texels
 }

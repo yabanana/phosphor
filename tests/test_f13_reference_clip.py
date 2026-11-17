@@ -98,5 +98,103 @@ class ResumeIdentity(unittest.TestCase):
             self.assertFalse(clip.reusable(report, self.config(), True))
 
 
+class DifferenceEstimator(unittest.TestCase):
+    """The correction new = old + (render_new - render_old) with shared seed streams (synthetic renderer, no Mitsuba)."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import numpy
+        except ImportError:
+            raise unittest.SkipTest("numpy not installed")
+        cls.np = numpy
+
+    def fake(self, effect, noise=0.5):
+        np = self.np
+
+        class Context:
+            def __init__(inner, shift_effect):
+                inner.np, inner.width, inner.height, inner.effect = np, 6, 4, shift_effect
+
+            def render_pass(inner, seed, spp):
+                rng = np.random.default_rng(seed)  # the noise is a function of the stream seed only
+                return spp * (1.0 + inner.effect + noise * rng.standard_normal((4, 6, 3)) / np.sqrt(spp))
+        return Context(0.0), Context(effect)
+
+    def test_exact_difference_with_shared_streams(self):
+        np = self.np
+        off, on = self.fake(0.25)
+        a = clip.accumulate(off, 64, 32)
+        b = clip.accumulate(on, 64, 32)
+        old = np.full((4, 6, 3), 3.0)
+        image, differences = clip.combine(np, old, a, b)
+        np.testing.assert_allclose(image, old + 0.25, atol=1e-12)
+        for d in differences:
+            np.testing.assert_allclose(d, 0.25, atol=1e-12)
+        area = (slice(0, 4), slice(0, 6))
+        stats = clip.difference_statistics(np, old, differences, area)
+        self.assertAlmostEqual(stats["mean_difference"], 0.25, places=12)
+        self.assertAlmostEqual(stats["relative_mean_effect"], 0.25 / 3.0, places=12)
+        self.assertLess(stats["difference_noise_rms"], 1e-12)
+
+    def test_streams_match_converge_and_shift_decorrelates(self):
+        np = self.np
+        self.assertEqual(clip.seed_stream(1234, 0), (1234 * 1000003) & 0x7FFFFFFF)
+        self.assertEqual(clip.seed_stream(5678, 64), (5678 * 1000003 + 64) & 0x7FFFFFFF)
+        self.assertNotEqual(clip.seed_stream(1234, 32, 7919), clip.seed_stream(1234, 32))
+        off, on = self.fake(0.25)
+        a = clip.accumulate(off, 64, 32)
+        correlated = clip.accumulate(on, 64, 32)
+        shifted = clip.accumulate(on, 64, 32, shift=7919)  # negative control: uncorrelated streams
+        old = np.ones((4, 6, 3))
+        area = (slice(0, 4), slice(0, 6))
+        good = clip.difference_statistics(np, old, clip.combine(np, old, a, correlated)[1], area)
+        bad = clip.difference_statistics(np, old, clip.combine(np, old, a, shifted)[1], area)
+        self.assertLess(good["difference_noise_rms"], 1e-12)
+        self.assertGreater(bad["difference_noise_rms"], 1e-2)
+        self.assertGreater(bad["noise_over_effect"], 10 * max(good["noise_over_effect"], 1e-3))
+
+    def test_accumulator_continues_the_same_streams(self):
+        np = self.np
+        _, on = self.fake(0.25)
+        one = clip.accumulate(on, 96, 32)
+        accumulator = clip.Accumulator(on, 32)
+        accumulator.extend(32)
+        accumulator.extend(96)
+        for a, b in zip(one, accumulator.means()):
+            np.testing.assert_allclose(a, b, atol=1e-12)
+
+    def test_adaptive_difference_stops_at_the_first_quiet_checkpoint(self):
+        import argparse
+        np = self.np
+        off, on = self.fake(0.25)
+        slices = {"frame": (slice(0, 4), slice(0, 6))}
+        args = argparse.Namespace(spp=[32, 64, 128], spp_per_pass=32, max_noise_ratio=0.15)
+        _, _, spp, noise = clip.adaptive_difference([(False, off), (True, on)], args, np.ones((4, 6, 3)), slices, {"frame": 0.01})
+        self.assertEqual(spp, 32)  # shared streams: the difference is exact at once
+        self.assertLess(noise["frame"], 1e-12)
+        on.effect = 0.0
+        # Decorrelate by hand: a context whose noise ignores the stream shift would never quiet down; the loop must run to the last checkpoint.
+        numpy = np
+
+        class Loud:
+            np, width, height, calls = numpy, 6, 4, 0
+            def render_pass(inner, seed, spp):
+                inner.calls += 1
+                return spp * np.random.default_rng(seed + 7 * inner.calls).standard_normal((4, 6, 3))
+        _, _, spp, noise = clip.adaptive_difference([(False, off), (True, Loud())], args, np.ones((4, 6, 3)), slices, {"frame": 0.01})
+        self.assertEqual(spp, 128)
+        self.assertGreater(noise["frame"], 0.0015)
+
+    def test_pfm_round_trip_keeps_row_order(self):
+        import tempfile
+        np = self.np
+        image = np.arange(4 * 6 * 3, dtype=np.float64).reshape(4, 6, 3)
+        with tempfile.TemporaryDirectory() as folder:
+            path = pathlib.Path(folder) / "a.pfm"
+            clip.write_pfm(path, image)
+            np.testing.assert_allclose(clip.read_pfm_array(path), image)
+
+
 if __name__ == "__main__":
     unittest.main()

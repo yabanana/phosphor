@@ -3,6 +3,7 @@
 #include "pipeline/pipeline_desc.h"
 #include "pipeline/pipeline_key.h"
 
+#include <atomic>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -83,6 +84,7 @@ struct PipelineStats {
     u32    swaps              = 0; // times an entry's served object changed
     u32    reloads            = 0; // generations committed after startup
     u32    reloadFailures     = 0; // generations abandoned
+    u32    compileRetries     = 0; // transient compiler-service interruptions retried (compile_retry.h)
 
     /// Share of final results NOT served by the archive:
     /// (misses + unavailable) / (hits + misses + unavailable); 0 with no results.
@@ -91,10 +93,12 @@ struct PipelineStats {
 
 /// "PIPELINES requests N | archive hits H, misses M, unavailable U (miss rate X%) |
 ///  compiler calls C (T ms, max X ms) | render-thread compiles R (T ms) |
-///  fallbacks F (draws D) | failures E | reloads L (failed K)"
+///  fallbacks F (draws D) | failures E | reloads L (failed K) | compile retries N"
 [[nodiscard]] std::string formatPipelineStats(const PipelineStats& stats);
 /// JSON object with every field (embedded in the benchmark report).
-[[nodiscard]] std::string pipelineStatsJson(const PipelineStats& stats);
+/// `atStart` (F15.2): the counters when the measured frames started; the JSON then also carries "measured" (the deltas since:
+/// requests, archiveMisses, compilerCalls, fallbackDraws, renderThreadCompiles), the budget numbers of warm runs.
+[[nodiscard]] std::string pipelineStatsJson(const PipelineStats& stats, const PipelineStats* atStart = nullptr);
 
 class PipelineRegistry {
 public:
@@ -137,7 +141,13 @@ public:
     void noteFallbackUse() { ++stats_.fallbackDraws; }
     void recordRenderThreadCompile(float ms);
 
-    [[nodiscard]] const PipelineStats& stats() const { return stats_; }
+    /// Count a retried transient compile failure (any compile thread).
+    void noteCompileRetry() { compileRetries_.fetch_add(1, std::memory_order_relaxed); }
+
+    [[nodiscard]] const PipelineStats& stats() const {
+        stats_.compileRetries = compileRetries_.load(std::memory_order_relaxed);
+        return stats_;
+    }
 
     // --- any thread ------------------------------------------------------------
     void post(const Completion& completion);
@@ -167,7 +177,8 @@ private:
     u32 pendingGeneration_ = 0;
     u32 lastIssued_        = 0;      // highest generation number handed out
     bool reloadFailed_     = false;
-    PipelineStats stats_;
+    mutable PipelineStats stats_; // stats() folds in compileRetries_
+    std::atomic<u32> compileRetries_{0};
 
     ReleaseFn releaseFn_  = nullptr;
     void*     releaseCtx_ = nullptr;

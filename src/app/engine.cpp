@@ -3,6 +3,7 @@
 #include <json.hpp>
 #include "app/engine.h"
 #include "testbench/reflection_validation.h"
+#include "testbench/material_validation.h"
 #include <glm/gtc/type_ptr.hpp>
 #include "platform/metal/temporal_worker.h"
 
@@ -53,6 +54,7 @@
 #include "renderer/gpu_scene.h"
 #include "renderer/scene_check.h"
 #include "renderer/scene_store.h"
+#include "renderer/material_class_export.h"
 #include "renderer/transform_math.h"
 #include "rendergraph/graph_dump.h"
 #include "rendergraph/optimizer/plan.h"
@@ -93,7 +95,12 @@ namespace {
 // infinite environment; every other scene is black outside its geometry.
 GiEnvironment declaredEnvironment(const AtmospherePasses* atmosphere,const LaunchOptions& options){
     if(atmosphere)return atmosphere->environment();
-    GiEnvironment e{};if(options.reflectionScene=="specular-environment")e.skyRadiance={.03f,.035f,.045f};return e;
+    GiEnvironment e{};if(options.reflectionScene=="specular-environment")e.skyRadiance={.03f,.035f,.045f};
+    // F15.3: material-validation scenarios declare one constant isotropic environment.
+    if(!options.materialScene.empty()){const float L=MaterialValidation::environmentRadiance(options.materialScene);e.skyRadiance={L,L,L};}
+    // F15.3 (ticket 22): the Khronos corpus rig declares one constant isotropic environment (testbench/corpus_rig.h).
+    if(options.corpusRig){const float L=CorpusRig::environmentRadiance;e.skyRadiance={L,L,L};}
+    return e;
 }
 }
 
@@ -217,6 +224,10 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     pipelineOptions.sync           = options_.pipelineSync;
     pipelineOptions.interactiveQos = options_.compileQosInteractive;
     pipelineOptions.fallbackOnly   = options_.debugFlexiblePipelines;
+    pipelineOptions.debugXpcFail   = options_.debugPipelineXpcFail;
+    pipelineOptions.specularMs     = options_.specularMs;
+    pipe::forward::setExactMaterialModule(!options_.debugMaterialModuleFast);
+    pipe::forward::setExactModuleAllScenes(options_.debugMaterialModuleAll);
     pipelines_     = std::make_unique<PipelineCache>(*context_, pipelineOptions);
     renderer_      = std::make_unique<SceneRenderer>(*context_, *pipelines_, options_.pipelineSalt,
                                                      /*genericOnly*/ options_.debugPipelineFallback,
@@ -259,6 +270,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
                                                            options_.materialBinning, options_.debugVisibility,
                                                            options_.tileResolve, options_.adaptiveShading,
                                                            options_.shadows != ShadowMode::Off || options_.directLighting != DirectLightingMode::Legacy || options_.gi != GiMode::Off || options_.reflections!=ReflectionMode::Off || options_.ao!=AoMode::Off || options_.lightingDenoise!=LightingDenoiseMode::Off || options_.atmosphere || options_.fog || options_.clouds);
+    if (visibility_) visibility_->setFeatureDebug(options_.resolveFeaturesAll, options_.debugClassDropLobes, options_.debugClassBudget);
     if (options_.post) {
         PostProcessor::Options po;
         po.physicalFloat32=options_.shadows!=ShadowMode::Off || options_.directLighting!=DirectLightingMode::Legacy || options_.gi!=GiMode::Off || options_.atmosphere || options_.fog || options_.clouds || options_.reflections!=ReflectionMode::Off || options_.ao!=AoMode::Off || options_.lightingDenoise!=LightingDenoiseMode::Off || !options_.denoisedFixture.empty();
@@ -333,6 +345,17 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
             rtVisibility_ = std::make_unique<RtVisibilityChecker>(*context_, *pipelines_, *renderer_, *mesh_, *rt_);
         rtCheckRays_.reserve(512);
         rtCheckHits_.reserve(512);
+        if (visibility_ && options_.subsurfaceMode == LaunchOptions::SubsurfaceMode::RtWalk) {
+            // F15.1 (ticket 17/18): the optional RT tier of the volumetric subsurface.  The lights are occluded at the exits of the walk when
+            // shadows are on; the direct-lighting path owns the local lights then (the walk lights the directional ones only).
+            u32 flags = 0;
+            if (options_.subsurfaceWalkShadows == 1 || (options_.subsurfaceWalkShadows < 0 && options_.shadows != ShadowMode::Off)) flags |= SSS_WALK_SHADOW_RAYS;
+            if (!options_.debugSubsurfaceWalkLights) flags |= SSS_WALK_NO_LIGHTS;
+            visibility_->setSubsurfaceWalk(rt_.get(), options_.subsurfaceSamples, options_.subsurfaceSteps, flags);
+            visibility_->setSubsurfaceAccumulation(options_.subsurfaceAccumulate, 4u, options_.subsurfaceHistory, options_.debugSubsurfaceHistoryNoReject, options_.lightingSeed);
+            LOG_INFO("Subsurface: RT random walk tier (%u walks per pixel, <= %u events, %s shadow rays); the screen-space diffusion serves until the scene's acceleration structures exist",
+                     options_.subsurfaceSamples, options_.subsurfaceSteps, (flags & SSS_WALK_SHADOW_RAYS) ? "with" : "without");
+        }
         rtTlasTimes_.reserve(options_.frames);
         rtProbeTimes_.reserve(options_.frames);
         rtProbeNs_.reserve(options_.frames);
@@ -369,7 +392,7 @@ Engine::Engine(int argc, char* argv[]) : launch_(Clock::now()) {
     if(!options_.exportReference.empty())referenceSnapshot_=std::make_unique<ReferenceSnapshot>(*context_,*renderer_,options_.exportReference,options_.exportReferenceFrame,rt_.get());
     if(!options_.captureLinear.empty()||!options_.captureLinearSequence.empty()) {
         LinearCapture::Config capture;capture.path=options_.captureLinear;capture.sequence=options_.captureLinearSequence;
-        capture.frame=options_.captureLinearFrame;capture.every=options_.captureEvery;capture.scalar=options_.captureLinearSignal==3||options_.captureLinearSignal==7||options_.captureLinearSignal==9;
+        capture.frame=options_.captureLinearFrame;capture.every=options_.captureEvery;capture.accumulate=options_.captureLinearAccumulate;capture.scalar=options_.captureLinearSignal==3||options_.captureLinearSignal==7||options_.captureLinearSignal==9||options_.captureLinearSignal==12;
         // Denoise history checkpoints exist only where the independent checks
         // are encoded (--debug-lighting, always passed by the F13/F14 runner);
         // product captures carry no history metadata.
@@ -560,6 +583,7 @@ void Engine::run() {
             meshletSamples_.reserve(options_.frames);
             allocationsAtStart_ = context_->memory().allocationCount() + TemporalWorker::totalGpuAllocations();
             commandRebuildsAtStart_ = context_->commandBufferRebuilds();
+        pipelineStatsAtStart_ = pipelines_->stats();
             heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
         }
     }
@@ -740,6 +764,7 @@ void Engine::recordBenchmarkFrame(float dt, float cpuMs, float waitMs) {
         trace_.reserve(options_.frames, options_.frames / std::max(options_.switchEvery, 1u) + 2);
         allocationsAtStart_ = context_->memory().allocationCount() + TemporalWorker::totalGpuAllocations();
         commandRebuildsAtStart_ = context_->commandBufferRebuilds();
+        pipelineStatsAtStart_ = pipelines_->stats();
         heapUsage(heapBlocksAtStart_, heapBytesAtStart_);
     } else if (presentedFrames_ > options_.warmup) {
         FrameRecord record;
@@ -812,8 +837,29 @@ void Engine::finishBenchmark() {
     report.cpuHeapBlocksDelta = static_cast<i64>(heapBlocks) - static_cast<i64>(heapBlocksAtStart_);
     report.cpuHeapBytesDelta  = static_cast<i64>(heapBytes) - static_cast<i64>(heapBytesAtStart_);
     summarizeSamples(samples_, report);
-    report.pipelinesJson = pipe::pipelineStatsJson(pipelines_->stats());
+    report.pipelinesJson = pipe::pipelineStatsJson(pipelines_->stats(), &pipelineStatsAtStart_);
+    // F15.3: support report of the loaded glTF materials (omitted for procedural scenes).
+    for (const auto& materialSupport : gpuScene_->materialSupport()) {
+        if (!materialSupport.valid()) continue;
+        report.materialsJson = supportToJson(gpuScene_->materialSupport(), gpuScene_->assetUnknownExtensions());
+        break;
+    }
     if(denoisedFixture_)report.denoisedFixtureJson=denoisedFixture_->reportJSON();
+    if (visibility_ && (visibility_->subsurfaceKey() != 0u || options_.subsurfaceMode != LaunchOptions::SubsurfaceMode::Diffusion)) {
+        // F15.1 (ticket 17/18): which technique rendered the volumetric subsurface (and why not the requested one).
+        const bool wantWalk = options_.subsurfaceMode == LaunchOptions::SubsurfaceMode::RtWalk;
+        const u32 key = visibility_->subsurfaceKey();
+        const char* effective = key == 2u ? "rt-walk" : key == 1u ? "diffusion" : "none";
+        const char* reason = "";
+        if (wantWalk && key != 2u) reason = !rt_ ? "--rt off: the walk needs the acceleration structures" : key == 0u ? "no volumetric subsurface in the scene" : "acceleration structures or the walk kernel not ready";
+        report.subsurfaceJson = std::string("{\"requested\": \"") + (wantWalk ? "rt-walk" : "diffusion") + "\", \"effective\": \"" + effective +
+            "\", \"fallback_reason\": \"" + reason + "\", \"samples\": " + std::to_string(options_.subsurfaceSamples) +
+            ", \"max_steps\": " + std::to_string(options_.subsurfaceSteps) + ", \"force_family_apple9\": " + (options_.forceApple9 ? "true" : "false") +
+            (key == 2u ? ", \"approximations\": \"locally_homogeneous_medium_of_the_entry_texel;boundary_ior_1_5_fixed;albedo_table_roughness_0_15_to_0_7_and_g_0_to_0_3_clamped;"
+                         "normal_maps_at_the_entry_only;ambient_gi_and_di_composite_diffuse_not_walked;di_local_lights_walked_only_by_the_resolve_path;"
+                         "analytic_lights_next_event_estimated_at_exits;not_composed_with_other_diffuse_lobes;stochastic_converges_over_frames;"
+                         "walk_bounded_by_max_steps\"" : "") + "}";
+    }
     report.gpuTiming        = timestamps_ != nullptr && timestamps_->enabled();
     report.gpuTimingUnfused = options_.gpuTimingUnfused;
     report.graph            = graphReport_;
@@ -865,6 +911,7 @@ void Engine::finishBenchmark() {
         auto &r = report.rendering;
         r.present = true;
         r.offscreen = options_.offscreen;
+        r.specularMs = options_.specularMs;
         r.deviceAllocatedBytes = context_->device()->currentAllocatedSize();
         r.engineResourceBytes = context_->memory().totalBytes();
         r.commandBufferRebuilds = context_->commandBufferRebuilds();
@@ -879,6 +926,9 @@ void Engine::finishBenchmark() {
         if (visibility_) {
             r.binnedFrames = visibility_->binnedFrames();
             r.genericFrames = visibility_->genericFrames();
+            r.featureBinnedFrames = visibility_->featureBinnedFrames();
+            r.classBins = visibility_->classTable().count;
+            r.classOverflow = visibility_->classTable().overflowClasses;
             r.guideChecks = visibility_->checkCount();
             r.guideFailures = visibility_->checkFailures();
             const auto adaptive = visibility_->adaptiveStats();
@@ -1185,7 +1235,11 @@ void Engine::switchTestBench(TestBenchType type) {
     framesOnBench_ = 0;
     TestBenchParams benchParams;
     benchParams.scenePath = options_.scenePath;
-    benchParams.lightingScenario=options_.lightingScene;benchParams.reflectionScenario=options_.reflectionScene;
+    benchParams.corpusRig = {options_.corpusRig, options_.corpusYaw, options_.corpusPitch,
+                             static_cast<float>(std::max<u32>(context_->width(), 1)) / static_cast<float>(std::max<u32>(context_->height(), 1))};
+    benchParams.materialOverridesPath = options_.materialOverridesPath;
+    benchParams.terrainTexturesPath = options_.terrainTexturesPath;
+    benchParams.materialToggleEvery=options_.materialToggleEvery;benchParams.transmissionMotion=options_.transmissionMotion;benchParams.materialMotion=options_.materialMotion;benchParams.materialScenario=options_.materialScene;benchParams.lightingScenario=options_.lightingScene;benchParams.reflectionScenario=options_.reflectionScene;
     benchParams.instances         = options_.sceneInstances;
     benchParams.localLightCount=options_.localLightCount;benchParams.areaLights=options_.areaLights;benchParams.stationaryLights=options_.stationaryLights;
     benchParams.meshes            = options_.sceneMeshes;
@@ -1209,6 +1263,7 @@ void Engine::switchTestBench(TestBenchType type) {
     // F5.1: full build of the persistent scene, uploaded through staging.
     store_->clear();
     store_->sync(*ecs_, *gpuScene_);
+    gpuScene_->sealMaterialLibrary(); // later description edits reach the GPU through SceneStore deltas (F15.1)
     ecs_->endFrame();
     renderer_->loadScene(*store_);
     if (mesh_) mesh_->loadScene(*store_, *gpuScene_);
@@ -1601,6 +1656,8 @@ bool Engine::frame(float dt) {
     constants.debugMode  = static_cast<u32>(settings_.debugMode);
     constants.exposure = effectiveExposure;
     constants.frameIndex = static_cast<u32>(frame.index);
+    constants.dfgTable = renderer_->dfgTableAddress(); // F15 (FrameConstants::dfgTable)
+    constants.sheenTable = renderer_->sheenTableAddress(); // F15.1 ticket 10 (FrameConstants::sheenTable)
 
 
     // Capture the last frame of a run (or the first frame when interactive).
@@ -1629,7 +1686,9 @@ bool Engine::frame(float dt) {
     // before the graph so a recompilation sees the new capacities.
     const Clock::time_point s3 = Clock::now();
     const u64 sceneBytes = renderer_->prepareFrame(*store_, lights_, constants, textures_->tableAddress(), sceneParams);
+    constants.materialExtensions = renderer_->materialExtensionsAddress(); // F15.1: after the (re)allocation in prepareFrame
     const bool meshletCheckFrame = mesh_ && options_.debugMeshlets > 0 && (presentedFrames_ + 1) % options_.debugMeshlets == 0;
+    const bool lobeGuideCheckFrame = directLighting_ && options_.debugLobeGuide > 0 && (presentedFrames_ + 1) % options_.debugLobeGuide == 0;
     if (mesh_) {
         MeshRenderer::FrameParams mp;
         mp.slot   = frame.slot;
@@ -1657,6 +1716,38 @@ bool Engine::frame(float dt) {
         const GiEnvironment declared=declaredEnvironment(atmosphere_.get(),options_);
         visibility_->setBackground(reflections_&&reflections_->ready()?declared.skyRadiance:std::array<float,3>{0.02f,0.025f,0.035f});
     }
+    if (visibility_) {
+        // F15.1 (ticket 17): screen-space diffusion of volumetric subsurface: the diffuse term the resolve evaluates (analytic lights and the
+        // sun, plus the ambient where no external composite owns it) is diffused; DI/GI composite terms are not (declared).
+        const glm::mat4 projection = unjittered * glm::inverse(view);
+        visibility_->setSubsurface(true, camera_->getNear(), 1.0f / projection[0][0], 1.0f / projection[1][1]);
+    }
+    if (!options_.exportClassManifest.empty() && !classManifestExported_ && store_ && store_->instanceCount() > 0) {
+        // F15.2 (ticket 21): the feature-class manifest of the scene the app runs (one scene entry, family "app"); the generator takes it
+        // as one more `manifest` input of shaders/material_classes.def.
+        classManifestExported_ = true;
+        matclass::Manifest manifest;
+        manifest.source = std::string("phosphor --export-class-manifest (") + (activeBench_ ? activeBench_->getName() : "") + ")";
+        manifest.scenes.push_back(matclass::entryFromStore(std::string("app:") + (activeBench_ ? activeBench_->getName() : "scene"), "app", *store_));
+        std::ofstream out(options_.exportClassManifest, std::ios::binary | std::ios::trunc);
+        out << matclass::serialize(manifest);
+        out.flush();
+        if (out) LOG_INFO("Class manifest written to %s (%zu material classes)", options_.exportClassManifest.c_str(), manifest.scenes[0].classes.size());
+        else LOG_ERROR("Cannot write the class manifest %s", options_.exportClassManifest.c_str());
+    }
+    if (visibility_) {
+        // F15.1 (ticket 17/18): the accumulated walk depends on the lights; any change of their parameters starts a new history.
+        u64 signature = 1469598103934665603ull;
+        for (const GPULight& l : lights_) {
+            // the fields that define the light itself: not the shadow-map slot / padding, and not the position of a directional light (it follows the camera)
+            GPULight key{};
+            key.type = l.type; key.intensity = l.intensity; key.range = l.range; key.innerCone = l.innerCone; key.outerCone = l.outerCone;
+            for (int i = 0; i < 3; ++i) { key.direction[i] = l.direction[i]; key.color[i] = l.color[i]; key.position[i] = l.type == LIGHT_DIRECTIONAL ? 0.0f : l.position[i]; }
+            const auto* bytes = reinterpret_cast<const unsigned char*>(&key);
+            for (size_t i = 0; i < sizeof(GPULight); ++i) signature = (signature ^ bytes[i]) * 1099511628211ull;
+        }
+        visibility_->setSubsurfaceLightsSignature(signature);
+    }
     if (visibility_)
         visibility_->prepareFrame(
             frame.slot, renderWidth, renderHeight, renderBackingWidth_, renderBackingHeight_, *store_,
@@ -1683,6 +1774,7 @@ bool Engine::frame(float dt) {
         rp.constants = constants;
         rp.check = rtCheckFrame;
         rt_->prepareFrame(*store_, rp);
+        if (visibility_) visibility_->prepareSubsurfaceWalk(frame.slot);
         if (rtVisibility_ && rt_->active())
             rtVisibility_->prepareFrame(frame.slot, renderWidth, renderHeight, constants);
     }
@@ -1699,7 +1791,7 @@ bool Engine::frame(float dt) {
             measureFirstFrame_=frame.index;measureLastFrame_=frame.index+options_.frames-1;
             context_->beginGpuTimeCapture(options_.frames);sceneSamples_.reserve(options_.frames);meshletSamples_.reserve(options_.frames);
             allocationsAtStart_=context_->memory().allocationCount()+TemporalWorker::totalGpuAllocations();
-            commandRebuildsAtStart_=context_->commandBufferRebuilds();heapUsage(heapBlocksAtStart_,heapBytesAtStart_);
+            commandRebuildsAtStart_=context_->commandBufferRebuilds();pipelineStatsAtStart_=pipelines_->stats();heapUsage(heapBlocksAtStart_,heapBytesAtStart_);
             fixtureMeasurementStarted_=true;
         }
     }
@@ -1712,10 +1804,14 @@ bool Engine::frame(float dt) {
         sf.motionSinCos=motionSinCos_;sf.motionSinCosValid=true;
         sf.constants=constants;sf.nearPlane=camera_->getNear();std::memcpy(sf.unjitteredVP,&unjittered[0][0],64);
         shadows_->prepareFrame(*store_,lights_,sf);
-        if(directLighting_)directLighting_->prepareFrame(*gpuScene_,*store_,lights_,sf);
+        if(directLighting_){directLighting_->setSubsurfaceWalk(visibility_&&visibility_->subsurfaceWalkActive()&&!options_.debugSubsurfaceDiDiffuse);directLighting_->prepareFrame(*gpuScene_,*store_,lights_,sf);}
+        // F15 (F13.1 residue found in F15): the GI passes receive the declared environment in EVERY scene (the atmosphere's is set in the scene sync
+        // above; a corpus rig, material scenario or specular-environment fixture declares its own constant one).  Escaped probe / candidate rays
+        // return it (ownership rule: shaders/gi_common.h giEscapeRadiance); before, GI saw black outside the geometry unless an atmosphere ran.
+        if(gi_&&!atmosphere_)gi_->setEnvironment(declaredEnvironment(nullptr,options_));
         if(gi_)gi_->prepareFrame(*gpuScene_,*store_,lights_,sf);
         if(store_->stats().structure||store_->stats().fullInstances||store_->stats().fullNodes||!store_->instanceDeltas().empty()||!store_->nodeDeltas().empty()||!store_->motionSlots().empty()||!store_->dirtyRoots().empty())++surfaceGeometryEpoch_;
-        if(store_->stats().fullMaterials||!store_->materialDeltas().empty())++surfaceMaterialEpoch_;
+        if(store_->materialsChanged())++surfaceMaterialEpoch_;
         const GiEnvironment environment=declaredEnvironment(atmosphere_.get(),options_);
         const auto lightEpoch=surfaceLightingEpoch_.update(lights_,environment,directLighting_?directLighting_->lightRevision():0);
         const SurfaceSignal signal{sceneEpoch_,surfaceGeometryEpoch_,surfaceMaterialEpoch_,rt_?rt_->geometryRevision():gpuScene_->geometryVersion(),lightEpoch,pipelines_->generation()};
@@ -1729,10 +1825,13 @@ bool Engine::frame(float dt) {
             denoised_->prepareFrame(df);
         }
         const bool custom=options_.lightingDenoise==LightingDenoiseMode::Custom || (denoised_&&!denoised_->ready());
-        if(reflections_&&reflections_->ready()){reflections_->setEnvironment(environment.skyRadiance);reflections_->prepareFrame(*store_,sf,custom,surfaceSignalEpoch_);}
+        if(reflections_&&reflections_->ready()){reflections_->setEnvironment(environment.skyRadiance);reflections_->setSubsurfaceWalk(visibility_&&visibility_->subsurfaceWalkActive());reflections_->prepareFrame(*store_,sf,custom,surfaceSignalEpoch_);}
         if(atmosphere_)atmosphere_->prepareFrame(sf,surfaceGeometryEpoch_,surfaceMaterialEpoch_);
-        const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u) |
-                        (options_.reflections!=ReflectionMode::Off && reflections_&&reflections_->ready()?8u:0u) | (reflections_&&reflections_->ready()?16u|RESOLVE_EXTERNAL_DIFFUSE:0u);
+        const u32 flags=(options_.shadows!=ShadowMode::Off?1u:0u) | (options_.directLighting!=DirectLightingMode::Legacy?2u:0u) | (options_.gi!=GiMode::Off?4u:0u) | (gi_&&gi_->backAvailable()?RESOLVE_GI_BACK:0u) |
+                        (options_.reflections!=ReflectionMode::Off && reflections_&&reflections_->ready()?8u:0u) | (reflections_&&reflections_->ready()?16u|RESOLVE_EXTERNAL_DIFFUSE:0u) |
+                        // F15.3: a material scenario without the reflection composite has the
+                        // resolve evaluate its declared environment (deterministic furnace).
+                        ((!options_.materialScene.empty()||options_.corpusRig) && !(reflections_&&reflections_->ready()) && !options_.legacyEnvironment?16u:0u); // F15.3: --legacy-environment keeps the resolve on the hemisphere
         visibility_->prepareLighting(flags,shadows_->sunIndex(),environment.skyRadiance,environment.sunAngularRadius);
     }
     if(referenceSnapshot_) {
@@ -1741,7 +1840,9 @@ bool Engine::frame(float dt) {
         std::memcpy(camera.direction,glm::value_ptr(front),12);std::memcpy(camera.up,glm::value_ptr(up),12);camera.width=renderWidth;camera.height=renderHeight;
         camera.fovYRadians=camera_->getFovY();camera.nearPlane=camera_->getNear();camera.farPlane=0;
         camera.jitterPixels[0]=temporal.jitter[0];camera.jitterPixels[1]=temporal.jitter[1];
-        const GiEnvironment environment=atmosphere_?atmosphere_->environment():GiEnvironment{};
+        // The snapshot carries the scene's declared environment (F15.3: the material scenarios
+        // declare theirs, which the reference needs); without a fixture it is unchanged.
+        const GiEnvironment environment=(atmosphere_||!options_.materialScene.empty()||options_.corpusRig)?declaredEnvironment(atmosphere_.get(),options_):GiEnvironment{};
         referenceSnapshot_->prepareFrame(ref,camera,lights_,environment,*store_,directLighting_.get());
     }
     if(linearCapture_) {
@@ -1801,7 +1902,7 @@ bool Engine::frame(float dt) {
                        shadows_?shadows_->version():0,directLighting_?directLighting_->version():0,
                        gi_?gi_->version():0,referenceSnapshot_?referenceSnapshot_->version():0,
                        linearCapture_?linearCapture_->version():0,renderWidth,renderHeight,
-                       reflections_?reflections_->version():0,denoised_?denoised_->version():0,atmosphere_?atmosphere_->version():0,reflections_&&reflections_->ready(),denoisedFixture_?denoisedFixture_->version():0,denoisedFixture_&&denoisedFixture_->ready()};
+                       reflections_?reflections_->version():0,denoised_?denoised_->version():0,atmosphere_?atmosphere_->version():0,reflections_&&reflections_->ready(),denoisedFixture_?denoisedFixture_->version():0,denoisedFixture_&&denoisedFixture_->ready(),visibility_?visibility_->subsurfaceKey():0u};
     if (!(key == graphKey_) || !graphExecutor_->valid()) {
         frameFlags_ |= FrameGraphCompile;
         if (key.width != graphKey_.width || key.height != graphKey_.height) frameFlags_ |= FrameResize;
@@ -1836,6 +1937,7 @@ bool Engine::frame(float dt) {
     if (scenario_) scenario_->bind(*graphExecutor_, frame.index);
     if (asyncProbe_) asyncProbe_->bind(*graphExecutor_, frame.slot);
     if (rt_) rt_->bindResources(*graphExecutor_);
+    if (visibility_) visibility_->bindFrame(*graphExecutor_);
     if (shadows_) shadows_->bindFrame(*graphExecutor_);
     if (directLighting_)directLighting_->bindFrame(*graphExecutor_);
     if(gi_)gi_->bindFrame(*graphExecutor_);
@@ -1882,6 +1984,12 @@ bool Engine::frame(float dt) {
         if (st.structure) ++ss.structureChanges;
     }
     if (checkScene && !checkGpuScene(frame.slot)) exitCode_ = 1;
+    if (lobeGuideCheckFrame) {
+        // F15.1 (ticket 06): the guide and the DI surfaces of this frame against their CPU reconstruction.
+        PH_ZONE("Lobe guide check");
+        context_->waitIdle();
+        if (!directLighting_->checkLobeGuide(frame.slot, *store_)) exitCode_ = 1;
+    }
     if (rtCheckFrame && !checkRayTracing(frame.slot)) exitCode_ = 1;
     if (visibility_ && options_.debugVisibility) {
         context_->waitIdle();
@@ -2305,10 +2413,10 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
                 shadows_->addToGraph(frameGraph_,color,depth);
                 if(directLighting_)directLighting_->addToGraph(frameGraph_,color,shadows_->depth());
                 if(gi_)gi_->addToGraph(frameGraph_);
-                visibility_->setLightingTextures(shadows_->mask(),directLighting_?directLighting_->direct():shadows_->zeroLighting(),gi_?gi_->irradiance():shadows_->zeroLighting());
+                visibility_->setLightingTextures(shadows_->mask(),directLighting_?directLighting_->direct():shadows_->zeroLighting(),gi_?gi_->irradiance():shadows_->zeroLighting(),gi_?gi_->irradianceBack():rg::TextureRef{});
             }
             visibility_->addResolve(frameGraph_, color, shadows_?shadows_->depth():depth);
-            if(graphKey_.reflectionReady)visibility_->replaceColor(reflections_->addToGraph(frameGraph_,visibility_->color(),visibility_->depth()));
+            if(graphKey_.reflectionReady){reflections_->setSubsurfaceGain(visibility_->subsurfaceGain());visibility_->replaceColor(reflections_->addToGraph(frameGraph_,visibility_->color(),visibility_->depth()));}
             if(atmosphere_)visibility_->replaceColor(atmosphere_->addToGraph(frameGraph_,visibility_->color(),visibility_->depth()));
             rg::TextureRef reconstructed;
             // prepareFrame selected custom Float32 for unqualified radiometry
@@ -2330,7 +2438,7 @@ void Engine::declareFrameGraph(u32 width, u32 height) {
                                                        options_.captureLinearSignal==5?shadows_->geometricNormal():
                                                        options_.captureLinearSignal==6?reflections_->rawSpecular():
                                                        options_.captureLinearSignal==7?reflections_->rawAO():options_.captureLinearSignal==8?reflections_->filteredIndirectDiffuse():options_.captureLinearSignal==9?reflections_->filteredAO():options_.captureLinearSignal==10?reflections_->filteredSpecular():
-                                                       options_.captureLinearSignal==11?atmosphere_->readResources().cloudTransmittance:visibility_->color());
+                                                       options_.captureLinearSignal==11?atmosphere_->readResources().cloudTransmittance:options_.captureLinearSignal==12?visibility_->reactiveMask():visibility_->color());
             color = post_ ? post_->addToGraph(frameGraph_, *visibility_, drawableRef_, graphKey_.outputFormat,reconstructed)
                           : visibility_->addPresent(frameGraph_, drawableRef_);
             visibility_->addChecks(frameGraph_,post_?post_->exposureInput():visibility_->color());
