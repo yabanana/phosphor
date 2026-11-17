@@ -16,7 +16,8 @@ archive af1a2b5) and re-ran ONE complete final battery on the new binary (phosph
 "Closure verification"). **No roadmap box F15.1-F15.4 is ticked** (each ID keeps an open item, see below). Physical Apple9/T0 certification
 stays `EXTERNAL_VALIDATION_PENDING`. Sponza D2 on the final binary: band met as an interleaved A/B (t03 -> final5 +0.051 ms, 0 allocations)
 in a timing window that quietgate flagged disturbed (absolute GPU p95 15.35 ms, not a quiet-machine value).
-Nothing is pushed; no PR is opened without the owner.
+Pushed and opened as a pull request to main on the owner's instruction "Push e PR (Consigliato)" (2026-11-17); merging is a separate owner
+step after CI, no auto-merge.
 
 ## Owner decisions of round 2 (2026-11-15/16)
 
@@ -317,7 +318,7 @@ and 991b2f95.
 
 ## Next steps
 
-1. Owner review of the branch; push and PR only on the owner's word (`cl/f15-plan-c38b51`).
+1. Owner review of the pull request and its CI; merge only on the owner's word (`cl/f15-plan-c38b51`).
 2. Follow-ups named in "Open and partial": the exact diffuse complement for transported anisotropic pixels (`combo-all-lobes-env`), D (chess
    medium per piece), E (narrow-glint per-term dump), the ToyCar marker kernel, the transmission cost candidate (`Local clustered RT
    shading`), the archive class-pipeline reduction (constant-26 values in use), `--pipeline-sync` in the forced-Apple9 battery step.
