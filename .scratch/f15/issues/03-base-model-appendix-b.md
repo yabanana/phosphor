@@ -125,3 +125,8 @@ Two keys failed with MS on (ADR-0007) and passed with MS off in engine AND refer
 - Selected for before/after: every key with `reflections: probes` or a probe capture, every key with a coat, `ms-*`, `furnace-*`, `layers-furnace`
   (enumerated from `SCENARIOS` by name/field).  Results in ticket 24's round-4 section if the orchestrator records them; per key BEFORE/AFTER are in the
   writer report (all unchanged to float noise except the two keys above and `texture-coat-env-resolve`: sphere-weighted mean 7.36e-04 -> 4.76e-04, the same Nc fix).
+
+2026-11-17 — final battery (orchestrator, e01bb209 / archive c2776814, `build/battery-r4`): `texture-coat-sun` passes, worst sphere p99
+0.34 % (sphere 0), max 1.46 %; `texture-coat-env-resolve` 4.76e-4; `sheen-probe-env` worst mean 1.78e-4.  Correction: on round 3 the key's
+worst sphere was sphere 3 (metallic 1): p99 14.8 %, max 28.3 % (sphere 5 p99 5.1 %); the 1.55 % quoted above is sphere 0.  Before / after
+of every coat, sheen, probe, MS and furnace key: ticket 24, section "round 4: before / after".

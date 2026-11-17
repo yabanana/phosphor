@@ -246,3 +246,8 @@ Finding of the code reading above: the walk's next-event shadow ray from the exi
 - Timing needed (quiet machine): none on glass-free scenes (same kernel, same payload); a glass + walk scene runs the 128 B payload walk (compare `Subsurface walk` pass time of the chess back-light rig, pawns + kings, against e0f6ea0).
 
 2026-11-16 — status reconciliation (closure): Status no longer says GI shadow rays and reflection secondary lighting through glass have no numeric fixture: the round-3 section (2026-11-16) built it and all four sites pass, and fixed the subsurface walk exit connection. The owner exclusions (a) AO, fog, ReSTIR reconnection, sky rays and (b) secondary RT hits are unchanged; the quiet-window cost of the +8 payload bytes stays pending the final battery (ticket 24).
+
+2026-11-17 — quiet-window timing of the walk with glass (orchestrator, final binary e01bb209, perf-log "F15 closure round 4"):
+`transmissive-shadow-sss-pane` against `-open`, 1280x720, 64 walks, 512 steps, 3 replicas interleaved: `Subsurface RT walk` p50
+95.3-96.0 against 54.0-54.2 ms, +41.4 ms (+77 %) for the glass variant (full 128-byte payload, transmitted exit shadow ray) on the optional
+RT walk tier; glass-free scenes keep the Lite walk.

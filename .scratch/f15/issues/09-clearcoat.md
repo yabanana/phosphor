@@ -195,3 +195,8 @@ and the engine (`msCoat`, |V.Nc| and Nc.L) use the coat normal Nc; KHR_materials
 (bsdf, sun quadrature, declared and exact environment); no effect without a coat normal texture (Nc = N).  New analytic unit test with N != Nc in `tools/test_f15_ms.py`
 (fails without the change).  `texture-coat-env-resolve` improves (sphere mean 7.36e-04 -> 4.76e-04); every other coat key (clearcoat-grid-*, combo-*-coat-*,
 furnace-clearcoat*, layers-*-coat*) is unchanged to float noise.  `texture-coat-sun` (p99 1.55 % before): NOT re-verified at the timebox, see ticket 03 round 4.
+
+2026-11-17 — final battery (orchestrator, e01bb209 / archive c2776814, `build/battery-r4`): `texture-coat-sun` passes, worst sphere p99
+0.34 % (sphere 0), max 1.46 %; `texture-coat-env-resolve` 4.76e-4; `sheen-probe-env` worst mean 1.78e-4.  Correction: on round 3 the key's
+worst sphere was sphere 3 (metallic 1): p99 14.8 %, max 28.3 % (sphere 5 p99 5.1 %); the 1.55 % quoted above is sphere 0.  Before / after
+of every coat, sheen, probe, MS and furnace key: ticket 24, section "round 4: before / after".
