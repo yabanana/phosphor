@@ -404,8 +404,9 @@ Identity for every row: phosphor e01bb209, metallib 0e5423c1, archive c2776814 (
 ### 2026-11-17 — round 4: before / after on the final binary, and two corrections to the round-3 record
 
 Every f15_check key with a coat, sheen, probe reflections, MS or a furnace, round 3 (`build/final2`, c2514d6f) against round 4
-(`build/battery-r4`, e01bb209), worst row over spheres; all pass on round 4.  Changed keys only (the other 60 are identical to the
-printed precision; table generated from both results.json files):
+(`build/battery-r4`, e01bb209), worst row over spheres; all pass on round 4.  Changed keys only: of the 73 keys selected, the other 66 are identical to the
+printed precision (every other furnace key, including the `@resolve` ones and `ms-furnace@resolve`, has a per-sphere delta of 0.0); table
+generated from both results.json files:
 
 | key | round 3 worst mean / p99 / max | round 4 worst mean / p99 / max |
 |---|---|---|
