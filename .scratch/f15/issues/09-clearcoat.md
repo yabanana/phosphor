@@ -194,4 +194,4 @@ Open item: "coat-only union (mask 2) not archived (no fixture uses it)".  DONE.
 and the engine (`msCoat`, |V.Nc| and Nc.L) use the coat normal Nc; KHR_materials_clearcoat evaluates the coat BRDF with clearcoatNormal.  Fixed in `dae35a82`
 (bsdf, sun quadrature, declared and exact environment); no effect without a coat normal texture (Nc = N).  New analytic unit test with N != Nc in `tools/test_f15_ms.py`
 (fails without the change).  `texture-coat-env-resolve` improves (sphere mean 7.36e-04 -> 4.76e-04); every other coat key (clearcoat-grid-*, combo-*-coat-*,
-furnace-clearcoat*, layers-*-coat*) is unchanged to float noise.  `texture-coat-sun`: see ticket 03 round 4.
+furnace-clearcoat*, layers-*-coat*) is unchanged to float noise.  `texture-coat-sun` (p99 1.55 % before): NOT re-verified at the timebox, see ticket 03 round 4.

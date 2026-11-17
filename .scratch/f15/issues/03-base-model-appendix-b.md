@@ -117,7 +117,7 @@ Two keys failed with MS on (ADR-0007) and passed with MS off in engine AND refer
 - **Non-lobe `_ms` composite under probes (open, not touched).**  The base `reflection_composite_ms` kernel still lights `msTerm` with the declared
   environment under probe reflections and the base probe kernel has no MS variant: no key exercises it (every probe key with a gradient from the
   environment has probe == environment radiance), kept byte-identical.
-- **Reference side (`texture-coat-sun`, p99 1.55 % against 1 %).**  `tools/f15_reference.py` evaluated the coat's own MS lobe on the shading normal N while the
+- **Reference side (`texture-coat-sun`, p99 1.55 % against 1 %; the key itself is NOT re-verified at the timebox: its Python reference re-render with the changed tool ran over 35 CPU minutes, result pending in scratchpad w2out_e_texture-coat-sun).**  `tools/f15_reference.py` evaluated the coat's own MS lobe on the shading normal N while the
   base path (`coat_lobe`, `coat_attenuation`) and the engine (`msCoat`: |V.Nc|, Nc.L) use the coat normal Nc (glTF KHR_materials_clearcoat evaluates the coat
   BRDF with clearcoatNormal).  Fixed in `bsdf` (coat MS value), `sun_radiance` (centre attenuation F_c(|V.Nc|), coat lobe at |V.Nc|, Nc.L), the declared and the
   exact environment coat term (`coat["mu"]`).  Identical without a coat normal texture (Nc = N).  Unit test
